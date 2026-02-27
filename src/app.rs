@@ -817,4 +817,123 @@ mod tests {
         app.preview_half_page_up(100);
         assert_eq!(app.preview_state.scroll_offset, 0);
     }
+
+    // === Integration tests: preview update flow ===
+
+    #[test]
+    fn update_preview_loads_file_content() {
+        let (dir, mut app) = setup_app();
+        // Write content to a file
+        std::fs::write(dir.path().join("file_a.txt"), "hello world\n").unwrap();
+        // Select file_a.txt (index 3)
+        app.tree_state.selected_index = 3;
+        app.update_preview();
+        assert!(app.preview_state.current_path.is_some());
+        assert!(!app.preview_state.content_lines.is_empty());
+        assert!(app.preview_state.total_lines >= 1);
+    }
+
+    #[test]
+    fn update_preview_directory_shows_summary() {
+        let (_dir, mut app) = setup_app();
+        // Select alpha directory (index 1)
+        app.tree_state.selected_index = 1;
+        app.update_preview();
+        assert!(app.preview_state.current_path.is_some());
+        let all_text: String = app
+            .preview_state
+            .content_lines
+            .iter()
+            .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
+            .collect();
+        assert!(all_text.contains("Directory:"));
+    }
+
+    #[test]
+    fn update_preview_binary_file_shows_metadata() {
+        let (dir, mut app) = setup_app();
+        // Create a binary file
+        let bin_path = dir.path().join("model.pt");
+        std::fs::write(&bin_path, &[0u8; 100]).unwrap();
+        app.tree_state.reload_dir(dir.path());
+
+        // Find the .pt file in flat_items
+        let idx = app
+            .tree_state
+            .flat_items
+            .iter()
+            .position(|item| item.name == "model.pt")
+            .unwrap();
+        app.tree_state.selected_index = idx;
+        app.update_preview();
+
+        let all_text: String = app
+            .preview_state
+            .content_lines
+            .iter()
+            .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
+            .collect();
+        assert!(all_text.contains("Binary file"));
+        assert!(all_text.contains("model.pt"));
+    }
+
+    #[test]
+    fn update_preview_notebook_file() {
+        let (dir, mut app) = setup_app();
+        let nb_path = dir.path().join("test.ipynb");
+        std::fs::write(
+            &nb_path,
+            r#"{"cells":[{"cell_type":"code","source":["x=1"],"outputs":[]}],"metadata":{}}"#,
+        )
+        .unwrap();
+        app.tree_state.reload_dir(dir.path());
+
+        let idx = app
+            .tree_state
+            .flat_items
+            .iter()
+            .position(|item| item.name == "test.ipynb")
+            .unwrap();
+        app.tree_state.selected_index = idx;
+        app.update_preview();
+
+        let all_text: String = app
+            .preview_state
+            .content_lines
+            .iter()
+            .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
+            .collect();
+        assert!(all_text.contains("Cell 1"));
+        assert!(all_text.contains("code"));
+    }
+
+    #[test]
+    fn update_preview_resets_scroll_on_selection_change() {
+        let (dir, mut app) = setup_app();
+        std::fs::write(dir.path().join("file_a.txt"), "line1\nline2\nline3\n").unwrap();
+        // Select file
+        app.tree_state.selected_index = 3;
+        app.update_preview();
+        app.preview_state.scroll_offset = 2;
+        // Change selection
+        app.tree_state.selected_index = 1; // directory
+        app.last_previewed_index = None; // force update
+        app.update_preview();
+        assert_eq!(app.preview_state.scroll_offset, 0);
+    }
+
+    #[test]
+    fn update_preview_skips_if_same_selection() {
+        let (dir, mut app) = setup_app();
+        std::fs::write(dir.path().join("file_a.txt"), "hello\n").unwrap();
+        app.tree_state.selected_index = 3;
+        app.update_preview();
+        let first_path = app.preview_state.current_path.clone();
+        // Call again without changing selection
+        app.preview_state.scroll_offset = 5;
+        app.update_preview();
+        // Should not reset scroll
+        assert_eq!(app.preview_state.scroll_offset, 5);
+        assert_eq!(app.preview_state.current_path, first_path);
+    }
 }
