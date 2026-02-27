@@ -1,5 +1,6 @@
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 use ratatui::style::{Color, Modifier, Style};
@@ -331,6 +332,202 @@ fn highlight_single_line(
     Line::from(spans)
 }
 
+/// Known binary file extensions.
+const BINARY_EXTENSIONS: &[&str] = &[
+    "pt", "pth", "h5", "hdf5", "pkl", "pickle", "onnx", "zip", "tar", "gz", "bz2", "xz", "so",
+    "dylib", "exe", "bin", "img", "iso",
+];
+
+/// Check if a file is binary by extension or null-byte scan.
+pub fn is_binary_file(path: &Path) -> bool {
+    // Check known extensions first
+    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+        if BINARY_EXTENSIONS
+            .iter()
+            .any(|&b| b.eq_ignore_ascii_case(ext))
+        {
+            return true;
+        }
+    }
+
+    // Fallback: scan first 8KB for null bytes
+    let file = match fs::File::open(path) {
+        Ok(f) => f,
+        Err(_) => return false,
+    };
+    let mut reader = BufReader::new(file);
+    let mut buf = [0u8; 8192];
+    let n = match reader.read(&mut buf) {
+        Ok(n) => n,
+        Err(_) => return false,
+    };
+    buf[..n].contains(&0)
+}
+
+/// Format bytes into human-readable size string.
+fn format_size(bytes: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = 1024 * KB;
+    const GB: u64 = 1024 * MB;
+    const TB: u64 = 1024 * GB;
+
+    if bytes >= TB {
+        format!("{:.2} TB", bytes as f64 / TB as f64)
+    } else if bytes >= GB {
+        format!("{:.2} GB", bytes as f64 / GB as f64)
+    } else if bytes >= MB {
+        format!("{:.2} MB", bytes as f64 / MB as f64)
+    } else if bytes >= KB {
+        format!("{:.2} KB", bytes as f64 / KB as f64)
+    } else {
+        format!("{} B", bytes)
+    }
+}
+
+/// Format Unix permissions as rwxrwxrwx string.
+fn format_permissions(mode: u32) -> String {
+    let mut s = String::with_capacity(9);
+    let flags = [
+        (0o400, 'r'),
+        (0o200, 'w'),
+        (0o100, 'x'),
+        (0o040, 'r'),
+        (0o020, 'w'),
+        (0o010, 'x'),
+        (0o004, 'r'),
+        (0o002, 'w'),
+        (0o001, 'x'),
+    ];
+    for (bit, ch) in flags {
+        if mode & bit != 0 {
+            s.push(ch);
+        } else {
+            s.push('-');
+        }
+    }
+    s
+}
+
+/// Generate metadata display lines for a binary file.
+pub fn load_binary_metadata(path: &Path) -> (Vec<Line<'static>>, usize) {
+    let meta = match fs::metadata(path) {
+        Ok(m) => m,
+        Err(e) => {
+            return (
+                vec![Line::from(Span::styled(
+                    format!("Error reading metadata: {}", e),
+                    Style::default().fg(Color::Red),
+                ))],
+                1,
+            );
+        }
+    };
+
+    let label_style = Style::default()
+        .fg(Color::Cyan)
+        .add_modifier(Modifier::BOLD);
+    let value_style = Style::default().fg(Color::White);
+    let dim_style = Style::default().fg(Color::DarkGray);
+
+    let file_name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.to_string_lossy().to_string());
+
+    let size_str = format_size(meta.len());
+
+    let modified_str = meta
+        .modified()
+        .ok()
+        .and_then(|t| {
+            t.duration_since(std::time::UNIX_EPOCH).ok().map(|d| {
+                let secs = d.as_secs();
+                let days = secs / 86400;
+                let remaining = secs % 86400;
+                let hours = remaining / 3600;
+                let minutes = (remaining % 3600) / 60;
+                // Simple date calculation from epoch days
+                let (year, month, day) = epoch_days_to_date(days);
+                format!(
+                    "{:04}-{:02}-{:02} {:02}:{:02}",
+                    year, month, day, hours, minutes
+                )
+            })
+        })
+        .unwrap_or_else(|| "Unknown".to_string());
+
+    let perms_str = format_permissions(meta.permissions().mode());
+
+    let lines = vec![
+        // Blank line
+        Line::from(""),
+        // File name
+        Line::from(vec![
+            Span::styled("  File: ", label_style),
+            Span::styled(file_name, value_style),
+        ]),
+        // Size
+        Line::from(vec![
+            Span::styled("  Size: ", label_style),
+            Span::styled(size_str, value_style),
+        ]),
+        // Modified
+        Line::from(vec![
+            Span::styled("  Modified: ", label_style),
+            Span::styled(modified_str, value_style),
+        ]),
+        // Permissions
+        Line::from(vec![
+            Span::styled("  Permissions: ", label_style),
+            Span::styled(perms_str, value_style),
+        ]),
+        // Blank line
+        Line::from(""),
+        // Binary message
+        Line::from(Span::styled("  [Binary file — cannot preview]", dim_style)),
+    ];
+
+    let total = lines.len();
+    (lines, total)
+}
+
+/// Convert days since Unix epoch to (year, month, day).
+fn epoch_days_to_date(days: u64) -> (u64, u64, u64) {
+    // Simple algorithm: iterate years/months
+    let mut remaining = days as i64;
+    let mut year = 1970u64;
+
+    loop {
+        let days_in_year = if is_leap_year(year) { 366 } else { 365 };
+        if remaining < days_in_year {
+            break;
+        }
+        remaining -= days_in_year;
+        year += 1;
+    }
+
+    let days_in_months: [i64; 12] = if is_leap_year(year) {
+        [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    } else {
+        [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    };
+
+    let mut month = 1u64;
+    for &dm in &days_in_months {
+        if remaining < dm {
+            break;
+        }
+        remaining -= dm;
+        month += 1;
+    }
+
+    (year, month, remaining as u64 + 1)
+}
+
+fn is_leap_year(year: u64) -> bool {
+    (year.is_multiple_of(4) && !year.is_multiple_of(100)) || year.is_multiple_of(400)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -520,5 +717,115 @@ mod tests {
         let theme = load_theme(None);
         let (lines, _) = load_head_tail_content(&path, &ss, &theme, 10, 5, ViewMode::TailOnly);
         assert_eq!(lines.len(), 5);
+    }
+
+    // === Binary file detection tests ===
+
+    #[test]
+    fn binary_detection_by_known_extension() {
+        assert!(is_binary_file(Path::new("model.pt")));
+        assert!(is_binary_file(Path::new("model.pth")));
+        assert!(is_binary_file(Path::new("data.h5")));
+        assert!(is_binary_file(Path::new("data.hdf5")));
+        assert!(is_binary_file(Path::new("model.pkl")));
+        assert!(is_binary_file(Path::new("model.pickle")));
+        assert!(is_binary_file(Path::new("model.onnx")));
+        assert!(is_binary_file(Path::new("archive.zip")));
+        assert!(is_binary_file(Path::new("archive.tar")));
+        assert!(is_binary_file(Path::new("file.gz")));
+        assert!(is_binary_file(Path::new("file.bz2")));
+        assert!(is_binary_file(Path::new("file.xz")));
+        assert!(is_binary_file(Path::new("lib.so")));
+        assert!(is_binary_file(Path::new("lib.dylib")));
+        assert!(is_binary_file(Path::new("app.exe")));
+        assert!(is_binary_file(Path::new("data.bin")));
+        assert!(is_binary_file(Path::new("disk.img")));
+        assert!(is_binary_file(Path::new("disk.iso")));
+    }
+
+    #[test]
+    fn binary_detection_text_file_not_binary() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("hello.txt");
+        let mut f = File::create(&path).unwrap();
+        writeln!(f, "This is plain text").unwrap();
+        assert!(!is_binary_file(&path));
+    }
+
+    #[test]
+    fn binary_detection_null_byte_scan() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("unknown.dat");
+        let mut f = File::create(&path).unwrap();
+        f.write_all(&[0x00, 0x01, 0x02, 0xFF]).unwrap();
+        assert!(is_binary_file(&path));
+    }
+
+    #[test]
+    fn binary_detection_nonexistent_file() {
+        assert!(!is_binary_file(Path::new("/nonexistent/file.dat")));
+    }
+
+    // === Binary metadata display tests ===
+
+    #[test]
+    fn binary_metadata_shows_info() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("test.bin");
+        let mut f = File::create(&path).unwrap();
+        f.write_all(&[0u8; 1024]).unwrap();
+
+        let (lines, total) = load_binary_metadata(&path);
+        assert!(total >= 7); // blank, file, size, modified, permissions, blank, message
+        let all_text: String = lines
+            .iter()
+            .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
+            .collect();
+        assert!(all_text.contains("test.bin"));
+        assert!(all_text.contains("1.00 KB"));
+        assert!(all_text.contains("Binary file"));
+    }
+
+    #[test]
+    fn binary_metadata_nonexistent_file() {
+        let (lines, total) = load_binary_metadata(Path::new("/nonexistent/file"));
+        assert_eq!(total, 1);
+        let text: String = lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(text.contains("Error"));
+    }
+
+    // === Format size tests ===
+
+    #[test]
+    fn format_size_bytes() {
+        assert_eq!(format_size(0), "0 B");
+        assert_eq!(format_size(512), "512 B");
+        assert_eq!(format_size(1023), "1023 B");
+    }
+
+    #[test]
+    fn format_size_kb() {
+        assert_eq!(format_size(1024), "1.00 KB");
+        assert_eq!(format_size(2048), "2.00 KB");
+    }
+
+    #[test]
+    fn format_size_mb() {
+        assert_eq!(format_size(1024 * 1024), "1.00 MB");
+    }
+
+    #[test]
+    fn format_size_gb() {
+        assert_eq!(format_size(1024 * 1024 * 1024), "1.00 GB");
+    }
+
+    // === Format permissions tests ===
+
+    #[test]
+    fn format_permissions_rwx() {
+        assert_eq!(format_permissions(0o755), "rwxr-xr-x");
+        assert_eq!(format_permissions(0o644), "rw-r--r--");
+        assert_eq!(format_permissions(0o777), "rwxrwxrwx");
+        assert_eq!(format_permissions(0o000), "---------");
     }
 }

@@ -300,6 +300,23 @@ impl App {
 
         let path = item.path.clone();
 
+        // Check if binary file
+        if preview_content::is_binary_file(&path) {
+            let (lines, total) = preview_content::load_binary_metadata(&path);
+            self.preview_state = PreviewState {
+                current_path: Some(path),
+                content_lines: lines,
+                scroll_offset: 0,
+                view_mode: ViewMode::default(),
+                line_wrap: false,
+                total_lines: total,
+                is_large_file: false,
+                head_lines: preview_content::DEFAULT_HEAD_LINES,
+                tail_lines: preview_content::DEFAULT_TAIL_LINES,
+            };
+            return;
+        }
+
         // Check file size for large-file mode
         let file_size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
 
