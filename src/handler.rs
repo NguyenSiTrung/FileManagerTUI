@@ -28,6 +28,10 @@ fn handle_normal_mode(app: &mut App, key: KeyEvent, event_tx: &mpsc::UnboundedSe
             app.toggle_focus();
             return;
         }
+        KeyCode::Char('z') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.undo();
+            return;
+        }
         _ => {}
     }
 
@@ -205,6 +209,10 @@ fn execute_input_operation(app: &mut App, kind: &DialogKind, input: &str) {
                 let new_path = parent.join(input);
                 match operations::rename(original, &new_path) {
                     Ok(()) => {
+                        app.last_undo = Some(crate::app::UndoAction::Rename {
+                            from: original.clone(),
+                            to: new_path,
+                        });
                         app.set_status_message(format!("Renamed to: {}", input));
                         app.tree_state.reload_dir(parent);
                     }
@@ -884,5 +892,97 @@ mod tests {
         assert!(dir.path().join("beta").join("file_a.txt").exists());
         // Clipboard still populated (copy doesn't clear it)
         assert!(!app.clipboard.is_empty());
+    }
+
+    // === Undo tests ===
+
+    #[test]
+    fn undo_rename() {
+        let (dir, mut app) = setup_app();
+        // Rename file_a.txt -> renamed.txt
+        app.tree_state.selected_index = 3;
+        handle_key(&mut app, make_key(KeyCode::Char('r')));
+        // Clear and type new name
+        for _ in 0..app.dialog_state.input.len() {
+            handle_key(&mut app, make_key(KeyCode::Backspace));
+        }
+        for c in "renamed.txt".chars() {
+            handle_key(&mut app, make_key(KeyCode::Char(c)));
+        }
+        handle_key(&mut app, make_key(KeyCode::Enter));
+        assert!(dir.path().join("renamed.txt").exists());
+        assert!(!dir.path().join("file_a.txt").exists());
+        // Undo
+        handle_key(
+            &mut app,
+            make_key_with_modifiers(KeyCode::Char('z'), KeyModifiers::CONTROL),
+        );
+        assert!(dir.path().join("file_a.txt").exists());
+        assert!(!dir.path().join("renamed.txt").exists());
+    }
+
+    #[tokio::test]
+    async fn undo_copy_paste() {
+        let (dir, mut app) = setup_app();
+        let (tx, mut rx) = mpsc::unbounded_channel::<Event>();
+        app.tree_state.selected_index = 3;
+        app.copy_to_clipboard();
+        app.tree_state.selected_index = 2;
+        app.expand_selected();
+        app.paste_clipboard_async(tx);
+        loop {
+            if let Some(evt) = rx.recv().await {
+                if let Event::OperationComplete(result) = evt {
+                    app.handle_operation_complete(result);
+                    break;
+                }
+            }
+        }
+        assert!(dir.path().join("beta").join("file_a.txt").exists());
+        // Undo should delete the copy
+        app.undo();
+        assert!(!dir.path().join("beta").join("file_a.txt").exists());
+        // Original still exists
+        assert!(dir.path().join("file_a.txt").exists());
+    }
+
+    #[test]
+    fn undo_nothing_shows_message() {
+        let (_dir, mut app) = setup_app();
+        handle_key(
+            &mut app,
+            make_key_with_modifiers(KeyCode::Char('z'), KeyModifiers::CONTROL),
+        );
+        assert!(app.status_message.is_some());
+        let (msg, _) = app.status_message.as_ref().unwrap();
+        assert!(msg.contains("Nothing to undo"));
+    }
+
+    #[test]
+    fn undo_only_works_once() {
+        let (dir, mut app) = setup_app();
+        // Rename
+        app.tree_state.selected_index = 3;
+        handle_key(&mut app, make_key(KeyCode::Char('r')));
+        for _ in 0..app.dialog_state.input.len() {
+            handle_key(&mut app, make_key(KeyCode::Backspace));
+        }
+        for c in "renamed.txt".chars() {
+            handle_key(&mut app, make_key(KeyCode::Char(c)));
+        }
+        handle_key(&mut app, make_key(KeyCode::Enter));
+        // Undo once
+        handle_key(
+            &mut app,
+            make_key_with_modifiers(KeyCode::Char('z'), KeyModifiers::CONTROL),
+        );
+        assert!(dir.path().join("file_a.txt").exists());
+        // Second undo should say "nothing"
+        handle_key(
+            &mut app,
+            make_key_with_modifiers(KeyCode::Char('z'), KeyModifiers::CONTROL),
+        );
+        let (msg, _) = app.status_message.as_ref().unwrap();
+        assert!(msg.contains("Nothing to undo"));
     }
 }

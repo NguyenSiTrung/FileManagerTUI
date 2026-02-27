@@ -94,6 +94,17 @@ pub struct DialogState {
     pub cursor_position: usize,
 }
 
+/// A reversible operation that can be undone.
+#[derive(Debug, Clone)]
+pub enum UndoAction {
+    /// Undo a rename: rename back from `to` to `from`.
+    Rename { from: PathBuf, to: PathBuf },
+    /// Undo a copy-paste: delete the created paths.
+    CopyPaste { created_paths: Vec<PathBuf> },
+    /// Undo a move-paste: move files back from `to` to `from`.
+    MovePaste { moves: Vec<(PathBuf, PathBuf)> },
+}
+
 /// Main application state.
 pub struct App {
     pub tree_state: TreeState,
@@ -115,6 +126,8 @@ pub struct App {
     pub clipboard: ClipboardState,
     /// Cancellation token for async operations.
     pub cancel_token: Arc<AtomicBool>,
+    /// Last reversible operation (single-level undo).
+    pub last_undo: Option<UndoAction>,
 }
 
 impl App {
@@ -136,6 +149,7 @@ impl App {
             last_previewed_index: None,
             clipboard: ClipboardState::new(),
             cancel_token: Arc::new(AtomicBool::new(false)),
+            last_undo: None,
         })
     }
 
@@ -415,6 +429,22 @@ impl App {
         }
 
         if result.errors.is_empty() {
+            // Record undo action
+            if result.was_cut {
+                // Build move pairs: (original_src, created_dest)
+                let moves: Vec<(PathBuf, PathBuf)> = result
+                    .source_paths
+                    .iter()
+                    .zip(result.created_paths.iter())
+                    .map(|(src, dest)| (src.clone(), dest.clone()))
+                    .collect();
+                self.last_undo = Some(UndoAction::MovePaste { moves });
+            } else {
+                self.last_undo = Some(UndoAction::CopyPaste {
+                    created_paths: result.created_paths.clone(),
+                });
+            }
+
             let op_name = if result.was_cut { "Moved" } else { "Pasted" };
             self.set_status_message(format!(
                 "{} {} item{}",
@@ -441,6 +471,79 @@ impl App {
     /// Cancel an ongoing async operation.
     pub fn cancel_operation(&mut self) {
         self.cancel_token.store(true, Ordering::SeqCst);
+    }
+
+    /// Undo the last reversible operation.
+    pub fn undo(&mut self) {
+        use crate::fs::operations;
+
+        let action = match self.last_undo.take() {
+            Some(a) => a,
+            None => {
+                self.set_status_message("Nothing to undo".to_string());
+                return;
+            }
+        };
+
+        match action {
+            UndoAction::Rename { from, to } => {
+                // Rename back: from is original, to is what it was renamed to
+                match operations::rename(&to, &from) {
+                    Ok(()) => {
+                        if let Some(parent) = from.parent() {
+                            self.tree_state.reload_dir(parent);
+                        }
+                        self.set_status_message("Undo: rename reverted".to_string());
+                    }
+                    Err(e) => self.set_status_message(format!("Undo failed: {}", e)),
+                }
+            }
+            UndoAction::CopyPaste { created_paths } => {
+                let mut errors = Vec::new();
+                for path in &created_paths {
+                    if let Err(e) = operations::delete(path) {
+                        errors.push(format!("{}: {}", path.display(), e));
+                    } else if let Some(parent) = path.parent() {
+                        self.tree_state.reload_dir(parent);
+                    }
+                }
+                if errors.is_empty() {
+                    self.set_status_message(format!(
+                        "Undo: deleted {} copied item{}",
+                        created_paths.len(),
+                        if created_paths.len() == 1 { "" } else { "s" }
+                    ));
+                } else {
+                    self.set_status_message(format!("Undo partial: {}", errors.join("; ")));
+                }
+            }
+            UndoAction::MovePaste { moves } => {
+                let mut errors = Vec::new();
+                for (original_src, current_dest) in &moves {
+                    // Move back: current_dest → original_src
+                    if let Some(parent) = original_src.parent() {
+                        match operations::move_item(current_dest, parent) {
+                            Ok(_) => {
+                                self.tree_state.reload_dir(parent);
+                                if let Some(dest_parent) = current_dest.parent() {
+                                    self.tree_state.reload_dir(dest_parent);
+                                }
+                            }
+                            Err(e) => errors.push(format!("{}: {}", current_dest.display(), e)),
+                        }
+                    }
+                }
+                if errors.is_empty() {
+                    self.set_status_message(format!(
+                        "Undo: moved {} item{} back",
+                        moves.len(),
+                        if moves.len() == 1 { "" } else { "s" }
+                    ));
+                } else {
+                    self.set_status_message(format!("Undo partial: {}", errors.join("; ")));
+                }
+            }
+        }
     }
 
     /// Scroll preview down by one line.
