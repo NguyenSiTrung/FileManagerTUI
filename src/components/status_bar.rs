@@ -12,6 +12,7 @@ pub struct StatusBarWidget<'a> {
     file_info: &'a str,
     status_message: Option<&'a str>,
     is_error: bool,
+    clipboard_info: Option<&'a str>,
 }
 
 impl<'a> StatusBarWidget<'a> {
@@ -21,12 +22,18 @@ impl<'a> StatusBarWidget<'a> {
             file_info,
             status_message: None,
             is_error: false,
+            clipboard_info: None,
         }
     }
 
     pub fn status_message(mut self, msg: &'a str, is_error: bool) -> Self {
         self.status_message = Some(msg);
         self.is_error = is_error;
+        self
+    }
+
+    pub fn clipboard_info(mut self, info: &'a str) -> Self {
+        self.clipboard_info = Some(info);
         self
     }
 }
@@ -109,6 +116,17 @@ impl<'a> Widget for StatusBarWidget<'a> {
             Span::raw(" ".repeat(gap)),
             Span::styled(info_display, info_style),
         ];
+
+        // Add clipboard info if present
+        let clipboard_display = self.clipboard_info.unwrap_or("");
+        let clipboard_len = clipboard_display.len();
+        if clipboard_len > 0 {
+            let clipboard_style = Style::default()
+                .fg(Color::Magenta)
+                .add_modifier(Modifier::BOLD);
+            spans.push(Span::raw(" "));
+            spans.push(Span::styled(clipboard_display.to_string(), clipboard_style));
+        }
 
         // Pad to fill remaining width if needed, then add hints
         let used: usize = spans.iter().map(|s| s.content.len()).sum();
@@ -198,5 +216,19 @@ mod tests {
         let area = Rect::new(0, 0, 0, 0);
         let mut buf = Buffer::empty(area);
         widget.render(area, &mut buf);
+    }
+
+    #[test]
+    fn test_clipboard_info_displayed() {
+        let widget = StatusBarWidget::new("/path", "info").clipboard_info("📋 2 items");
+
+        let area = Rect::new(0, 0, 120, 1);
+        let mut buf = Buffer::empty(area);
+        widget.render(area, &mut buf);
+
+        let content: String = (0..120)
+            .map(|x| buf.cell((x, 0)).unwrap().symbol().to_string())
+            .collect();
+        assert!(content.contains("2 items"));
     }
 }

@@ -113,6 +113,20 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         .unwrap_or_default();
 
     let mut status_widget = StatusBarWidget::new(&path_str, &file_info);
+
+    // Show clipboard info if clipboard has content
+    let clipboard_info_str;
+    if !app.clipboard.is_empty() {
+        use crate::fs::clipboard::ClipboardOp;
+        let icon = match app.clipboard.operation {
+            Some(ClipboardOp::Copy) => "📋",
+            Some(ClipboardOp::Cut) => "✂",
+            None => "",
+        };
+        clipboard_info_str = format!("{} {} item{}", icon, app.clipboard.len(), if app.clipboard.len() == 1 { "" } else { "s" });
+        status_widget = status_widget.clipboard_info(&clipboard_info_str);
+    }
+
     if let Some((ref msg, _)) = app.status_message {
         let is_error = msg.starts_with("Error");
         status_widget = status_widget.status_message(msg, is_error);
