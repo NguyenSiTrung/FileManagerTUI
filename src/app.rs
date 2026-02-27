@@ -1,6 +1,8 @@
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+use ratatui::text::Line;
+
 use crate::error::Result;
 use crate::fs::tree::{NodeType, TreeState};
 
@@ -13,6 +15,43 @@ pub enum DialogKind {
     Rename { original: PathBuf },
     DeleteConfirm { targets: Vec<PathBuf> },
     Error { message: String },
+}
+
+/// Which panel currently has focus.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
+pub enum FocusedPanel {
+    #[default]
+    Tree,
+    Preview,
+}
+
+/// View mode for large-file head+tail preview.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
+pub enum ViewMode {
+    #[default]
+    HeadAndTail,
+    HeadOnly,
+    TailOnly,
+}
+
+/// State for the file preview panel.
+#[derive(Debug, Default)]
+#[allow(dead_code)]
+pub struct PreviewState {
+    /// Path of the file currently being previewed.
+    pub current_path: Option<PathBuf>,
+    /// Rendered content lines (syntax-highlighted).
+    pub content_lines: Vec<Line<'static>>,
+    /// Vertical scroll offset (line index of topmost visible line).
+    pub scroll_offset: usize,
+    /// Current view mode for large files.
+    pub view_mode: ViewMode,
+    /// Whether long lines wrap.
+    pub line_wrap: bool,
+    /// Total number of lines in the content.
+    pub total_lines: usize,
 }
 
 /// Application mode.
@@ -41,6 +80,10 @@ pub struct App {
     pub dialog_state: DialogState,
     #[allow(dead_code)]
     pub status_message: Option<(String, Instant)>,
+    #[allow(dead_code)]
+    pub preview_state: PreviewState,
+    #[allow(dead_code)]
+    pub focused_panel: FocusedPanel,
 }
 
 impl App {
@@ -53,6 +96,8 @@ impl App {
             mode: AppMode::Normal,
             dialog_state: DialogState::default(),
             status_message: None,
+            preview_state: PreviewState::default(),
+            focused_panel: FocusedPanel::default(),
         })
     }
 
@@ -170,6 +215,58 @@ impl App {
             }
         }
         self.tree_state.root.path.clone()
+    }
+
+    /// Toggle focus between tree and preview panels.
+    #[allow(dead_code)]
+    pub fn toggle_focus(&mut self) {
+        self.focused_panel = match self.focused_panel {
+            FocusedPanel::Tree => FocusedPanel::Preview,
+            FocusedPanel::Preview => FocusedPanel::Tree,
+        };
+    }
+
+    /// Scroll preview down by one line.
+    #[allow(dead_code)]
+    pub fn preview_scroll_down(&mut self) {
+        if self.preview_state.scroll_offset < self.preview_state.total_lines.saturating_sub(1) {
+            self.preview_state.scroll_offset += 1;
+        }
+    }
+
+    /// Scroll preview up by one line.
+    #[allow(dead_code)]
+    pub fn preview_scroll_up(&mut self) {
+        if self.preview_state.scroll_offset > 0 {
+            self.preview_state.scroll_offset -= 1;
+        }
+    }
+
+    /// Jump preview to the first line.
+    #[allow(dead_code)]
+    pub fn preview_jump_top(&mut self) {
+        self.preview_state.scroll_offset = 0;
+    }
+
+    /// Jump preview to the last line.
+    #[allow(dead_code)]
+    pub fn preview_jump_bottom(&mut self) {
+        self.preview_state.scroll_offset = self.preview_state.total_lines.saturating_sub(1);
+    }
+
+    /// Scroll preview down by half a page.
+    #[allow(dead_code)]
+    pub fn preview_half_page_down(&mut self, visible_height: usize) {
+        let half = visible_height / 2;
+        let max = self.preview_state.total_lines.saturating_sub(1);
+        self.preview_state.scroll_offset = (self.preview_state.scroll_offset + half).min(max);
+    }
+
+    /// Scroll preview up by half a page.
+    #[allow(dead_code)]
+    pub fn preview_half_page_up(&mut self, visible_height: usize) {
+        let half = visible_height / 2;
+        self.preview_state.scroll_offset = self.preview_state.scroll_offset.saturating_sub(half);
     }
 
     /// Quit the application.
@@ -445,5 +542,100 @@ mod tests {
         // flat_items: root(dir), alpha(dir), beta(dir), file_a.txt, file_b.rs
         app.tree_state.selected_index = 3; // file_a.txt
         assert_eq!(app.current_dir(), dir.path().to_path_buf());
+    }
+
+    // === Preview state tests ===
+
+    #[test]
+    fn default_focused_panel_is_tree() {
+        let (_dir, app) = setup_app();
+        assert_eq!(app.focused_panel, FocusedPanel::Tree);
+    }
+
+    #[test]
+    fn toggle_focus_switches_panel() {
+        let (_dir, mut app) = setup_app();
+        assert_eq!(app.focused_panel, FocusedPanel::Tree);
+        app.toggle_focus();
+        assert_eq!(app.focused_panel, FocusedPanel::Preview);
+        app.toggle_focus();
+        assert_eq!(app.focused_panel, FocusedPanel::Tree);
+    }
+
+    #[test]
+    fn preview_state_defaults() {
+        let (_dir, app) = setup_app();
+        assert!(app.preview_state.current_path.is_none());
+        assert!(app.preview_state.content_lines.is_empty());
+        assert_eq!(app.preview_state.scroll_offset, 0);
+        assert_eq!(app.preview_state.view_mode, ViewMode::HeadAndTail);
+        assert!(!app.preview_state.line_wrap);
+        assert_eq!(app.preview_state.total_lines, 0);
+    }
+
+    #[test]
+    fn preview_scroll_down_up() {
+        let (_dir, mut app) = setup_app();
+        app.preview_state.total_lines = 100;
+        app.preview_scroll_down();
+        assert_eq!(app.preview_state.scroll_offset, 1);
+        app.preview_scroll_down();
+        assert_eq!(app.preview_state.scroll_offset, 2);
+        app.preview_scroll_up();
+        assert_eq!(app.preview_state.scroll_offset, 1);
+    }
+
+    #[test]
+    fn preview_scroll_clamps_at_boundaries() {
+        let (_dir, mut app) = setup_app();
+        app.preview_state.total_lines = 3;
+        // Can't scroll past end
+        app.preview_state.scroll_offset = 2;
+        app.preview_scroll_down();
+        assert_eq!(app.preview_state.scroll_offset, 2);
+        // Can't scroll before start
+        app.preview_state.scroll_offset = 0;
+        app.preview_scroll_up();
+        assert_eq!(app.preview_state.scroll_offset, 0);
+    }
+
+    #[test]
+    fn preview_scroll_down_noop_when_empty() {
+        let (_dir, mut app) = setup_app();
+        app.preview_state.total_lines = 0;
+        app.preview_scroll_down();
+        assert_eq!(app.preview_state.scroll_offset, 0);
+    }
+
+    #[test]
+    fn preview_jump_top_bottom() {
+        let (_dir, mut app) = setup_app();
+        app.preview_state.total_lines = 100;
+        app.preview_jump_bottom();
+        assert_eq!(app.preview_state.scroll_offset, 99);
+        app.preview_jump_top();
+        assert_eq!(app.preview_state.scroll_offset, 0);
+    }
+
+    #[test]
+    fn preview_half_page_scroll() {
+        let (_dir, mut app) = setup_app();
+        app.preview_state.total_lines = 100;
+        app.preview_half_page_down(20);
+        assert_eq!(app.preview_state.scroll_offset, 10);
+        app.preview_half_page_down(20);
+        assert_eq!(app.preview_state.scroll_offset, 20);
+        app.preview_half_page_up(20);
+        assert_eq!(app.preview_state.scroll_offset, 10);
+    }
+
+    #[test]
+    fn preview_half_page_clamps() {
+        let (_dir, mut app) = setup_app();
+        app.preview_state.total_lines = 10;
+        app.preview_half_page_down(100);
+        assert_eq!(app.preview_state.scroll_offset, 9);
+        app.preview_half_page_up(100);
+        assert_eq!(app.preview_state.scroll_offset, 0);
     }
 }
