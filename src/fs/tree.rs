@@ -14,6 +14,7 @@ pub enum NodeType {
 
 /// File metadata for display purposes.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct FileMeta {
     pub size: u64,
     pub modified: Option<SystemTime>,
@@ -106,6 +107,7 @@ impl TreeNode {
 
 /// A flattened representation of a tree node for rendering.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct FlatItem {
     pub name: String,
     pub path: PathBuf,
@@ -150,7 +152,13 @@ impl TreeState {
     /// The root node is always included regardless of hidden status.
     pub fn flatten(&mut self) {
         self.flat_items.clear();
-        Self::flatten_node(&self.root, &mut self.flat_items, self.show_hidden, true, true);
+        Self::flatten_node(
+            &self.root,
+            &mut self.flat_items,
+            self.show_hidden,
+            true,
+            true,
+        );
         // Clamp selected index
         if !self.flat_items.is_empty() && self.selected_index >= self.flat_items.len() {
             self.selected_index = self.flat_items.len() - 1;

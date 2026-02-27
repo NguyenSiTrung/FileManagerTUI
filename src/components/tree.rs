@@ -119,7 +119,9 @@ impl<'a> Widget for TreeWidget<'a> {
                     .add_modifier(Modifier::BOLD)
             } else {
                 match item.node_type {
-                    NodeType::Directory => Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD),
+                    NodeType::Directory => Style::default()
+                        .fg(Color::Blue)
+                        .add_modifier(Modifier::BOLD),
                     NodeType::Symlink => Style::default().fg(Color::Cyan),
                     NodeType::File => Style::default(),
                 }

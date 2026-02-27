@@ -13,6 +13,7 @@ pub enum Event {
     /// A periodic tick for rendering.
     Tick,
     /// Terminal resize event.
+    #[allow(dead_code)]
     Resize(u16, u16),
 }
 

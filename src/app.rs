@@ -14,6 +14,7 @@ pub enum AppMode {
 pub struct App {
     pub tree_state: TreeState,
     pub should_quit: bool,
+    #[allow(dead_code)]
     pub mode: AppMode,
 }
 
