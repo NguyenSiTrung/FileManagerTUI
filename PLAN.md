@@ -886,16 +886,16 @@ show head+tail.
 
 ---
 
-### Milestone 4: Copy / Cut / Paste + Multi-Select
+### Milestone 4: Copy / Cut / Paste + Multi-Select ✅
 **Goal**: Move and copy files within the tree.
 
-- [ ] `fs/clipboard.rs`: Clipboard buffer (copy/cut state + paths)
-- [ ] `fs/operations.rs`: `copy_recursive`, `move_item`
-- [ ] `handler.rs`: `Space` for multi-select, `y`/`x`/`p` for clipboard ops
-- [ ] `components/tree.rs`: Visual indicator for multi-selected items
-- [ ] `components/status_bar.rs`: Show clipboard state ("3 items copied")
-- [ ] Async file operations for large files (don't freeze UI)
-- [ ] Basic undo: single-level undo for last operation
+- [x] `fs/clipboard.rs`: Clipboard buffer (copy/cut state + paths)
+- [x] `fs/operations.rs`: `copy_recursive`, `move_item`
+- [x] `handler.rs`: `Space` for multi-select, `y`/`x`/`p` for clipboard ops
+- [x] `components/tree.rs`: Visual indicator for multi-selected items
+- [x] `components/status_bar.rs`: Show clipboard state ("3 items copied")
+- [x] Async file operations for large files (don't freeze UI)
+- [x] Basic undo: single-level undo for last operation
 
 **Deliverable**: Can copy/cut files and paste them into another directory.
 
