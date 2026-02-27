@@ -60,6 +60,7 @@ fn handle_tree_keys(app: &mut App, key: KeyEvent) {
         // Clipboard operations
         KeyCode::Char('y') => app.copy_to_clipboard(),
         KeyCode::Char('x') => app.cut_to_clipboard(),
+        KeyCode::Char('p') => app.paste_clipboard(),
 
         // File operations — open dialogs
         KeyCode::Char('a') => app.open_dialog(DialogKind::CreateFile),
@@ -774,5 +775,63 @@ mod tests {
         assert!(app.status_message.is_some());
         let (msg, _) = app.status_message.as_ref().unwrap();
         assert!(msg.contains("cut"));
+    }
+
+    // === Paste tests ===
+
+    #[test]
+    fn paste_copy_creates_duplicate() {
+        let (dir, mut app) = setup_app();
+        // Copy file_a.txt (index 3)
+        app.tree_state.selected_index = 3;
+        handle_key_event(&mut app, make_key(KeyCode::Char('y')));
+        // Navigate to beta dir (index 2) and paste
+        app.tree_state.selected_index = 2;
+        // Expand beta so it becomes the current dir
+        handle_key_event(&mut app, make_key(KeyCode::Enter));
+        handle_key_event(&mut app, make_key(KeyCode::Char('p')));
+        assert!(dir.path().join("beta").join("file_a.txt").exists());
+        // Original still exists
+        assert!(dir.path().join("file_a.txt").exists());
+    }
+
+    #[test]
+    fn paste_cut_moves_file() {
+        let (dir, mut app) = setup_app();
+        // Cut file_a.txt (index 3)
+        app.tree_state.selected_index = 3;
+        handle_key_event(&mut app, make_key(KeyCode::Char('x')));
+        // Navigate to beta dir
+        app.tree_state.selected_index = 2;
+        handle_key_event(&mut app, make_key(KeyCode::Enter));
+        handle_key_event(&mut app, make_key(KeyCode::Char('p')));
+        assert!(dir.path().join("beta").join("file_a.txt").exists());
+        // Original removed
+        assert!(!dir.path().join("file_a.txt").exists());
+        // Clipboard should be cleared after cut-paste
+        assert!(app.clipboard.is_empty());
+    }
+
+    #[test]
+    fn paste_empty_clipboard_shows_message() {
+        let (_dir, mut app) = setup_app();
+        handle_key_event(&mut app, make_key(KeyCode::Char('p')));
+        assert!(app.status_message.is_some());
+        let (msg, _) = app.status_message.as_ref().unwrap();
+        assert!(msg.contains("empty"));
+    }
+
+    #[test]
+    fn paste_copy_preserves_clipboard() {
+        let (dir, mut app) = setup_app();
+        app.tree_state.selected_index = 3;
+        handle_key_event(&mut app, make_key(KeyCode::Char('y')));
+        // Paste into beta
+        app.tree_state.selected_index = 2;
+        handle_key_event(&mut app, make_key(KeyCode::Enter));
+        handle_key_event(&mut app, make_key(KeyCode::Char('p')));
+        assert!(dir.path().join("beta").join("file_a.txt").exists());
+        // Clipboard still populated (copy doesn't clear it)
+        assert!(!app.clipboard.is_empty());
     }
 }

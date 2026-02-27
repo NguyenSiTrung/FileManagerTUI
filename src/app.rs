@@ -296,6 +296,72 @@ impl App {
         ));
     }
 
+    /// Paste clipboard contents into the current directory.
+    pub fn paste_clipboard(&mut self) {
+        use crate::fs::operations;
+
+        if self.clipboard.is_empty() {
+            self.set_status_message("Clipboard is empty".to_string());
+            return;
+        }
+
+        let dest_dir = self.current_dir();
+        let op = self.clipboard.operation;
+        let paths = self.clipboard.paths.clone();
+        let mut errors = Vec::new();
+        let mut success_count = 0;
+
+        for src in &paths {
+            let result = match op {
+                Some(ClipboardOp::Copy) => operations::copy_recursive(src, &dest_dir).map(|_| ()),
+                Some(ClipboardOp::Cut) => operations::move_item(src, &dest_dir).map(|_| ()),
+                None => continue,
+            };
+            match result {
+                Ok(()) => success_count += 1,
+                Err(e) => errors.push(format!(
+                    "{}: {}",
+                    src.file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_default(),
+                    e
+                )),
+            }
+        }
+
+        // Clear clipboard after cut (move) operation
+        if op == Some(ClipboardOp::Cut) && errors.is_empty() {
+            self.clipboard.clear();
+        }
+
+        // Refresh affected directories
+        self.tree_state.reload_dir(&dest_dir);
+        // For cut operations, also reload source parents
+        if op == Some(ClipboardOp::Cut) {
+            for src in &paths {
+                if let Some(parent) = src.parent() {
+                    self.tree_state.reload_dir(parent);
+                }
+            }
+        }
+
+        if errors.is_empty() {
+            let op_name = match op {
+                Some(ClipboardOp::Copy) => "Pasted",
+                Some(ClipboardOp::Cut) => "Moved",
+                None => "Done",
+            };
+            self.set_status_message(format!(
+                "{} {} item{}",
+                op_name,
+                success_count,
+                if success_count == 1 { "" } else { "s" }
+            ));
+        } else {
+            self.set_status_message(format!("Error: {}", errors.join("; ")));
+        }
+    }
+
     /// Scroll preview down by one line.
     pub fn preview_scroll_down(&mut self) {
         if self.preview_state.scroll_offset < self.preview_state.total_lines.saturating_sub(1) {
