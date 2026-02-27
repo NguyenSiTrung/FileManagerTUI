@@ -9,6 +9,8 @@ This file is the project's institutional knowledge - learnings extracted from co
 ## Code Conventions
 
 - Use `#[allow(dead_code)]` on struct fields/variants reserved for future milestones (from: core-loop-tree_20260227, 2026-02-27)
+- Use `vec![...]` macro instead of `Vec::new()` + `.push()` chains — clippy enforces this (from: preview-panel_20260227, archived 2026-02-27)
+- Use `r##"..."##` for raw strings that contain `"#` sequences (from: preview-panel_20260227, archived 2026-02-27)
 
 ## Architecture
 
@@ -25,6 +27,10 @@ This file is the project's institutional knowledge - learnings extracted from co
 - Binary detection: check known extensions first (fast), then null-byte scan in 8KB (fallback) (from: preview-panel_20260227, 2026-02-27)
 - Use iterative stack-based directory walk with entry cap (10K) to prevent hanging on huge trees (from: preview-panel_20260227, 2026-02-27)
 - Notebook source fields can be String or Array<String> — handle both with `extract_notebook_text()` (from: preview-panel_20260227, 2026-02-27)
+- `Layout::default().direction(Direction::Horizontal).constraints([Percentage(40), Percentage(60)])` for panel splits (from: preview-panel_20260227, archived 2026-02-27)
+- Use `Block.border_style()` with `Color::Cyan` for focused panel indication (from: preview-panel_20260227, archived 2026-02-27)
+- PreviewWidget follows same pattern as TreeWidget — struct with `block()` builder, implements `Widget` trait (from: preview-panel_20260227, archived 2026-02-27)
+- Strip ANSI escape codes from notebook error tracebacks for clean display (from: preview-panel_20260227, archived 2026-02-27)
 
 ## Gotchas
 
@@ -35,6 +41,8 @@ This file is the project's institutional knowledge - learnings extracted from co
 - Must clone DialogKind before matching to avoid borrow conflicts with `app` (from: file-ops-dialogs_20260227, 2026-02-27)
 - `detect_syntax_name` returns `&str` with lifetime tied to argument — bind format! result to a let before passing (from: preview-panel_20260227, 2026-02-27)
 - `.ipynb` is in the extension-to-syntax map as "Python" — must check for notebook _before_ normal file loading in update_preview (from: preview-panel_20260227, 2026-02-27)
+- syntect `find_syntax_by_extension` returns Option, chain with `find_syntax_by_name` for robust fallback (from: preview-panel_20260227, archived 2026-02-27)
+- `fast_line_count` must handle files without trailing newline (check for content if newline count is 0) (from: preview-panel_20260227, archived 2026-02-27)
 
 ## Testing
 
@@ -43,7 +51,9 @@ This file is the project's institutional knowledge - learnings extracted from co
 ## Context
 
 - Tree widget builds box-drawing prefix by walking ancestor chain backwards to determine `│` vs space continuation lines (from: core-loop-tree_20260227, 2026-02-27)
+- ViewMode cycling only applies when `is_large_file` is true — noop for normal files (from: preview-panel_20260227, archived 2026-02-27)
+- `serde_json` added as dependency for notebook parsing (Value-based, not serde derive) (from: preview-panel_20260227, archived 2026-02-27)
 
 ---
 
-Last refreshed: 2026-02-27 (preview-panel_20260227 complete)
+Last refreshed: 2026-02-27 (preview-panel_20260227 archived)

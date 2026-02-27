@@ -2,5 +2,4 @@
 
 ---
 
-## [x] Track: Preview Panel + Syntax Highlighting
-*Link: [./conductor/tracks/preview-panel_20260227/](./conductor/tracks/preview-panel_20260227/)*
+<!-- Archived: preview-panel_20260227 (2026-02-27) → conductor/archive/ -->
