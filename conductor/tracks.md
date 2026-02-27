@@ -6,5 +6,5 @@
 
 ---
 
-## [~] Track: Copy / Cut / Paste + Multi-Select
+## [x] Track: Copy / Cut / Paste + Multi-Select
 *Link: [./conductor/tracks/clipboard-multiselect_20260227/](./conductor/tracks/clipboard-multiselect_20260227/)*

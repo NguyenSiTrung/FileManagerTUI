@@ -54,6 +54,12 @@ This file is the project's institutional knowledge - learnings extracted from co
 - ViewMode cycling only applies when `is_large_file` is true — noop for normal files (from: preview-panel_20260227, archived 2026-02-27)
 - `serde_json` added as dependency for notebook parsing (Value-based, not serde derive) (from: preview-panel_20260227, archived 2026-02-27)
 
+- Async paste via `tokio::spawn` + `mpsc::unbounded_channel` events (Progress, OperationComplete) integrates with the existing event loop (from: clipboard-multiselect_20260227, 2026-02-27)
+- Use `Arc<AtomicBool>` for cancel tokens — no need for `tokio_util::CancellationToken` (from: clipboard-multiselect_20260227, 2026-02-27)
+- Handler tests need dummy mpsc sender when signature includes `event_tx` — use a `handle_key()` test wrapper (from: clipboard-multiselect_20260227, 2026-02-27)
+- `flatten()` must clear `multi_selected` since flat indices change on re-flatten (from: clipboard-multiselect_20260227, 2026-02-27)
+- Paste tests must be `#[tokio::test] async` since `paste_clipboard_async` uses `tokio::spawn` (from: clipboard-multiselect_20260227, 2026-02-27)
+
 ---
 
-Last refreshed: 2026-02-27 (preview-panel_20260227 archived)
+Last refreshed: 2026-02-27 (clipboard-multiselect_20260227 completed)
