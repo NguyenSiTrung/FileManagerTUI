@@ -274,7 +274,11 @@ impl App {
         }
         let count = paths.len();
         self.clipboard.set(paths, ClipboardOp::Copy);
-        self.set_status_message(format!("📋 {} item{} copied", count, if count == 1 { "" } else { "s" }));
+        self.set_status_message(format!(
+            "📋 {} item{} copied",
+            count,
+            if count == 1 { "" } else { "s" }
+        ));
     }
 
     /// Cut selected/focused items to clipboard.
@@ -285,7 +289,11 @@ impl App {
         }
         let count = paths.len();
         self.clipboard.set(paths, ClipboardOp::Cut);
-        self.set_status_message(format!("✂ {} item{} cut", count, if count == 1 { "" } else { "s" }));
+        self.set_status_message(format!(
+            "✂ {} item{} cut",
+            count,
+            if count == 1 { "" } else { "s" }
+        ));
     }
 
     /// Scroll preview down by one line.

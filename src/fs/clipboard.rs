@@ -36,6 +36,7 @@ impl ClipboardState {
     }
 
     /// Clear the clipboard.
+    #[allow(dead_code)]
     pub fn clear(&mut self) {
         self.paths.clear();
         self.operation = None;

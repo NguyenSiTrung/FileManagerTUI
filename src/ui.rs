@@ -123,7 +123,12 @@ pub fn render(app: &mut App, frame: &mut Frame) {
             Some(ClipboardOp::Cut) => "✂",
             None => "",
         };
-        clipboard_info_str = format!("{} {} item{}", icon, app.clipboard.len(), if app.clipboard.len() == 1 { "" } else { "s" });
+        clipboard_info_str = format!(
+            "{} {} item{}",
+            icon,
+            app.clipboard.len(),
+            if app.clipboard.len() == 1 { "" } else { "s" }
+        );
         status_widget = status_widget.clipboard_info(&clipboard_info_str);
     }
 
