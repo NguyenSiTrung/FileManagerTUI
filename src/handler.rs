@@ -51,6 +51,12 @@ fn handle_tree_keys(app: &mut App, key: KeyEvent) {
         // Toggle hidden files
         KeyCode::Char('.') => app.toggle_hidden(),
 
+        // Multi-select toggle
+        KeyCode::Char(' ') => app.tree_state.toggle_multi_select(),
+
+        // Clear multi-selection
+        KeyCode::Esc => app.tree_state.clear_multi_select(),
+
         // File operations — open dialogs
         KeyCode::Char('a') => app.open_dialog(DialogKind::CreateFile),
         KeyCode::Char('A') => app.open_dialog(DialogKind::CreateDirectory),
@@ -668,5 +674,40 @@ mod tests {
         let idx = app.tree_state.selected_index;
         handle_key_event(&mut app, make_key(KeyCode::Char('j')));
         assert_eq!(app.tree_state.selected_index, idx);
+    }
+
+    // === Multi-select tests ===
+
+    #[test]
+    fn space_toggles_multi_select() {
+        let (_dir, mut app) = setup_app();
+        app.tree_state.selected_index = 1;
+        handle_key_event(&mut app, make_key(KeyCode::Char(' ')));
+        assert!(app.tree_state.multi_selected.contains(&1));
+        handle_key_event(&mut app, make_key(KeyCode::Char(' ')));
+        assert!(!app.tree_state.multi_selected.contains(&1));
+    }
+
+    #[test]
+    fn esc_clears_multi_select() {
+        let (_dir, mut app) = setup_app();
+        app.tree_state.selected_index = 1;
+        handle_key_event(&mut app, make_key(KeyCode::Char(' ')));
+        app.tree_state.selected_index = 2;
+        handle_key_event(&mut app, make_key(KeyCode::Char(' ')));
+        assert_eq!(app.tree_state.multi_selected.len(), 2);
+        handle_key_event(&mut app, make_key(KeyCode::Esc));
+        assert!(app.tree_state.multi_selected.is_empty());
+    }
+
+    #[test]
+    fn navigation_preserves_multi_select() {
+        let (_dir, mut app) = setup_app();
+        app.tree_state.selected_index = 1;
+        handle_key_event(&mut app, make_key(KeyCode::Char(' ')));
+        // Navigate down
+        handle_key_event(&mut app, make_key(KeyCode::Char('j')));
+        // Selection should persist
+        assert!(app.tree_state.multi_selected.contains(&1));
     }
 }

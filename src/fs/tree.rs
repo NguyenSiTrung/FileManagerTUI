@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -125,6 +126,8 @@ pub struct TreeState {
     pub selected_index: usize,
     pub scroll_offset: usize,
     pub show_hidden: bool,
+    /// Indices of multi-selected items.
+    pub multi_selected: HashSet<usize>,
 }
 
 impl TreeState {
@@ -142,6 +145,7 @@ impl TreeState {
             selected_index: 0,
             scroll_offset: 0,
             show_hidden: false,
+            multi_selected: HashSet::new(),
         };
         state.flatten();
         Ok(state)
@@ -150,8 +154,10 @@ impl TreeState {
     /// Rebuild the flat items list from the tree, respecting `show_hidden`.
     ///
     /// The root node is always included regardless of hidden status.
+    /// Multi-selection is cleared since indices change.
     pub fn flatten(&mut self) {
         self.flat_items.clear();
+        self.multi_selected.clear();
         Self::flatten_node(
             &self.root,
             &mut self.flat_items,
@@ -292,6 +298,24 @@ impl TreeState {
         self.show_hidden = !self.show_hidden;
         self.flatten();
     }
+
+    /// Toggle multi-selection of the currently focused item.
+    pub fn toggle_multi_select(&mut self) {
+        if self.flat_items.is_empty() {
+            return;
+        }
+        let idx = self.selected_index;
+        if self.multi_selected.contains(&idx) {
+            self.multi_selected.remove(&idx);
+        } else {
+            self.multi_selected.insert(idx);
+        }
+    }
+
+    /// Clear all multi-selections.
+    pub fn clear_multi_select(&mut self) {
+        self.multi_selected.clear();
+    }
 }
 
 #[cfg(test)]
@@ -402,5 +426,70 @@ mod tests {
         state.toggle_hidden();
         state.toggle_hidden();
         assert_eq!(state.flat_items.len(), original_count);
+    }
+
+    #[test]
+    fn multi_select_toggle_adds_index() {
+        let dir = setup_test_dir();
+        let mut state = TreeState::new(dir.path()).unwrap();
+        state.selected_index = 1;
+        state.toggle_multi_select();
+        assert!(state.multi_selected.contains(&1));
+    }
+
+    #[test]
+    fn multi_select_toggle_removes_index() {
+        let dir = setup_test_dir();
+        let mut state = TreeState::new(dir.path()).unwrap();
+        state.selected_index = 2;
+        state.toggle_multi_select();
+        assert!(state.multi_selected.contains(&2));
+        state.toggle_multi_select();
+        assert!(!state.multi_selected.contains(&2));
+    }
+
+    #[test]
+    fn multi_select_multiple_items() {
+        let dir = setup_test_dir();
+        let mut state = TreeState::new(dir.path()).unwrap();
+        state.selected_index = 1;
+        state.toggle_multi_select();
+        state.selected_index = 3;
+        state.toggle_multi_select();
+        assert_eq!(state.multi_selected.len(), 2);
+        assert!(state.multi_selected.contains(&1));
+        assert!(state.multi_selected.contains(&3));
+    }
+
+    #[test]
+    fn clear_multi_select() {
+        let dir = setup_test_dir();
+        let mut state = TreeState::new(dir.path()).unwrap();
+        state.selected_index = 1;
+        state.toggle_multi_select();
+        state.selected_index = 2;
+        state.toggle_multi_select();
+        state.clear_multi_select();
+        assert!(state.multi_selected.is_empty());
+    }
+
+    #[test]
+    fn flatten_clears_multi_select() {
+        let dir = setup_test_dir();
+        let mut state = TreeState::new(dir.path()).unwrap();
+        state.selected_index = 1;
+        state.toggle_multi_select();
+        state.flatten();
+        assert!(state.multi_selected.is_empty());
+    }
+
+    #[test]
+    fn toggle_multi_select_on_empty_is_noop() {
+        let dir = TempDir::new().unwrap();
+        // Create an empty dir with no children
+        let mut state = TreeState::new(dir.path()).unwrap();
+        // There's at least the root — but if flat_items is somehow empty, it's a noop
+        // Just check it doesn't panic
+        state.toggle_multi_select();
     }
 }
