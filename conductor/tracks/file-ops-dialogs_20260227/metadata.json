@@ -1,0 +1,26 @@
+{
+  "track_id": "file-ops-dialogs_20260227",
+  "type": "feature",
+  "status": "new",
+  "priority": "high",
+  "depends_on": [],
+  "estimated_hours": null,
+  "created_at": "2026-02-27T12:00:00Z",
+  "updated_at": "2026-02-27T12:00:00Z",
+  "description": "File Operations + Dialogs: Create, rename, delete files and directories with modal dialog system, status bar feedback, and error handling",
+  "beads_epic": "FileManagerTUI-2zk",
+  "beads_tasks": {
+    "phase1": "FileManagerTUI-2zk.1",
+    "phase1_task1": "FileManagerTUI-2zk.1.1",
+    "phase2": "FileManagerTUI-2zk.2",
+    "phase2_task1": "FileManagerTUI-2zk.2.1",
+    "phase3": "FileManagerTUI-2zk.3",
+    "phase3_task1": "FileManagerTUI-2zk.3.1",
+    "phase4": "FileManagerTUI-2zk.4",
+    "phase4_task1": "FileManagerTUI-2zk.4.1",
+    "phase5": "FileManagerTUI-2zk.5",
+    "phase5_task1": "FileManagerTUI-2zk.5.1",
+    "phase5_task2": "FileManagerTUI-2zk.5.2",
+    "phase5_task3": "FileManagerTUI-2zk.5.3"
+  }
+}
