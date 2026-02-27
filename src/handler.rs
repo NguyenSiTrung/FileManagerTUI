@@ -84,7 +84,7 @@ fn handle_preview_keys(app: &mut App, key: KeyEvent) {
         KeyCode::Char('G') | KeyCode::End => app.preview_jump_bottom(),
         // Half-page scroll
         KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            app.preview_half_page_down(30); // Default visible height; actual wired from UI later
+            app.preview_half_page_down(30);
         }
         KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             app.preview_half_page_up(30);
@@ -92,6 +92,17 @@ fn handle_preview_keys(app: &mut App, key: KeyEvent) {
         // Toggle line wrap
         KeyCode::Char('w') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             app.preview_state.line_wrap = !app.preview_state.line_wrap;
+        }
+        // Cycle view mode (large files only)
+        KeyCode::Char('t') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.cycle_view_mode();
+        }
+        // Adjust head/tail line counts
+        KeyCode::Char('+') | KeyCode::Char('=') => {
+            app.adjust_preview_lines(crate::preview_content::LINE_COUNT_STEP as isize);
+        }
+        KeyCode::Char('-') => {
+            app.adjust_preview_lines(-(crate::preview_content::LINE_COUNT_STEP as isize));
         }
 
         _ => {}

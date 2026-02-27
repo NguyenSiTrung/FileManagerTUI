@@ -1,11 +1,22 @@
 use std::fs;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
 
-use ratatui::style::{Color, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use syntect::highlighting::{Theme, ThemeSet};
 use syntect::parsing::SyntaxSet;
+
+use crate::app::ViewMode;
+
+/// Default max file size before switching to head+tail mode (1 MB).
+pub const DEFAULT_MAX_FULL_PREVIEW_BYTES: u64 = 1_048_576;
+/// Default number of head lines in head+tail mode.
+pub const DEFAULT_HEAD_LINES: usize = 50;
+/// Default number of tail lines in head+tail mode.
+pub const DEFAULT_TAIL_LINES: usize = 20;
+/// Line count adjustment step for +/- keys.
+pub const LINE_COUNT_STEP: usize = 10;
 
 /// Detect the syntax name for a file based on its extension.
 pub fn detect_syntax_name(path: &Path) -> &str {
@@ -152,6 +163,174 @@ pub fn load_highlighted_content(
     (result_lines, total)
 }
 
+/// Count lines in a file using fast byte scanning (64KB chunks).
+pub fn fast_line_count(path: &Path) -> std::io::Result<usize> {
+    let mut file = fs::File::open(path)?;
+    let mut buf = [0u8; 65536];
+    let mut count = 0usize;
+    loop {
+        let n = file.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        count += buf[..n].iter().filter(|&&b| b == b'\n').count();
+    }
+    // If file doesn't end with newline, the last line still counts
+    if count == 0 {
+        // Check if file has any content
+        file.seek(SeekFrom::Start(0))?;
+        let mut check = [0u8; 1];
+        if file.read(&mut check)? > 0 {
+            count = 1;
+        }
+    }
+    Ok(count)
+}
+
+/// Load head+tail content from a large file.
+///
+/// Returns styled lines with head section, separator, and tail section.
+pub fn load_head_tail_content(
+    path: &Path,
+    ss: &SyntaxSet,
+    theme: &Theme,
+    head_lines: usize,
+    tail_lines: usize,
+    view_mode: ViewMode,
+) -> (Vec<Line<'static>>, usize) {
+    let total_lines = match fast_line_count(path) {
+        Ok(n) => n,
+        Err(e) => {
+            return (
+                vec![Line::from(Span::styled(
+                    format!("Error counting lines: {}", e),
+                    Style::default().fg(Color::Red),
+                ))],
+                1,
+            );
+        }
+    };
+
+    let file = match fs::File::open(path) {
+        Ok(f) => f,
+        Err(e) => {
+            return (
+                vec![Line::from(Span::styled(
+                    format!("Error reading file: {}", e),
+                    Style::default().fg(Color::Red),
+                ))],
+                1,
+            );
+        }
+    };
+    let reader = BufReader::new(file);
+    let all_lines: Vec<String> = reader.lines().map_while(Result::ok).collect();
+
+    let syntax_name = detect_syntax_name(path);
+    let syntax = ss
+        .find_syntax_by_name(syntax_name)
+        .unwrap_or_else(|| ss.find_syntax_plain_text());
+    let mut highlighter = syntect::easy::HighlightLines::new(syntax, theme);
+
+    let line_num_width = total_lines.to_string().len();
+    let mut result_lines: Vec<Line<'static>> = Vec::new();
+
+    let effective_head = head_lines.min(all_lines.len());
+    let effective_tail = tail_lines.min(all_lines.len().saturating_sub(effective_head));
+    let tail_start = all_lines.len().saturating_sub(effective_tail);
+
+    match view_mode {
+        ViewMode::HeadAndTail => {
+            // Head section
+            for (i, line_str) in all_lines[..effective_head].iter().enumerate() {
+                result_lines.push(highlight_single_line(
+                    line_str,
+                    i + 1,
+                    line_num_width,
+                    &mut highlighter,
+                    ss,
+                ));
+            }
+
+            // Separator
+            if tail_start > effective_head {
+                let omitted = tail_start - effective_head;
+                let sep = format!("  ──── {} lines omitted ────", omitted);
+                result_lines.push(Line::from(Span::styled(
+                    sep,
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::DIM),
+                )));
+            }
+
+            // Tail section
+            for (i, line_str) in all_lines[tail_start..].iter().enumerate() {
+                result_lines.push(highlight_single_line(
+                    line_str,
+                    tail_start + i + 1,
+                    line_num_width,
+                    &mut highlighter,
+                    ss,
+                ));
+            }
+        }
+        ViewMode::HeadOnly => {
+            for (i, line_str) in all_lines[..effective_head].iter().enumerate() {
+                result_lines.push(highlight_single_line(
+                    line_str,
+                    i + 1,
+                    line_num_width,
+                    &mut highlighter,
+                    ss,
+                ));
+            }
+        }
+        ViewMode::TailOnly => {
+            for (i, line_str) in all_lines[tail_start..].iter().enumerate() {
+                result_lines.push(highlight_single_line(
+                    line_str,
+                    tail_start + i + 1,
+                    line_num_width,
+                    &mut highlighter,
+                    ss,
+                ));
+            }
+        }
+    }
+
+    let displayed = result_lines.len();
+    (result_lines, displayed.max(1))
+}
+
+/// Highlight a single line with line number prefix.
+fn highlight_single_line(
+    line_str: &str,
+    line_num: usize,
+    line_num_width: usize,
+    highlighter: &mut syntect::easy::HighlightLines,
+    ss: &SyntaxSet,
+) -> Line<'static> {
+    let mut spans: Vec<Span<'static>> = Vec::new();
+
+    let num = format!("{:>width$} │ ", line_num, width = line_num_width);
+    spans.push(Span::styled(num, Style::default().fg(Color::DarkGray)));
+
+    match highlighter.highlight_line(line_str, ss) {
+        Ok(ranges) => {
+            for (style, text) in ranges {
+                let fg = syntect_color_to_ratatui(style.foreground);
+                spans.push(Span::styled(text.to_string(), Style::default().fg(fg)));
+            }
+        }
+        Err(_) => {
+            spans.push(Span::raw(line_str.to_string()));
+        }
+    }
+
+    Line::from(spans)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -266,5 +445,80 @@ mod tests {
         // Should contain error message
         let text: String = lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(text.contains("Error"));
+    }
+
+    // === Fast line counting tests ===
+
+    #[test]
+    fn fast_line_count_small_file() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("small.txt");
+        let mut f = File::create(&path).unwrap();
+        writeln!(f, "line 1").unwrap();
+        writeln!(f, "line 2").unwrap();
+        writeln!(f, "line 3").unwrap();
+        assert_eq!(fast_line_count(&path).unwrap(), 3);
+    }
+
+    #[test]
+    fn fast_line_count_empty_file() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("empty.txt");
+        File::create(&path).unwrap();
+        assert_eq!(fast_line_count(&path).unwrap(), 0);
+    }
+
+    #[test]
+    fn fast_line_count_no_trailing_newline() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("no_nl.txt");
+        let mut f = File::create(&path).unwrap();
+        write!(f, "no newline").unwrap(); // no trailing \n
+        assert_eq!(fast_line_count(&path).unwrap(), 1);
+    }
+
+    // === Head+tail tests ===
+
+    #[test]
+    fn head_tail_basic() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("big.txt");
+        let mut f = File::create(&path).unwrap();
+        for i in 1..=100 {
+            writeln!(f, "line {}", i).unwrap();
+        }
+        let ss = SyntaxSet::load_defaults_newlines();
+        let theme = load_theme(None);
+        let (lines, _) = load_head_tail_content(&path, &ss, &theme, 10, 5, ViewMode::HeadAndTail);
+        // Should have 10 head + 1 separator + 5 tail = 16 lines
+        assert_eq!(lines.len(), 16);
+    }
+
+    #[test]
+    fn head_only_mode() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("big2.txt");
+        let mut f = File::create(&path).unwrap();
+        for i in 1..=100 {
+            writeln!(f, "line {}", i).unwrap();
+        }
+        let ss = SyntaxSet::load_defaults_newlines();
+        let theme = load_theme(None);
+        let (lines, _) = load_head_tail_content(&path, &ss, &theme, 10, 5, ViewMode::HeadOnly);
+        assert_eq!(lines.len(), 10);
+    }
+
+    #[test]
+    fn tail_only_mode() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("big3.txt");
+        let mut f = File::create(&path).unwrap();
+        for i in 1..=100 {
+            writeln!(f, "line {}", i).unwrap();
+        }
+        let ss = SyntaxSet::load_defaults_newlines();
+        let theme = load_theme(None);
+        let (lines, _) = load_head_tail_content(&path, &ss, &theme, 10, 5, ViewMode::TailOnly);
+        assert_eq!(lines.len(), 5);
     }
 }

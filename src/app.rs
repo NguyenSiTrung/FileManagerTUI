@@ -55,6 +55,12 @@ pub struct PreviewState {
     pub line_wrap: bool,
     /// Total number of lines in the content.
     pub total_lines: usize,
+    /// Whether the current file is in large-file mode.
+    pub is_large_file: bool,
+    /// Number of head lines to show in head+tail mode.
+    pub head_lines: usize,
+    /// Number of tail lines to show in head+tail mode.
+    pub tail_lines: usize,
 }
 
 /// Application mode.
@@ -293,16 +299,101 @@ impl App {
         }
 
         let path = item.path.clone();
-        let (lines, total) =
-            preview_content::load_highlighted_content(&path, &self.syntax_set, &self.syntax_theme);
-        self.preview_state = PreviewState {
-            current_path: Some(path),
-            content_lines: lines,
-            scroll_offset: 0,
-            view_mode: ViewMode::default(),
-            line_wrap: false,
-            total_lines: total,
+
+        // Check file size for large-file mode
+        let file_size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+
+        let is_large = file_size > preview_content::DEFAULT_MAX_FULL_PREVIEW_BYTES;
+
+        if is_large {
+            let head = preview_content::DEFAULT_HEAD_LINES;
+            let tail = preview_content::DEFAULT_TAIL_LINES;
+            let (lines, total) = preview_content::load_head_tail_content(
+                &path,
+                &self.syntax_set,
+                &self.syntax_theme,
+                head,
+                tail,
+                ViewMode::HeadAndTail,
+            );
+            self.preview_state = PreviewState {
+                current_path: Some(path),
+                content_lines: lines,
+                scroll_offset: 0,
+                view_mode: ViewMode::HeadAndTail,
+                line_wrap: false,
+                total_lines: total,
+                is_large_file: true,
+                head_lines: head,
+                tail_lines: tail,
+            };
+        } else {
+            let (lines, total) = preview_content::load_highlighted_content(
+                &path,
+                &self.syntax_set,
+                &self.syntax_theme,
+            );
+            self.preview_state = PreviewState {
+                current_path: Some(path),
+                content_lines: lines,
+                scroll_offset: 0,
+                view_mode: ViewMode::default(),
+                line_wrap: false,
+                total_lines: total,
+                is_large_file: false,
+                head_lines: preview_content::DEFAULT_HEAD_LINES,
+                tail_lines: preview_content::DEFAULT_TAIL_LINES,
+            };
+        }
+    }
+
+    /// Cycle view mode for large file preview (Ctrl+T).
+    pub fn cycle_view_mode(&mut self) {
+        if !self.preview_state.is_large_file {
+            return;
+        }
+        self.preview_state.view_mode = match self.preview_state.view_mode {
+            ViewMode::HeadAndTail => ViewMode::HeadOnly,
+            ViewMode::HeadOnly => ViewMode::TailOnly,
+            ViewMode::TailOnly => ViewMode::HeadAndTail,
         };
+        self.reload_large_preview();
+    }
+
+    /// Adjust head/tail line counts by a delta (+/- keys).
+    pub fn adjust_preview_lines(&mut self, delta: isize) {
+        if !self.preview_state.is_large_file {
+            return;
+        }
+        let step = delta.unsigned_abs();
+        if delta > 0 {
+            self.preview_state.head_lines += step;
+            self.preview_state.tail_lines += step;
+        } else {
+            self.preview_state.head_lines =
+                self.preview_state.head_lines.saturating_sub(step).max(5);
+            self.preview_state.tail_lines =
+                self.preview_state.tail_lines.saturating_sub(step).max(5);
+        }
+        self.reload_large_preview();
+    }
+
+    /// Reload the large file preview with current settings.
+    fn reload_large_preview(&mut self) {
+        if let Some(ref path) = self.preview_state.current_path {
+            let path = path.clone();
+            let (lines, total) = preview_content::load_head_tail_content(
+                &path,
+                &self.syntax_set,
+                &self.syntax_theme,
+                self.preview_state.head_lines,
+                self.preview_state.tail_lines,
+                self.preview_state.view_mode,
+            );
+            self.preview_state.content_lines = lines;
+            self.preview_state.total_lines = total;
+            self.preview_state.scroll_offset = 0;
+        }
     }
 
     /// Quit the application.
