@@ -277,6 +277,16 @@ impl TreeState {
         }
     }
 
+    /// Reload a specific directory's children and re-flatten.
+    pub fn reload_dir(&mut self, dir_path: &Path) {
+        if let Some(node) = Self::find_node_mut(&mut self.root, dir_path) {
+            if node.node_type == NodeType::Directory {
+                let _ = node.load_children();
+                self.flatten();
+            }
+        }
+    }
+
     /// Toggle visibility of hidden files and re-flatten.
     pub fn toggle_hidden(&mut self) {
         self.show_hidden = !self.show_hidden;
