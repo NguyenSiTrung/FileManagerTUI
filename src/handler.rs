@@ -1,6 +1,6 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::app::{App, AppMode, DialogKind};
+use crate::app::{App, AppMode, DialogKind, FocusedPanel};
 use crate::fs::operations;
 
 /// Handle a key event and dispatch to the appropriate app method.
@@ -12,11 +12,32 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) {
 }
 
 fn handle_normal_mode(app: &mut App, key: KeyEvent) {
+    // Global keys (work regardless of focus)
     match key.code {
-        // Quit
-        KeyCode::Char('q') => app.quit(),
-        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => app.quit(),
+        KeyCode::Char('q') => {
+            app.quit();
+            return;
+        }
+        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.quit();
+            return;
+        }
+        KeyCode::Tab => {
+            app.toggle_focus();
+            return;
+        }
+        _ => {}
+    }
 
+    // Dispatch based on focused panel
+    match app.focused_panel {
+        FocusedPanel::Tree => handle_tree_keys(app, key),
+        FocusedPanel::Preview => handle_preview_keys(app, key),
+    }
+}
+
+fn handle_tree_keys(app: &mut App, key: KeyEvent) {
+    match key.code {
         // Navigation
         KeyCode::Char('j') | KeyCode::Down => app.select_next(),
         KeyCode::Char('k') | KeyCode::Up => app.select_previous(),
@@ -47,6 +68,30 @@ fn handle_normal_mode(app: &mut App, key: KeyEvent) {
                     app.open_dialog(DialogKind::DeleteConfirm { targets });
                 }
             }
+        }
+
+        _ => {}
+    }
+}
+
+fn handle_preview_keys(app: &mut App, key: KeyEvent) {
+    match key.code {
+        // Line-by-line scroll
+        KeyCode::Char('j') | KeyCode::Down => app.preview_scroll_down(),
+        KeyCode::Char('k') | KeyCode::Up => app.preview_scroll_up(),
+        // Jump to top/bottom
+        KeyCode::Char('g') | KeyCode::Home => app.preview_jump_top(),
+        KeyCode::Char('G') | KeyCode::End => app.preview_jump_bottom(),
+        // Half-page scroll
+        KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.preview_half_page_down(30); // Default visible height; actual wired from UI later
+        }
+        KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.preview_half_page_up(30);
+        }
+        // Toggle line wrap
+        KeyCode::Char('w') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.preview_state.line_wrap = !app.preview_state.line_wrap;
         }
 
         _ => {}
@@ -517,5 +562,100 @@ mod tests {
         handle_key_event(&mut app, make_key(KeyCode::Enter));
         // Tree should have one more item
         assert_eq!(app.tree_state.flat_items.len(), before_count + 1);
+    }
+
+    // === Focus management tests ===
+
+    #[test]
+    fn tab_toggles_focus() {
+        let (_dir, mut app) = setup_app();
+        assert_eq!(app.focused_panel, FocusedPanel::Tree);
+        handle_key_event(&mut app, make_key(KeyCode::Tab));
+        assert_eq!(app.focused_panel, FocusedPanel::Preview);
+        handle_key_event(&mut app, make_key(KeyCode::Tab));
+        assert_eq!(app.focused_panel, FocusedPanel::Tree);
+    }
+
+    #[test]
+    fn q_quits_from_preview_focus() {
+        let (_dir, mut app) = setup_app();
+        app.focused_panel = FocusedPanel::Preview;
+        handle_key_event(&mut app, make_key(KeyCode::Char('q')));
+        assert!(app.should_quit);
+    }
+
+    #[test]
+    fn ctrl_c_quits_from_preview_focus() {
+        let (_dir, mut app) = setup_app();
+        app.focused_panel = FocusedPanel::Preview;
+        handle_key_event(
+            &mut app,
+            make_key_with_modifiers(KeyCode::Char('c'), KeyModifiers::CONTROL),
+        );
+        assert!(app.should_quit);
+    }
+
+    #[test]
+    fn preview_j_scrolls_down() {
+        let (_dir, mut app) = setup_app();
+        app.focused_panel = FocusedPanel::Preview;
+        app.preview_state.total_lines = 100;
+        handle_key_event(&mut app, make_key(KeyCode::Char('j')));
+        assert_eq!(app.preview_state.scroll_offset, 1);
+    }
+
+    #[test]
+    fn preview_k_scrolls_up() {
+        let (_dir, mut app) = setup_app();
+        app.focused_panel = FocusedPanel::Preview;
+        app.preview_state.total_lines = 100;
+        app.preview_state.scroll_offset = 5;
+        handle_key_event(&mut app, make_key(KeyCode::Char('k')));
+        assert_eq!(app.preview_state.scroll_offset, 4);
+    }
+
+    #[test]
+    fn preview_g_jumps_top() {
+        let (_dir, mut app) = setup_app();
+        app.focused_panel = FocusedPanel::Preview;
+        app.preview_state.total_lines = 100;
+        app.preview_state.scroll_offset = 50;
+        handle_key_event(&mut app, make_key(KeyCode::Char('g')));
+        assert_eq!(app.preview_state.scroll_offset, 0);
+    }
+
+    #[test]
+    fn preview_shift_g_jumps_bottom() {
+        let (_dir, mut app) = setup_app();
+        app.focused_panel = FocusedPanel::Preview;
+        app.preview_state.total_lines = 100;
+        handle_key_event(&mut app, make_key(KeyCode::Char('G')));
+        assert_eq!(app.preview_state.scroll_offset, 99);
+    }
+
+    #[test]
+    fn preview_ctrl_w_toggles_wrap() {
+        let (_dir, mut app) = setup_app();
+        app.focused_panel = FocusedPanel::Preview;
+        assert!(!app.preview_state.line_wrap);
+        handle_key_event(
+            &mut app,
+            make_key_with_modifiers(KeyCode::Char('w'), KeyModifiers::CONTROL),
+        );
+        assert!(app.preview_state.line_wrap);
+        handle_key_event(
+            &mut app,
+            make_key_with_modifiers(KeyCode::Char('w'), KeyModifiers::CONTROL),
+        );
+        assert!(!app.preview_state.line_wrap);
+    }
+
+    #[test]
+    fn preview_j_does_not_navigate_tree() {
+        let (_dir, mut app) = setup_app();
+        app.focused_panel = FocusedPanel::Preview;
+        let idx = app.tree_state.selected_index;
+        handle_key_event(&mut app, make_key(KeyCode::Char('j')));
+        assert_eq!(app.tree_state.selected_index, idx);
     }
 }

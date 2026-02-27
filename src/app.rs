@@ -229,7 +229,6 @@ impl App {
     }
 
     /// Toggle focus between tree and preview panels.
-    #[allow(dead_code)]
     pub fn toggle_focus(&mut self) {
         self.focused_panel = match self.focused_panel {
             FocusedPanel::Tree => FocusedPanel::Preview,
@@ -238,7 +237,6 @@ impl App {
     }
 
     /// Scroll preview down by one line.
-    #[allow(dead_code)]
     pub fn preview_scroll_down(&mut self) {
         if self.preview_state.scroll_offset < self.preview_state.total_lines.saturating_sub(1) {
             self.preview_state.scroll_offset += 1;
@@ -246,7 +244,6 @@ impl App {
     }
 
     /// Scroll preview up by one line.
-    #[allow(dead_code)]
     pub fn preview_scroll_up(&mut self) {
         if self.preview_state.scroll_offset > 0 {
             self.preview_state.scroll_offset -= 1;
@@ -254,19 +251,16 @@ impl App {
     }
 
     /// Jump preview to the first line.
-    #[allow(dead_code)]
     pub fn preview_jump_top(&mut self) {
         self.preview_state.scroll_offset = 0;
     }
 
     /// Jump preview to the last line.
-    #[allow(dead_code)]
     pub fn preview_jump_bottom(&mut self) {
         self.preview_state.scroll_offset = self.preview_state.total_lines.saturating_sub(1);
     }
 
     /// Scroll preview down by half a page.
-    #[allow(dead_code)]
     pub fn preview_half_page_down(&mut self, visible_height: usize) {
         let half = visible_height / 2;
         let max = self.preview_state.total_lines.saturating_sub(1);
@@ -274,7 +268,6 @@ impl App {
     }
 
     /// Scroll preview up by half a page.
-    #[allow(dead_code)]
     pub fn preview_half_page_up(&mut self, visible_height: usize) {
         let half = visible_height / 2;
         self.preview_state.scroll_offset = self.preview_state.scroll_offset.saturating_sub(half);
