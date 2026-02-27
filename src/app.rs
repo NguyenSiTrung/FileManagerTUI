@@ -6,7 +6,7 @@ use syntect::highlighting::Theme;
 use syntect::parsing::SyntaxSet;
 
 use crate::error::Result;
-use crate::fs::clipboard::ClipboardState;
+use crate::fs::clipboard::{ClipboardOp, ClipboardState};
 use crate::fs::tree::{NodeType, TreeState};
 use crate::preview_content;
 
@@ -244,6 +244,48 @@ impl App {
             FocusedPanel::Tree => FocusedPanel::Preview,
             FocusedPanel::Preview => FocusedPanel::Tree,
         };
+    }
+
+    /// Collect paths for clipboard: multi-selected if any, else focused item.
+    fn collect_target_paths(&self) -> Vec<PathBuf> {
+        if !self.tree_state.multi_selected.is_empty() {
+            self.tree_state
+                .multi_selected
+                .iter()
+                .filter_map(|&idx| self.tree_state.flat_items.get(idx))
+                .map(|item| item.path.clone())
+                .collect()
+        } else if let Some(item) = self
+            .tree_state
+            .flat_items
+            .get(self.tree_state.selected_index)
+        {
+            vec![item.path.clone()]
+        } else {
+            vec![]
+        }
+    }
+
+    /// Copy selected/focused items to clipboard.
+    pub fn copy_to_clipboard(&mut self) {
+        let paths = self.collect_target_paths();
+        if paths.is_empty() {
+            return;
+        }
+        let count = paths.len();
+        self.clipboard.set(paths, ClipboardOp::Copy);
+        self.set_status_message(format!("📋 {} item{} copied", count, if count == 1 { "" } else { "s" }));
+    }
+
+    /// Cut selected/focused items to clipboard.
+    pub fn cut_to_clipboard(&mut self) {
+        let paths = self.collect_target_paths();
+        if paths.is_empty() {
+            return;
+        }
+        let count = paths.len();
+        self.clipboard.set(paths, ClipboardOp::Cut);
+        self.set_status_message(format!("✂ {} item{} cut", count, if count == 1 { "" } else { "s" }));
     }
 
     /// Scroll preview down by one line.

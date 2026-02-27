@@ -57,6 +57,10 @@ fn handle_tree_keys(app: &mut App, key: KeyEvent) {
         // Clear multi-selection
         KeyCode::Esc => app.tree_state.clear_multi_select(),
 
+        // Clipboard operations
+        KeyCode::Char('y') => app.copy_to_clipboard(),
+        KeyCode::Char('x') => app.cut_to_clipboard(),
+
         // File operations — open dialogs
         KeyCode::Char('a') => app.open_dialog(DialogKind::CreateFile),
         KeyCode::Char('A') => app.open_dialog(DialogKind::CreateDirectory),
@@ -709,5 +713,66 @@ mod tests {
         handle_key_event(&mut app, make_key(KeyCode::Char('j')));
         // Selection should persist
         assert!(app.tree_state.multi_selected.contains(&1));
+    }
+
+    // === Clipboard tests ===
+
+    #[test]
+    fn y_copies_focused_item_to_clipboard() {
+        let (_dir, mut app) = setup_app();
+        app.tree_state.selected_index = 3; // file_a.txt
+        handle_key_event(&mut app, make_key(KeyCode::Char('y')));
+        assert_eq!(app.clipboard.len(), 1);
+        assert_eq!(
+            app.clipboard.operation,
+            Some(crate::fs::clipboard::ClipboardOp::Copy)
+        );
+    }
+
+    #[test]
+    fn x_cuts_focused_item_to_clipboard() {
+        let (_dir, mut app) = setup_app();
+        app.tree_state.selected_index = 3;
+        handle_key_event(&mut app, make_key(KeyCode::Char('x')));
+        assert_eq!(app.clipboard.len(), 1);
+        assert_eq!(
+            app.clipboard.operation,
+            Some(crate::fs::clipboard::ClipboardOp::Cut)
+        );
+    }
+
+    #[test]
+    fn y_copies_multi_selected_items() {
+        let (_dir, mut app) = setup_app();
+        app.tree_state.selected_index = 1;
+        handle_key_event(&mut app, make_key(KeyCode::Char(' ')));
+        app.tree_state.selected_index = 3;
+        handle_key_event(&mut app, make_key(KeyCode::Char(' ')));
+        handle_key_event(&mut app, make_key(KeyCode::Char('y')));
+        assert_eq!(app.clipboard.len(), 2);
+        assert_eq!(
+            app.clipboard.operation,
+            Some(crate::fs::clipboard::ClipboardOp::Copy)
+        );
+    }
+
+    #[test]
+    fn copy_sets_status_message() {
+        let (_dir, mut app) = setup_app();
+        app.tree_state.selected_index = 3;
+        handle_key_event(&mut app, make_key(KeyCode::Char('y')));
+        assert!(app.status_message.is_some());
+        let (msg, _) = app.status_message.as_ref().unwrap();
+        assert!(msg.contains("copied"));
+    }
+
+    #[test]
+    fn cut_sets_status_message() {
+        let (_dir, mut app) = setup_app();
+        app.tree_state.selected_index = 3;
+        handle_key_event(&mut app, make_key(KeyCode::Char('x')));
+        assert!(app.status_message.is_some());
+        let (msg, _) = app.status_message.as_ref().unwrap();
+        assert!(msg.contains("cut"));
     }
 }
