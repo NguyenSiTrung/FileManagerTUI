@@ -619,6 +619,224 @@ pub fn load_directory_summary(path: &Path) -> (Vec<Line<'static>>, usize) {
     (lines, total)
 }
 
+/// Load and render a Jupyter notebook (.ipynb) file.
+///
+/// Parses the JSON structure and renders cells with headers, source code
+/// (syntax-highlighted for code cells), and text outputs.
+pub fn load_notebook_content(
+    path: &Path,
+    ss: &SyntaxSet,
+    theme: &Theme,
+) -> (Vec<Line<'static>>, usize) {
+    let content = match fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(e) => {
+            return (
+                vec![Line::from(Span::styled(
+                    format!("Error reading notebook: {}", e),
+                    Style::default().fg(Color::Red),
+                ))],
+                1,
+            );
+        }
+    };
+
+    let notebook: serde_json::Value = match serde_json::from_str(&content) {
+        Ok(v) => v,
+        Err(e) => {
+            return (
+                vec![Line::from(Span::styled(
+                    format!("Error parsing notebook JSON: {}", e),
+                    Style::default().fg(Color::Red),
+                ))],
+                1,
+            );
+        }
+    };
+
+    let cells = match notebook.get("cells").and_then(|c| c.as_array()) {
+        Some(c) => c,
+        None => {
+            return (
+                vec![Line::from(Span::styled(
+                    "Invalid notebook: no cells array found",
+                    Style::default().fg(Color::Red),
+                ))],
+                1,
+            );
+        }
+    };
+
+    // Detect kernel language for code cell highlighting
+    let kernel_lang = notebook
+        .pointer("/metadata/kernelspec/language")
+        .and_then(|v| v.as_str())
+        .unwrap_or("python");
+    let kernel_ext = format!("_.{}", kernel_lang);
+    let kernel_syntax_name = detect_syntax_name(Path::new(&kernel_ext));
+
+    let header_style = Style::default()
+        .fg(Color::Yellow)
+        .add_modifier(Modifier::BOLD);
+    let output_prefix_style = Style::default()
+        .fg(Color::Green)
+        .add_modifier(Modifier::BOLD);
+    let dim_style = Style::default().fg(Color::DarkGray);
+
+    let mut lines: Vec<Line<'static>> = Vec::new();
+
+    for (i, cell) in cells.iter().enumerate() {
+        let cell_type = cell
+            .get("cell_type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+
+        // Cell header
+        lines.push(Line::from(Span::styled(
+            format!("━━━ Cell {} [{}] ━━━", i + 1, cell_type),
+            header_style,
+        )));
+
+        // Cell source
+        let source = extract_notebook_text(cell.get("source"));
+        if !source.is_empty() {
+            if cell_type == "code" {
+                // Syntax-highlight code cells
+                let syntax = ss
+                    .find_syntax_by_name(kernel_syntax_name)
+                    .unwrap_or_else(|| ss.find_syntax_plain_text());
+                let mut highlighter = syntect::easy::HighlightLines::new(syntax, theme);
+
+                for line_str in source.lines() {
+                    let mut spans: Vec<Span<'static>> = Vec::new();
+                    match highlighter.highlight_line(line_str, ss) {
+                        Ok(ranges) => {
+                            for (style, text) in ranges {
+                                let fg = syntect_color_to_ratatui(style.foreground);
+                                spans.push(Span::styled(text.to_string(), Style::default().fg(fg)));
+                            }
+                        }
+                        Err(_) => {
+                            spans.push(Span::raw(line_str.to_string()));
+                        }
+                    }
+                    lines.push(Line::from(spans));
+                }
+            } else {
+                // Markdown/raw cells: plain text
+                for line_str in source.lines() {
+                    lines.push(Line::from(line_str.to_string()));
+                }
+            }
+        }
+
+        // Cell outputs (only for code cells)
+        if cell_type == "code" {
+            if let Some(outputs) = cell.get("outputs").and_then(|o| o.as_array()) {
+                for output in outputs {
+                    let output_type = output
+                        .get("output_type")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+
+                    match output_type {
+                        "stream" => {
+                            let text = extract_notebook_text(output.get("text"));
+                            if !text.is_empty() {
+                                for line_str in text.lines() {
+                                    lines.push(Line::from(vec![
+                                        Span::styled("[Out] ", output_prefix_style),
+                                        Span::raw(line_str.to_string()),
+                                    ]));
+                                }
+                            }
+                        }
+                        "execute_result" | "display_data" => {
+                            // Only render text/plain from data
+                            if let Some(data) = output.get("data") {
+                                let text = extract_notebook_text(data.get("text/plain"));
+                                if !text.is_empty() {
+                                    for line_str in text.lines() {
+                                        lines.push(Line::from(vec![
+                                            Span::styled("[Out] ", output_prefix_style),
+                                            Span::raw(line_str.to_string()),
+                                        ]));
+                                    }
+                                }
+                            }
+                        }
+                        "error" => {
+                            if let Some(traceback) =
+                                output.get("traceback").and_then(|t| t.as_array())
+                            {
+                                for tb_line in traceback {
+                                    if let Some(s) = tb_line.as_str() {
+                                        // Strip ANSI escape codes
+                                        let clean = strip_ansi(s);
+                                        lines.push(Line::from(Span::styled(
+                                            clean,
+                                            Style::default().fg(Color::Red),
+                                        )));
+                                    }
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        // Separator between cells
+        lines.push(Line::from(Span::styled("", dim_style)));
+    }
+
+    if lines.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "(empty notebook)",
+            Style::default().fg(Color::DarkGray),
+        )));
+    }
+
+    let total = lines.len();
+    (lines, total)
+}
+
+/// Extract text from a notebook source/text field.
+///
+/// Notebook fields can be either a string or an array of strings.
+fn extract_notebook_text(value: Option<&serde_json::Value>) -> String {
+    match value {
+        Some(serde_json::Value::String(s)) => s.clone(),
+        Some(serde_json::Value::Array(arr)) => arr
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect::<Vec<_>>()
+            .join(""),
+        _ => String::new(),
+    }
+}
+
+/// Strip ANSI escape codes from a string.
+fn strip_ansi(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            // Skip until we find a letter (end of escape sequence)
+            while let Some(&next) = chars.peek() {
+                chars.next();
+                if next.is_ascii_alphabetic() {
+                    break;
+                }
+            }
+        } else {
+            result.push(c);
+        }
+    }
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -970,5 +1188,127 @@ mod tests {
         // Should count nested file and both subdirs
         assert!(all_text.contains("1")); // 1 file
         assert!(all_text.contains("2")); // 2 subdirs (a, b)
+    }
+
+    // === Notebook rendering tests ===
+
+    #[test]
+    fn notebook_basic_rendering() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("test.ipynb");
+        let notebook = r##"{
+            "cells": [
+                {
+                    "cell_type": "code",
+                    "source": ["print('hello')\n", "x = 1"],
+                    "outputs": [
+                        {
+                            "output_type": "stream",
+                            "text": ["hello\n"]
+                        }
+                    ]
+                },
+                {
+                    "cell_type": "markdown",
+                    "source": ["# Title"]
+                }
+            ],
+            "metadata": {
+                "kernelspec": {
+                    "language": "python"
+                }
+            }
+        }"##;
+        let mut f = File::create(&path).unwrap();
+        f.write_all(notebook.as_bytes()).unwrap();
+
+        let ss = SyntaxSet::load_defaults_newlines();
+        let theme = load_theme(None);
+        let (lines, total) = load_notebook_content(&path, &ss, &theme);
+        assert!(total > 0);
+        let all_text: String = lines
+            .iter()
+            .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
+            .collect();
+        assert!(all_text.contains("Cell 1"));
+        assert!(all_text.contains("code"));
+        assert!(all_text.contains("Cell 2"));
+        assert!(all_text.contains("markdown"));
+        assert!(all_text.contains("[Out]"));
+        assert!(all_text.contains("hello"));
+    }
+
+    #[test]
+    fn notebook_execute_result_output() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("test2.ipynb");
+        let notebook = r#"{
+            "cells": [
+                {
+                    "cell_type": "code",
+                    "source": ["42"],
+                    "outputs": [
+                        {
+                            "output_type": "execute_result",
+                            "data": {
+                                "text/plain": ["42"]
+                            }
+                        }
+                    ]
+                }
+            ],
+            "metadata": {}
+        }"#;
+        let mut f = File::create(&path).unwrap();
+        f.write_all(notebook.as_bytes()).unwrap();
+
+        let ss = SyntaxSet::load_defaults_newlines();
+        let theme = load_theme(None);
+        let (lines, _) = load_notebook_content(&path, &ss, &theme);
+        let all_text: String = lines
+            .iter()
+            .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
+            .collect();
+        assert!(all_text.contains("[Out]"));
+        assert!(all_text.contains("42"));
+    }
+
+    #[test]
+    fn notebook_invalid_json() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("bad.ipynb");
+        let mut f = File::create(&path).unwrap();
+        f.write_all(b"not json").unwrap();
+
+        let ss = SyntaxSet::load_defaults_newlines();
+        let theme = load_theme(None);
+        let (lines, total) = load_notebook_content(&path, &ss, &theme);
+        assert_eq!(total, 1);
+        let text: String = lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(text.contains("Error"));
+    }
+
+    #[test]
+    fn notebook_no_cells() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("empty.ipynb");
+        let mut f = File::create(&path).unwrap();
+        f.write_all(b"{}").unwrap();
+
+        let ss = SyntaxSet::load_defaults_newlines();
+        let theme = load_theme(None);
+        let (lines, total) = load_notebook_content(&path, &ss, &theme);
+        assert_eq!(total, 1);
+        let text: String = lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(text.contains("no cells"));
+    }
+
+    // === ANSI strip tests ===
+
+    #[test]
+    fn strip_ansi_removes_codes() {
+        assert_eq!(strip_ansi("hello"), "hello");
+        assert_eq!(strip_ansi("\x1b[31mred\x1b[0m"), "red");
+        assert_eq!(strip_ansi("\x1b[1;32mbold green\x1b[0m"), "bold green");
     }
 }

@@ -317,6 +317,24 @@ impl App {
 
         let path = item.path.clone();
 
+        // Check for notebook files
+        if path.extension().and_then(|e| e.to_str()) == Some("ipynb") {
+            let (lines, total) =
+                preview_content::load_notebook_content(&path, &self.syntax_set, &self.syntax_theme);
+            self.preview_state = PreviewState {
+                current_path: Some(path),
+                content_lines: lines,
+                scroll_offset: 0,
+                view_mode: ViewMode::default(),
+                line_wrap: false,
+                total_lines: total,
+                is_large_file: false,
+                head_lines: preview_content::DEFAULT_HEAD_LINES,
+                tail_lines: preview_content::DEFAULT_TAIL_LINES,
+            };
+            return;
+        }
+
         // Check if binary file
         if preview_content::is_binary_file(&path) {
             let (lines, total) = preview_content::load_binary_metadata(&path);

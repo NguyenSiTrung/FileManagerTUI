@@ -65,7 +65,23 @@ pub fn render(app: &mut App, frame: &mut Frame) {
                 .file_name()
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_else(|| "Preview".to_string());
-            format!(" {} ", name)
+            if path.extension().and_then(|e| e.to_str()) == Some("ipynb") {
+                // Count cells from content lines (cell headers start with ━━━)
+                let cell_count = app
+                    .preview_state
+                    .content_lines
+                    .iter()
+                    .filter(|l| {
+                        l.spans
+                            .first()
+                            .map(|s| s.content.starts_with('━'))
+                            .unwrap_or(false)
+                    })
+                    .count();
+                format!(" Notebook: {} cells ", cell_count)
+            } else {
+                format!(" {} ", name)
+            }
         }
         None => " Preview ".to_string(),
     };

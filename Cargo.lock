@@ -300,6 +300,7 @@ dependencies = [
  "clap",
  "crossterm",
  "ratatui",
+ "serde_json",
  "syntect",
  "tempfile",
  "thiserror 1.0.69",
