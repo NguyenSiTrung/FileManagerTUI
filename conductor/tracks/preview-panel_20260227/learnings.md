@@ -46,3 +46,19 @@ Patterns, gotchas, and context discovered during implementation.
   - Gotchas: `fast_line_count` must handle files without trailing newline (check for content if newline count is 0)
   - Context: ViewMode cycling only applies when `is_large_file` is true — noop for normal files
 ---
+
+## [2026-02-27] - Phase 5-6: Special Content Types + Integration & Polish
+- **Implemented:** Binary file detection (extension + null-byte scan), metadata display, directory summary preview, Jupyter notebook cell rendering, integration tests, edge case tests
+- **Files changed:** src/preview_content.rs, src/app.rs, src/ui.rs, Cargo.toml
+- **Commits:** 1b297dd, 67d46fb, b65a0a9, f8f085b, 774e8bb
+- **Learnings:**
+  - Patterns: Use `vec![...]` macro instead of `Vec::new()` + `.push()` chains — clippy enforces this
+  - Patterns: Binary detection: check known extensions first (fast), then null-byte scan in 8KB (fallback)
+  - Patterns: Use `r##"..."##` for raw strings that contain `"#` sequences (notebook JSON with markdown headers)
+  - Patterns: Use iterative stack-based directory walk with entry cap (10K) to prevent hanging on huge trees
+  - Patterns: Notebook source fields can be String or Array<String> — handle both with `extract_notebook_text()`
+  - Patterns: Strip ANSI escape codes from notebook error tracebacks for clean display
+  - Gotchas: `detect_syntax_name` returns `&str` with lifetime tied to argument — bind format! result to a let before passing
+  - Gotchas: `.ipynb` is in the extension-to-syntax map as "Python" — must check for notebook _before_ normal file loading
+  - Context: `serde_json` added as dependency for notebook parsing (not using serde derive, just Value-based parsing)
+---

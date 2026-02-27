@@ -87,18 +87,18 @@
 
 ## Phase 5: Special Content Types
 
-- [ ] Task 1: Binary file detection and metadata display
+- [x] Task 1: Binary file detection and metadata display
   - Known binary extension list + null-byte scan in first 8KB
   - Display: filename, human-readable size, modified time, permissions
   - Show "[Binary file — cannot preview]" message
   - Tests for detection logic
 
-- [ ] Task 2: Directory summary preview
+- [x] Task 2: Directory summary preview
   - When selected item is a directory, show: name, file count, subdir count, total size
   - Compute on demand (non-recursive for very deep trees, cap depth or file count)
   - Tests for directory summary
 
-- [ ] Task 3: Jupyter notebook `.ipynb` cell rendering
+- [x] Task 3: Jupyter notebook `.ipynb` cell rendering
   - Parse `.ipynb` JSON: extract cells array
   - Render cell headers with index and type (markdown/code/raw)
   - Display cell source with syntax highlighting for code cells
@@ -107,11 +107,11 @@
   - Show "Notebook: N cells" in preview title
   - Tests for notebook parsing
 
-- [ ] Task: Conductor - Phase Verification 'Special Content Types' (Protocol in workflow.md)
+- [x] Task: Conductor - Phase Verification 'Special Content Types' (Protocol in workflow.md)
 
 ## Phase 6: Integration Testing & Polish
 
-- [ ] Task 1: Integration tests for preview functionality
+- [x] Task 1: Integration tests for preview functionality
   - Test split layout renders without panic
   - Test preview updates on selection change
   - Test focus toggle and scroll keys
@@ -120,7 +120,7 @@
   - Test directory summary
   - Test notebook rendering
 
-- [ ] Task 2: Edge cases and polish
+- [x] Task 2: Edge cases and polish
   - Empty file preview
   - Permission-denied file preview (show error in panel)
   - Symlink file preview (follow target)
@@ -128,4 +128,4 @@
   - Zero-byte files
   - Run `cargo test`, `cargo clippy -- -D warnings`, `cargo fmt --check`
 
-- [ ] Task: Conductor - Phase Verification 'Integration Testing & Polish' (Protocol in workflow.md)
+- [x] Task: Conductor - Phase Verification 'Integration Testing & Polish' (Protocol in workflow.md)
