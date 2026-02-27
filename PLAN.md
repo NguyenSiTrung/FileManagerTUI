@@ -838,32 +838,32 @@ jobs:
 
 ## 12. Milestones
 
-### Milestone 1: Core Loop + Tree Rendering
+### Milestone 1: Core Loop + Tree Rendering ✅
 **Goal**: Navigate a folder tree in the terminal.
 
-- [ ] Project setup: `Cargo.toml`, dependencies, directory structure
-- [ ] `main.rs`: Terminal init/restore with crossterm
-- [ ] `event.rs`: Basic event loop (poll crossterm key events)
-- [ ] `fs/tree.rs`: `TreeNode` struct with lazy directory loading
-- [ ] `components/tree.rs`: Render tree as `StatefulWidget` with indentation
-- [ ] `handler.rs`: Navigation keys (j/k, Enter/Backspace, expand/collapse)
-- [ ] `ui.rs`: Single-panel layout (tree only)
-- [ ] `app.rs`: Basic app state (selected index, scroll offset)
+- [x] Project setup: `Cargo.toml`, dependencies, directory structure
+- [x] `main.rs`: Terminal init/restore with crossterm
+- [x] `event.rs`: Basic event loop (poll crossterm key events)
+- [x] `fs/tree.rs`: `TreeNode` struct with lazy directory loading
+- [x] `components/tree.rs`: Render tree as `StatefulWidget` with indentation
+- [x] `handler.rs`: Navigation keys (j/k, Enter/Backspace, expand/collapse)
+- [x] `ui.rs`: Single-panel layout (tree only)
+- [x] `app.rs`: Basic app state (selected index, scroll offset)
 
 **Deliverable**: Can launch `fm /path`, see folder tree, navigate with keyboard.
 
 ---
 
-### Milestone 2: File Operations + Dialogs
+### Milestone 2: File Operations + Dialogs ✅
 **Goal**: Create, rename, delete files and directories.
 
-- [ ] `components/dialog.rs`: Modal input dialog widget
-- [ ] `components/dialog.rs`: Confirmation dialog widget
-- [ ] `fs/operations.rs`: `create_file`, `create_dir`, `rename`, `delete`
-- [ ] `handler.rs`: Wire up `a`, `A`, `r`, `d` keys to dialogs
-- [ ] `app.rs`: `AppMode::Dialog` state transitions
-- [ ] `components/status_bar.rs`: Show success/error messages
-- [ ] Error handling: Display fs errors in dialog
+- [x] `components/dialog.rs`: Modal input dialog widget
+- [x] `components/dialog.rs`: Confirmation dialog widget
+- [x] `fs/operations.rs`: `create_file`, `create_dir`, `rename`, `delete`
+- [x] `handler.rs`: Wire up `a`, `A`, `r`, `d` keys to dialogs
+- [x] `app.rs`: `AppMode::Dialog` state transitions
+- [x] `components/status_bar.rs`: Show success/error messages
+- [x] Error handling: Display fs errors in dialog
 
 **Deliverable**: Can create, rename, delete files/dirs with confirmation.
 
