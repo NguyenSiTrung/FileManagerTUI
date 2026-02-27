@@ -22,3 +22,8 @@ build/
 
 # Beads (local tracking)
 .beads/
+
+
+# Added by cargo
+
+/target
