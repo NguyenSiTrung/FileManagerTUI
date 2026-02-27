@@ -1,0 +1,32 @@
+{
+  "track_id": "core-loop-tree_20260227",
+  "type": "feature",
+  "status": "new",
+  "priority": "high",
+  "depends_on": [],
+  "estimated_hours": null,
+  "created_at": "2026-02-27T00:00:00Z",
+  "updated_at": "2026-02-27T00:00:00Z",
+  "description": "Core Loop + Tree Rendering — Navigate a folder tree in the terminal: project setup, terminal init, event loop, TreeNode with lazy loading, tree widget rendering, keyboard navigation, and basic app state.",
+  "beads_epic": "FileManagerTUI-zzi",
+  "beads_tasks": {
+    "phase1": "FileManagerTUI-zzi.1",
+    "phase1_task1": "FileManagerTUI-zzi.1.1",
+    "phase1_task2": "FileManagerTUI-zzi.1.2",
+    "phase2": "FileManagerTUI-zzi.2",
+    "phase2_task1": "FileManagerTUI-zzi.2.1",
+    "phase2_task2": "FileManagerTUI-zzi.2.2",
+    "phase2_task3": "FileManagerTUI-zzi.2.3",
+    "phase3": "FileManagerTUI-zzi.3",
+    "phase3_task1": "FileManagerTUI-zzi.3.1",
+    "phase3_task2": "FileManagerTUI-zzi.3.2",
+    "phase3_task3": "FileManagerTUI-zzi.3.3",
+    "phase4": "FileManagerTUI-zzi.4",
+    "phase4_task1": "FileManagerTUI-zzi.4.1",
+    "phase4_task2": "FileManagerTUI-zzi.4.2",
+    "phase4_task3": "FileManagerTUI-zzi.4.3",
+    "phase5": "FileManagerTUI-zzi.5",
+    "phase5_task1": "FileManagerTUI-zzi.5.1",
+    "phase5_task2": "FileManagerTUI-zzi.5.2"
+  }
+}
