@@ -869,17 +869,17 @@ jobs:
 
 ---
 
-### Milestone 3: Preview Panel + Syntax Highlighting
+### Milestone 3: Preview Panel + Syntax Highlighting ✅
 **Goal**: See file contents alongside the tree.
 
-- [ ] `ui.rs`: Split layout — tree (left 40%) + preview (right 60%)
-- [ ] `components/preview.rs`: Full text preview with `syntect` highlighting
-- [ ] Preview: Large file head+tail mode with configurable line counts
-- [ ] Preview: Binary file metadata display
-- [ ] Preview: Directory summary (file count, total size)
-- [ ] Preview: `.ipynb` notebook cell rendering
-- [ ] `handler.rs`: `Tab` to switch focus, scroll keys in preview
-- [ ] Syntax detection by extension + shebang fallback
+- [x] `ui.rs`: Split layout — tree (left 40%) + preview (right 60%)
+- [x] `components/preview.rs`: Full text preview with `syntect` highlighting
+- [x] Preview: Large file head+tail mode with configurable line counts
+- [x] Preview: Binary file metadata display
+- [x] Preview: Directory summary (file count, total size)
+- [x] Preview: `.ipynb` notebook cell rendering
+- [x] `handler.rs`: `Tab` to switch focus, scroll keys in preview
+- [x] Syntax detection by extension + shebang fallback
 
 **Deliverable**: Selecting a file shows syntax-highlighted preview; large files
 show head+tail.
@@ -934,7 +934,7 @@ automatically in the tree.
 **Goal**: Production-ready with customization.
 
 - [ ] `config.rs`: Load from TOML file + CLI args + defaults
-- [ ] CLI argument parsing with `clap`
+- [x] CLI argument parsing with `clap` (basic path arg only; full options pending)
 - [ ] Theme support: dark / light / custom colors
 - [ ] Help overlay (`?` key): show all keybindings
 - [ ] Mouse support (optional): click to select, scroll wheel
