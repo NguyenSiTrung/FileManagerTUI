@@ -14,6 +14,9 @@ use crate::fs::tree::NodeType;
 
 /// Render the application UI.
 pub fn render(app: &mut App, frame: &mut Frame) {
+    // Update preview when selection changes
+    app.update_preview();
+
     let area = frame.area();
 
     // Split into main area + status bar (1 line)

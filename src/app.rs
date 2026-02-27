@@ -2,9 +2,12 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use ratatui::text::Line;
+use syntect::highlighting::Theme;
+use syntect::parsing::SyntaxSet;
 
 use crate::error::Result;
 use crate::fs::tree::{NodeType, TreeState};
+use crate::preview_content;
 
 /// The kind of dialog being displayed.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -80,16 +83,21 @@ pub struct App {
     pub dialog_state: DialogState,
     #[allow(dead_code)]
     pub status_message: Option<(String, Instant)>,
-    #[allow(dead_code)]
     pub preview_state: PreviewState,
     #[allow(dead_code)]
     pub focused_panel: FocusedPanel,
+    pub syntax_set: SyntaxSet,
+    pub syntax_theme: Theme,
+    /// Tracks which tree index was last previewed, to avoid re-loading on every frame.
+    pub last_previewed_index: Option<usize>,
 }
 
 impl App {
     /// Create a new App rooted at the given path.
     pub fn new(path: &Path) -> Result<Self> {
         let tree_state = TreeState::new(path)?;
+        let syntax_set = SyntaxSet::load_defaults_newlines();
+        let syntax_theme = preview_content::load_theme(None);
         Ok(Self {
             tree_state,
             should_quit: false,
@@ -98,6 +106,9 @@ impl App {
             status_message: None,
             preview_state: PreviewState::default(),
             focused_panel: FocusedPanel::default(),
+            syntax_set,
+            syntax_theme,
+            last_previewed_index: None,
         })
     }
 
@@ -267,6 +278,38 @@ impl App {
     pub fn preview_half_page_up(&mut self, visible_height: usize) {
         let half = visible_height / 2;
         self.preview_state.scroll_offset = self.preview_state.scroll_offset.saturating_sub(half);
+    }
+
+    /// Update preview content when the selected tree item changes.
+    pub fn update_preview(&mut self) {
+        let idx = self.tree_state.selected_index;
+        if self.last_previewed_index == Some(idx) {
+            return; // No change
+        }
+        self.last_previewed_index = Some(idx);
+
+        let item = match self.tree_state.flat_items.get(idx) {
+            Some(item) => item,
+            None => return,
+        };
+
+        // Only preview files, not directories
+        if item.node_type != NodeType::File {
+            self.preview_state = PreviewState::default();
+            return;
+        }
+
+        let path = item.path.clone();
+        let (lines, total) =
+            preview_content::load_highlighted_content(&path, &self.syntax_set, &self.syntax_theme);
+        self.preview_state = PreviewState {
+            current_path: Some(path),
+            content_lines: lines,
+            scroll_offset: 0,
+            view_mode: ViewMode::default(),
+            line_wrap: false,
+            total_lines: total,
+        };
     }
 
     /// Quit the application.

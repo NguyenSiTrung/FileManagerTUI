@@ -4,6 +4,7 @@ mod error;
 mod event;
 mod fs;
 mod handler;
+mod preview_content;
 mod tui;
 mod ui;
 

@@ -10,6 +10,7 @@ crossterm = "0.28"
 tokio = { version = "1", features = ["full"] }
 thiserror = "1"
 clap = { version = "4", features = ["derive"] }
+syntect = "5"
 
 [dev-dependencies]
 tempfile = "3"
