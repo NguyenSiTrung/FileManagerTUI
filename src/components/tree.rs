@@ -112,10 +112,18 @@ impl<'a> Widget for TreeWidget<'a> {
             let prefix = Self::build_prefix(item, items, idx);
             let indicator = Self::dir_indicator(item);
 
-            let style = if idx == selected {
+            let is_selected = idx == selected;
+            let is_multi_selected = self.tree_state.multi_selected.contains(&idx);
+
+            let style = if is_selected {
                 Style::default()
                     .bg(Color::DarkGray)
                     .fg(Color::White)
+                    .add_modifier(Modifier::BOLD)
+            } else if is_multi_selected {
+                Style::default()
+                    .bg(Color::Rgb(40, 40, 80))
+                    .fg(Color::Yellow)
                     .add_modifier(Modifier::BOLD)
             } else {
                 match item.node_type {
@@ -127,7 +135,8 @@ impl<'a> Widget for TreeWidget<'a> {
                 }
             };
 
-            let line_content = format!("{}{}{}", prefix, indicator, item.name);
+            let marker = if is_multi_selected { "● " } else { "" };
+            let line_content = format!("{}{}{}{}", prefix, marker, indicator, item.name);
             let span = Span::styled(line_content, style);
             let line = Line::from(span);
 
