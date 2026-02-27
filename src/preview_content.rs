@@ -1311,4 +1311,73 @@ mod tests {
         assert_eq!(strip_ansi("\x1b[31mred\x1b[0m"), "red");
         assert_eq!(strip_ansi("\x1b[1;32mbold green\x1b[0m"), "bold green");
     }
+
+    // === Edge case tests ===
+
+    #[test]
+    fn highlight_empty_file_shows_placeholder() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("empty.txt");
+        File::create(&path).unwrap();
+
+        let ss = SyntaxSet::load_defaults_newlines();
+        let theme = load_theme(None);
+        let (lines, total) = load_highlighted_content(&path, &ss, &theme);
+        assert_eq!(total, 1);
+        let text: String = lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(text.contains("empty file"));
+    }
+
+    #[test]
+    fn highlight_permission_denied_shows_error() {
+        let ss = SyntaxSet::load_defaults_newlines();
+        let theme = load_theme(None);
+        // Non-existent path simulates permission denied scenario
+        let (lines, total) = load_highlighted_content(Path::new("/nonexistent/file"), &ss, &theme);
+        assert_eq!(total, 1);
+        let text: String = lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(text.contains("Error"));
+    }
+
+    #[test]
+    fn binary_detection_empty_file_not_binary() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("empty.dat");
+        File::create(&path).unwrap();
+        // Empty file with unknown extension should not be binary (no null bytes)
+        assert!(!is_binary_file(&path));
+    }
+
+    #[test]
+    fn format_size_large_values() {
+        assert_eq!(format_size(1024 * 1024 * 1024 * 1024), "1.00 TB");
+    }
+
+    #[test]
+    fn notebook_source_as_string() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("str_source.ipynb");
+        let notebook =
+            r#"{"cells":[{"cell_type":"code","source":"x=1","outputs":[]}],"metadata":{}}"#;
+        let mut f = File::create(&path).unwrap();
+        f.write_all(notebook.as_bytes()).unwrap();
+
+        let ss = SyntaxSet::load_defaults_newlines();
+        let theme = load_theme(None);
+        let (lines, total) = load_notebook_content(&path, &ss, &theme);
+        assert!(total > 0);
+        let all_text: String = lines
+            .iter()
+            .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
+            .collect();
+        assert!(all_text.contains("Cell 1"));
+    }
+
+    #[test]
+    fn zero_byte_file_line_count() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("zero.txt");
+        File::create(&path).unwrap();
+        assert_eq!(fast_line_count(&path).unwrap(), 0);
+    }
 }
