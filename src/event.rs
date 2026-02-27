@@ -1,9 +1,39 @@
+use std::path::PathBuf;
 use std::time::Duration;
 
 use crossterm::event::{self, Event as CrosstermEvent, KeyEvent};
 use tokio::sync::mpsc;
 
 use crate::error::Result;
+
+/// Progress update from an async file operation.
+#[derive(Debug, Clone)]
+pub struct ProgressUpdate {
+    /// Current file being processed.
+    pub current_file: String,
+    /// Index of current item (1-based).
+    pub current: usize,
+    /// Total number of items.
+    pub total: usize,
+}
+
+/// Result of a completed async operation.
+#[derive(Debug)]
+pub struct OperationResult {
+    /// Number of successfully processed items.
+    pub success_count: usize,
+    /// Error messages, if any.
+    pub errors: Vec<String>,
+    /// Paths that were created (for undo support).
+    #[allow(dead_code)]
+    pub created_paths: Vec<PathBuf>,
+    /// Source paths that were involved (for tree refresh).
+    pub source_paths: Vec<PathBuf>,
+    /// Destination directory.
+    pub dest_dir: PathBuf,
+    /// Whether this was a cut (move) operation.
+    pub was_cut: bool,
+}
 
 /// Application events.
 #[derive(Debug)]
@@ -15,12 +45,16 @@ pub enum Event {
     /// Terminal resize event.
     #[allow(dead_code)]
     Resize(u16, u16),
+    /// Progress update from an async file operation.
+    Progress(ProgressUpdate),
+    /// Async file operation completed.
+    OperationComplete(OperationResult),
 }
 
 /// Async event handler that polls crossterm events and forwards them via a channel.
 pub struct EventHandler {
     rx: mpsc::UnboundedReceiver<Event>,
-    _tx: mpsc::UnboundedSender<Event>,
+    tx: mpsc::UnboundedSender<Event>,
 }
 
 impl EventHandler {
@@ -51,7 +85,12 @@ impl EventHandler {
             }
         });
 
-        Self { rx, _tx: tx }
+        Self { rx, tx }
+    }
+
+    /// Get a sender clone for async tasks to send progress/completion events.
+    pub fn sender(&self) -> mpsc::UnboundedSender<Event> {
+        self.tx.clone()
     }
 
     /// Receive the next event (blocks until available).

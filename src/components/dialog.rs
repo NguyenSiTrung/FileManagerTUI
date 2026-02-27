@@ -52,6 +52,13 @@ impl<'a> Widget for DialogWidget<'a> {
             DialogKind::Error { message } => {
                 render_error_dialog(message, area, buf);
             }
+            DialogKind::Progress {
+                message,
+                current,
+                total,
+            } => {
+                render_progress_dialog(message, *current, *total, area, buf);
+            }
         }
     }
 }
@@ -217,6 +224,60 @@ fn render_error_dialog(message: &str, area: Rect, buf: &mut Buffer) {
         .add_modifier(Modifier::DIM);
     let hint_line = Line::from(Span::styled(hint, hint_style));
     if inner.height > 1 {
+        buf.set_line(inner.x, inner.y + inner.height - 1, &hint_line, inner.width);
+    }
+}
+
+fn render_progress_dialog(
+    current_file: &str,
+    current: usize,
+    total: usize,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    let dialog_width = 50.min(area.width.saturating_sub(4));
+    let dialog_height = 6;
+    let rect = DialogWidget::centered_rect(dialog_width, dialog_height, area);
+
+    Clear.render(rect, buf);
+
+    let title = format!(" Processing {}/{} ", current, total);
+    let block = Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Yellow))
+        .padding(Padding::horizontal(1));
+
+    let inner = block.inner(rect);
+    block.render(rect, buf);
+
+    if inner.height == 0 || inner.width == 0 {
+        return;
+    }
+
+    // Current file being processed
+    let file_line = Line::from(Span::styled(
+        current_file.to_string(),
+        Style::default().fg(Color::White),
+    ));
+    buf.set_line(inner.x, inner.y, &file_line, inner.width);
+
+    // Simple progress bar
+    if inner.height > 1 && total > 0 {
+        let bar_width = inner.width as usize;
+        let filled = (current * bar_width) / total;
+        let bar: String = "█".repeat(filled) + &"░".repeat(bar_width.saturating_sub(filled));
+        let bar_line = Line::from(Span::styled(bar, Style::default().fg(Color::Cyan)));
+        buf.set_line(inner.x, inner.y + 1, &bar_line, inner.width);
+    }
+
+    // Hint at bottom
+    let hint = "[Esc] Cancel";
+    let hint_style = Style::default()
+        .fg(Color::DarkGray)
+        .add_modifier(Modifier::DIM);
+    let hint_line = Line::from(Span::styled(hint, hint_style));
+    if inner.height > 2 {
         buf.set_line(inner.x, inner.y + inner.height - 1, &hint_line, inner.width);
     }
 }

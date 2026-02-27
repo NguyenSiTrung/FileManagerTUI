@@ -1,9 +1,12 @@
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Instant;
 
 use ratatui::text::Line;
 use syntect::highlighting::Theme;
 use syntect::parsing::SyntaxSet;
+use tokio::sync::mpsc;
 
 use crate::error::Result;
 use crate::fs::clipboard::{ClipboardOp, ClipboardState};
@@ -16,9 +19,20 @@ use crate::preview_content;
 pub enum DialogKind {
     CreateFile,
     CreateDirectory,
-    Rename { original: PathBuf },
-    DeleteConfirm { targets: Vec<PathBuf> },
-    Error { message: String },
+    Rename {
+        original: PathBuf,
+    },
+    DeleteConfirm {
+        targets: Vec<PathBuf>,
+    },
+    Error {
+        message: String,
+    },
+    Progress {
+        message: String,
+        current: usize,
+        total: usize,
+    },
 }
 
 /// Which panel currently has focus.
@@ -99,6 +113,8 @@ pub struct App {
     pub last_previewed_index: Option<usize>,
     /// Internal clipboard for copy/cut/paste operations.
     pub clipboard: ClipboardState,
+    /// Cancellation token for async operations.
+    pub cancel_token: Arc<AtomicBool>,
 }
 
 impl App {
@@ -119,6 +135,7 @@ impl App {
             syntax_theme,
             last_previewed_index: None,
             clipboard: ClipboardState::new(),
+            cancel_token: Arc::new(AtomicBool::new(false)),
         })
     }
 
@@ -296,8 +313,9 @@ impl App {
         ));
     }
 
-    /// Paste clipboard contents into the current directory.
-    pub fn paste_clipboard(&mut self) {
+    /// Paste clipboard contents — async version that spawns a tokio task.
+    pub fn paste_clipboard_async(&mut self, event_tx: mpsc::UnboundedSender<crate::event::Event>) {
+        use crate::event::{Event, OperationResult, ProgressUpdate};
         use crate::fs::operations;
 
         if self.clipboard.is_empty() {
@@ -308,58 +326,121 @@ impl App {
         let dest_dir = self.current_dir();
         let op = self.clipboard.operation;
         let paths = self.clipboard.paths.clone();
-        let mut errors = Vec::new();
-        let mut success_count = 0;
+        let cancel = self.cancel_token.clone();
 
-        for src in &paths {
-            let result = match op {
-                Some(ClipboardOp::Copy) => operations::copy_recursive(src, &dest_dir).map(|_| ()),
-                Some(ClipboardOp::Cut) => operations::move_item(src, &dest_dir).map(|_| ()),
-                None => continue,
-            };
-            match result {
-                Ok(()) => success_count += 1,
-                Err(e) => errors.push(format!(
-                    "{}: {}",
-                    src.file_name()
-                        .map(|n| n.to_string_lossy().to_string())
-                        .unwrap_or_default(),
-                    e
-                )),
+        // Reset cancel token
+        cancel.store(false, Ordering::SeqCst);
+
+        // Show progress dialog
+        self.open_dialog(DialogKind::Progress {
+            message: "Preparing...".to_string(),
+            current: 0,
+            total: paths.len(),
+        });
+
+        let was_cut = op == Some(ClipboardOp::Cut);
+
+        tokio::spawn(async move {
+            let total = paths.len();
+            let mut success_count = 0;
+            let mut errors = Vec::new();
+            let mut created_paths = Vec::new();
+
+            for (i, src) in paths.iter().enumerate() {
+                if cancel.load(Ordering::SeqCst) {
+                    break;
+                }
+
+                let filename = src
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
+
+                let _ = event_tx.send(Event::Progress(ProgressUpdate {
+                    current_file: filename,
+                    current: i + 1,
+                    total,
+                }));
+
+                let result = match op {
+                    Some(ClipboardOp::Copy) => operations::copy_recursive(src, &dest_dir),
+                    Some(ClipboardOp::Cut) => operations::move_item(src, &dest_dir),
+                    None => continue,
+                };
+
+                match result {
+                    Ok(created) => {
+                        success_count += 1;
+                        created_paths.push(created);
+                    }
+                    Err(e) => errors.push(format!(
+                        "{}: {}",
+                        src.file_name()
+                            .map(|n| n.to_string_lossy().to_string())
+                            .unwrap_or_default(),
+                        e
+                    )),
+                }
             }
-        }
 
-        // Clear clipboard after cut (move) operation
-        if op == Some(ClipboardOp::Cut) && errors.is_empty() {
-            self.clipboard.clear();
-        }
+            let _ = event_tx.send(Event::OperationComplete(OperationResult {
+                success_count,
+                errors,
+                created_paths,
+                source_paths: paths,
+                dest_dir,
+                was_cut,
+            }));
+        });
+    }
 
-        // Refresh affected directories
-        self.tree_state.reload_dir(&dest_dir);
-        // For cut operations, also reload source parents
-        if op == Some(ClipboardOp::Cut) {
-            for src in &paths {
+    /// Handle an async operation completion.
+    pub fn handle_operation_complete(&mut self, result: crate::event::OperationResult) {
+        self.close_dialog();
+
+        // Refresh dest dir
+        self.tree_state.reload_dir(&result.dest_dir);
+
+        // For cut/move, also refresh source parents
+        if result.was_cut {
+            for src in &result.source_paths {
                 if let Some(parent) = src.parent() {
                     self.tree_state.reload_dir(parent);
                 }
             }
+            // Clear clipboard after successful cut
+            if result.errors.is_empty() {
+                self.clipboard.clear();
+            }
         }
 
-        if errors.is_empty() {
-            let op_name = match op {
-                Some(ClipboardOp::Copy) => "Pasted",
-                Some(ClipboardOp::Cut) => "Moved",
-                None => "Done",
-            };
+        if result.errors.is_empty() {
+            let op_name = if result.was_cut { "Moved" } else { "Pasted" };
             self.set_status_message(format!(
                 "{} {} item{}",
                 op_name,
-                success_count,
-                if success_count == 1 { "" } else { "s" }
+                result.success_count,
+                if result.success_count == 1 { "" } else { "s" }
             ));
         } else {
-            self.set_status_message(format!("Error: {}", errors.join("; ")));
+            self.set_status_message(format!("Error: {}", result.errors.join("; ")));
         }
+    }
+
+    /// Handle a progress update from an async operation.
+    pub fn handle_progress(&mut self, update: crate::event::ProgressUpdate) {
+        if let AppMode::Dialog(DialogKind::Progress { .. }) = &self.mode {
+            self.mode = AppMode::Dialog(DialogKind::Progress {
+                message: update.current_file,
+                current: update.current,
+                total: update.total,
+            });
+        }
+    }
+
+    /// Cancel an ongoing async operation.
+    pub fn cancel_operation(&mut self) {
+        self.cancel_token.store(true, Ordering::SeqCst);
     }
 
     /// Scroll preview down by one line.

@@ -1,17 +1,19 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use tokio::sync::mpsc;
 
 use crate::app::{App, AppMode, DialogKind, FocusedPanel};
+use crate::event::Event;
 use crate::fs::operations;
 
 /// Handle a key event and dispatch to the appropriate app method.
-pub fn handle_key_event(app: &mut App, key: KeyEvent) {
+pub fn handle_key_event(app: &mut App, key: KeyEvent, event_tx: &mpsc::UnboundedSender<Event>) {
     match &app.mode {
-        AppMode::Normal => handle_normal_mode(app, key),
+        AppMode::Normal => handle_normal_mode(app, key, event_tx),
         AppMode::Dialog(_) => handle_dialog_mode(app, key),
     }
 }
 
-fn handle_normal_mode(app: &mut App, key: KeyEvent) {
+fn handle_normal_mode(app: &mut App, key: KeyEvent, event_tx: &mpsc::UnboundedSender<Event>) {
     // Global keys (work regardless of focus)
     match key.code {
         KeyCode::Char('q') => {
@@ -31,12 +33,12 @@ fn handle_normal_mode(app: &mut App, key: KeyEvent) {
 
     // Dispatch based on focused panel
     match app.focused_panel {
-        FocusedPanel::Tree => handle_tree_keys(app, key),
+        FocusedPanel::Tree => handle_tree_keys(app, key, event_tx),
         FocusedPanel::Preview => handle_preview_keys(app, key),
     }
 }
 
-fn handle_tree_keys(app: &mut App, key: KeyEvent) {
+fn handle_tree_keys(app: &mut App, key: KeyEvent, event_tx: &mpsc::UnboundedSender<Event>) {
     match key.code {
         // Navigation
         KeyCode::Char('j') | KeyCode::Down => app.select_next(),
@@ -60,7 +62,7 @@ fn handle_tree_keys(app: &mut App, key: KeyEvent) {
         // Clipboard operations
         KeyCode::Char('y') => app.copy_to_clipboard(),
         KeyCode::Char('x') => app.cut_to_clipboard(),
-        KeyCode::Char('p') => app.paste_clipboard(),
+        KeyCode::Char('p') => app.paste_clipboard_async(event_tx.clone()),
 
         // File operations — open dialogs
         KeyCode::Char('a') => app.open_dialog(DialogKind::CreateFile),
@@ -132,6 +134,9 @@ fn handle_dialog_mode(app: &mut App, key: KeyEvent) {
         }
         DialogKind::Error { .. } => {
             handle_error_dialog(app, key);
+        }
+        DialogKind::Progress { .. } => {
+            handle_progress_dialog(app, key);
         }
         _ => {
             handle_input_dialog(app, key, kind);
@@ -254,6 +259,14 @@ fn handle_error_dialog(app: &mut App, key: KeyEvent) {
     }
 }
 
+fn handle_progress_dialog(app: &mut App, key: KeyEvent) {
+    if key.code == KeyCode::Esc {
+        app.cancel_operation();
+        app.close_dialog();
+        app.set_status_message("Operation cancelled".to_string());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -279,6 +292,17 @@ mod tests {
         }
     }
 
+    fn make_event_tx() -> mpsc::UnboundedSender<Event> {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        tx
+    }
+
+    /// Test helper: handle_key_event with a dummy event sender.
+    fn handle_key(app: &mut App, key: KeyEvent) {
+        let tx = make_event_tx();
+        handle_key_event(app, key, &tx);
+    }
+
     fn setup_app() -> (TempDir, App) {
         let dir = TempDir::new().unwrap();
         fs::create_dir(dir.path().join("alpha")).unwrap();
@@ -294,7 +318,7 @@ mod tests {
     #[test]
     fn key_j_moves_down() {
         let (_dir, mut app) = setup_app();
-        handle_key_event(&mut app, make_key(KeyCode::Char('j')));
+        handle_key(&mut app, make_key(KeyCode::Char('j')));
         assert_eq!(app.tree_state.selected_index, 1);
     }
 
@@ -302,14 +326,14 @@ mod tests {
     fn key_k_moves_up() {
         let (_dir, mut app) = setup_app();
         app.tree_state.selected_index = 2;
-        handle_key_event(&mut app, make_key(KeyCode::Char('k')));
+        handle_key(&mut app, make_key(KeyCode::Char('k')));
         assert_eq!(app.tree_state.selected_index, 1);
     }
 
     #[test]
     fn key_down_arrow_moves_down() {
         let (_dir, mut app) = setup_app();
-        handle_key_event(&mut app, make_key(KeyCode::Down));
+        handle_key(&mut app, make_key(KeyCode::Down));
         assert_eq!(app.tree_state.selected_index, 1);
     }
 
@@ -317,7 +341,7 @@ mod tests {
     fn key_up_arrow_moves_up() {
         let (_dir, mut app) = setup_app();
         app.tree_state.selected_index = 1;
-        handle_key_event(&mut app, make_key(KeyCode::Up));
+        handle_key(&mut app, make_key(KeyCode::Up));
         assert_eq!(app.tree_state.selected_index, 0);
     }
 
@@ -325,14 +349,14 @@ mod tests {
     fn key_g_jumps_to_first() {
         let (_dir, mut app) = setup_app();
         app.tree_state.selected_index = 3;
-        handle_key_event(&mut app, make_key(KeyCode::Char('g')));
+        handle_key(&mut app, make_key(KeyCode::Char('g')));
         assert_eq!(app.tree_state.selected_index, 0);
     }
 
     #[test]
     fn key_shift_g_jumps_to_last() {
         let (_dir, mut app) = setup_app();
-        handle_key_event(&mut app, make_key(KeyCode::Char('G')));
+        handle_key(&mut app, make_key(KeyCode::Char('G')));
         assert_eq!(
             app.tree_state.selected_index,
             app.tree_state.flat_items.len() - 1
@@ -342,19 +366,19 @@ mod tests {
     #[test]
     fn key_enter_expands_directory() {
         let (_dir, mut app) = setup_app();
-        handle_key_event(&mut app, make_key(KeyCode::Char('j')));
+        handle_key(&mut app, make_key(KeyCode::Char('j')));
         assert_eq!(app.tree_state.flat_items[1].name, "alpha");
-        handle_key_event(&mut app, make_key(KeyCode::Enter));
+        handle_key(&mut app, make_key(KeyCode::Enter));
         assert!(app.tree_state.flat_items[1].is_expanded);
     }
 
     #[test]
     fn key_backspace_collapses_directory() {
         let (_dir, mut app) = setup_app();
-        handle_key_event(&mut app, make_key(KeyCode::Char('j')));
-        handle_key_event(&mut app, make_key(KeyCode::Enter));
+        handle_key(&mut app, make_key(KeyCode::Char('j')));
+        handle_key(&mut app, make_key(KeyCode::Enter));
         assert!(app.tree_state.flat_items[1].is_expanded);
-        handle_key_event(&mut app, make_key(KeyCode::Backspace));
+        handle_key(&mut app, make_key(KeyCode::Backspace));
         assert!(!app.tree_state.flat_items[1].is_expanded);
     }
 
@@ -362,21 +386,21 @@ mod tests {
     fn key_dot_toggles_hidden() {
         let (_dir, mut app) = setup_app();
         let before = app.tree_state.flat_items.len();
-        handle_key_event(&mut app, make_key(KeyCode::Char('.')));
+        handle_key(&mut app, make_key(KeyCode::Char('.')));
         assert!(app.tree_state.flat_items.len() > before);
     }
 
     #[test]
     fn key_q_quits() {
         let (_dir, mut app) = setup_app();
-        handle_key_event(&mut app, make_key(KeyCode::Char('q')));
+        handle_key(&mut app, make_key(KeyCode::Char('q')));
         assert!(app.should_quit);
     }
 
     #[test]
     fn key_ctrl_c_quits() {
         let (_dir, mut app) = setup_app();
-        handle_key_event(
+        handle_key(
             &mut app,
             make_key_with_modifiers(KeyCode::Char('c'), KeyModifiers::CONTROL),
         );
@@ -388,14 +412,14 @@ mod tests {
     #[test]
     fn key_a_opens_create_file_dialog() {
         let (_dir, mut app) = setup_app();
-        handle_key_event(&mut app, make_key(KeyCode::Char('a')));
+        handle_key(&mut app, make_key(KeyCode::Char('a')));
         assert!(matches!(app.mode, AppMode::Dialog(DialogKind::CreateFile)));
     }
 
     #[test]
     fn key_shift_a_opens_create_dir_dialog() {
         let (_dir, mut app) = setup_app();
-        handle_key_event(
+        handle_key(
             &mut app,
             make_key_with_modifiers(KeyCode::Char('A'), KeyModifiers::SHIFT),
         );
@@ -410,7 +434,7 @@ mod tests {
         let (_dir, mut app) = setup_app();
         // Select a file
         app.tree_state.selected_index = 3; // file_a.txt
-        handle_key_event(&mut app, make_key(KeyCode::Char('r')));
+        handle_key(&mut app, make_key(KeyCode::Char('r')));
         assert!(matches!(
             app.mode,
             AppMode::Dialog(DialogKind::Rename { .. })
@@ -422,7 +446,7 @@ mod tests {
     fn key_d_opens_delete_dialog() {
         let (_dir, mut app) = setup_app();
         app.tree_state.selected_index = 3; // file_a.txt
-        handle_key_event(&mut app, make_key(KeyCode::Char('d')));
+        handle_key(&mut app, make_key(KeyCode::Char('d')));
         assert!(matches!(
             app.mode,
             AppMode::Dialog(DialogKind::DeleteConfirm { .. })
@@ -433,7 +457,7 @@ mod tests {
     fn key_d_on_root_is_noop() {
         let (_dir, mut app) = setup_app();
         app.tree_state.selected_index = 0; // root
-        handle_key_event(&mut app, make_key(KeyCode::Char('d')));
+        handle_key(&mut app, make_key(KeyCode::Char('d')));
         assert!(matches!(app.mode, AppMode::Normal));
     }
 
@@ -443,7 +467,7 @@ mod tests {
     fn dialog_esc_closes() {
         let (_dir, mut app) = setup_app();
         app.open_dialog(DialogKind::CreateFile);
-        handle_key_event(&mut app, make_key(KeyCode::Esc));
+        handle_key(&mut app, make_key(KeyCode::Esc));
         assert!(matches!(app.mode, AppMode::Normal));
     }
 
@@ -451,10 +475,10 @@ mod tests {
     fn dialog_typing_inputs_chars() {
         let (_dir, mut app) = setup_app();
         app.open_dialog(DialogKind::CreateFile);
-        handle_key_event(&mut app, make_key(KeyCode::Char('t')));
-        handle_key_event(&mut app, make_key(KeyCode::Char('e')));
-        handle_key_event(&mut app, make_key(KeyCode::Char('s')));
-        handle_key_event(&mut app, make_key(KeyCode::Char('t')));
+        handle_key(&mut app, make_key(KeyCode::Char('t')));
+        handle_key(&mut app, make_key(KeyCode::Char('e')));
+        handle_key(&mut app, make_key(KeyCode::Char('s')));
+        handle_key(&mut app, make_key(KeyCode::Char('t')));
         assert_eq!(app.dialog_state.input, "test");
     }
 
@@ -462,9 +486,9 @@ mod tests {
     fn dialog_backspace_deletes() {
         let (_dir, mut app) = setup_app();
         app.open_dialog(DialogKind::CreateFile);
-        handle_key_event(&mut app, make_key(KeyCode::Char('a')));
-        handle_key_event(&mut app, make_key(KeyCode::Char('b')));
-        handle_key_event(&mut app, make_key(KeyCode::Backspace));
+        handle_key(&mut app, make_key(KeyCode::Char('a')));
+        handle_key(&mut app, make_key(KeyCode::Char('b')));
+        handle_key(&mut app, make_key(KeyCode::Backspace));
         assert_eq!(app.dialog_state.input, "a");
     }
 
@@ -474,13 +498,13 @@ mod tests {
     fn create_file_via_dialog() {
         let (dir, mut app) = setup_app();
         // Open create file dialog
-        handle_key_event(&mut app, make_key(KeyCode::Char('a')));
+        handle_key(&mut app, make_key(KeyCode::Char('a')));
         // Type filename
         for c in "new_file.txt".chars() {
-            handle_key_event(&mut app, make_key(KeyCode::Char(c)));
+            handle_key(&mut app, make_key(KeyCode::Char(c)));
         }
         // Confirm
-        handle_key_event(&mut app, make_key(KeyCode::Enter));
+        handle_key(&mut app, make_key(KeyCode::Enter));
         // Verify file was created
         assert!(dir.path().join("new_file.txt").exists());
         assert!(matches!(app.mode, AppMode::Normal));
@@ -490,14 +514,14 @@ mod tests {
     #[test]
     fn create_dir_via_dialog() {
         let (dir, mut app) = setup_app();
-        handle_key_event(
+        handle_key(
             &mut app,
             make_key_with_modifiers(KeyCode::Char('A'), KeyModifiers::SHIFT),
         );
         for c in "new_dir".chars() {
-            handle_key_event(&mut app, make_key(KeyCode::Char(c)));
+            handle_key(&mut app, make_key(KeyCode::Char(c)));
         }
-        handle_key_event(&mut app, make_key(KeyCode::Enter));
+        handle_key(&mut app, make_key(KeyCode::Enter));
         assert!(dir.path().join("new_dir").exists());
         assert!(dir.path().join("new_dir").is_dir());
     }
@@ -507,15 +531,15 @@ mod tests {
         let (dir, mut app) = setup_app();
         // Select file_a.txt (index 3)
         app.tree_state.selected_index = 3;
-        handle_key_event(&mut app, make_key(KeyCode::Char('r')));
+        handle_key(&mut app, make_key(KeyCode::Char('r')));
         // Clear existing name and type new one
         for _ in 0..app.dialog_state.input.len() {
-            handle_key_event(&mut app, make_key(KeyCode::Backspace));
+            handle_key(&mut app, make_key(KeyCode::Backspace));
         }
         for c in "renamed.txt".chars() {
-            handle_key_event(&mut app, make_key(KeyCode::Char(c)));
+            handle_key(&mut app, make_key(KeyCode::Char(c)));
         }
-        handle_key_event(&mut app, make_key(KeyCode::Enter));
+        handle_key(&mut app, make_key(KeyCode::Enter));
         assert!(!dir.path().join("file_a.txt").exists());
         assert!(dir.path().join("renamed.txt").exists());
     }
@@ -525,9 +549,9 @@ mod tests {
         let (dir, mut app) = setup_app();
         // Select file_a.txt (index 3)
         app.tree_state.selected_index = 3;
-        handle_key_event(&mut app, make_key(KeyCode::Char('d')));
+        handle_key(&mut app, make_key(KeyCode::Char('d')));
         // Confirm delete
-        handle_key_event(&mut app, make_key(KeyCode::Char('y')));
+        handle_key(&mut app, make_key(KeyCode::Char('y')));
         assert!(!dir.path().join("file_a.txt").exists());
         assert!(matches!(app.mode, AppMode::Normal));
     }
@@ -536,8 +560,8 @@ mod tests {
     fn delete_cancel_preserves_file() {
         let (dir, mut app) = setup_app();
         app.tree_state.selected_index = 3;
-        handle_key_event(&mut app, make_key(KeyCode::Char('d')));
-        handle_key_event(&mut app, make_key(KeyCode::Char('n')));
+        handle_key(&mut app, make_key(KeyCode::Char('d')));
+        handle_key(&mut app, make_key(KeyCode::Char('n')));
         assert!(dir.path().join("file_a.txt").exists());
         assert!(matches!(app.mode, AppMode::Normal));
     }
@@ -548,7 +572,7 @@ mod tests {
         app.open_dialog(DialogKind::CreateFile);
         let idx = app.tree_state.selected_index;
         // 'j' should type 'j', not navigate
-        handle_key_event(&mut app, make_key(KeyCode::Char('j')));
+        handle_key(&mut app, make_key(KeyCode::Char('j')));
         assert_eq!(app.dialog_state.input, "j");
         assert_eq!(app.tree_state.selected_index, idx);
     }
@@ -559,7 +583,7 @@ mod tests {
         app.open_dialog(DialogKind::Error {
             message: "test error".to_string(),
         });
-        handle_key_event(&mut app, make_key(KeyCode::Enter));
+        handle_key(&mut app, make_key(KeyCode::Enter));
         assert!(matches!(app.mode, AppMode::Normal));
     }
 
@@ -569,7 +593,7 @@ mod tests {
         app.open_dialog(DialogKind::Error {
             message: "test error".to_string(),
         });
-        handle_key_event(&mut app, make_key(KeyCode::Esc));
+        handle_key(&mut app, make_key(KeyCode::Esc));
         assert!(matches!(app.mode, AppMode::Normal));
     }
 
@@ -577,11 +601,11 @@ mod tests {
     fn tree_refreshes_after_create() {
         let (_dir, mut app) = setup_app();
         let before_count = app.tree_state.flat_items.len();
-        handle_key_event(&mut app, make_key(KeyCode::Char('a')));
+        handle_key(&mut app, make_key(KeyCode::Char('a')));
         for c in "brand_new.txt".chars() {
-            handle_key_event(&mut app, make_key(KeyCode::Char(c)));
+            handle_key(&mut app, make_key(KeyCode::Char(c)));
         }
-        handle_key_event(&mut app, make_key(KeyCode::Enter));
+        handle_key(&mut app, make_key(KeyCode::Enter));
         // Tree should have one more item
         assert_eq!(app.tree_state.flat_items.len(), before_count + 1);
     }
@@ -592,9 +616,9 @@ mod tests {
     fn tab_toggles_focus() {
         let (_dir, mut app) = setup_app();
         assert_eq!(app.focused_panel, FocusedPanel::Tree);
-        handle_key_event(&mut app, make_key(KeyCode::Tab));
+        handle_key(&mut app, make_key(KeyCode::Tab));
         assert_eq!(app.focused_panel, FocusedPanel::Preview);
-        handle_key_event(&mut app, make_key(KeyCode::Tab));
+        handle_key(&mut app, make_key(KeyCode::Tab));
         assert_eq!(app.focused_panel, FocusedPanel::Tree);
     }
 
@@ -602,7 +626,7 @@ mod tests {
     fn q_quits_from_preview_focus() {
         let (_dir, mut app) = setup_app();
         app.focused_panel = FocusedPanel::Preview;
-        handle_key_event(&mut app, make_key(KeyCode::Char('q')));
+        handle_key(&mut app, make_key(KeyCode::Char('q')));
         assert!(app.should_quit);
     }
 
@@ -610,7 +634,7 @@ mod tests {
     fn ctrl_c_quits_from_preview_focus() {
         let (_dir, mut app) = setup_app();
         app.focused_panel = FocusedPanel::Preview;
-        handle_key_event(
+        handle_key(
             &mut app,
             make_key_with_modifiers(KeyCode::Char('c'), KeyModifiers::CONTROL),
         );
@@ -622,7 +646,7 @@ mod tests {
         let (_dir, mut app) = setup_app();
         app.focused_panel = FocusedPanel::Preview;
         app.preview_state.total_lines = 100;
-        handle_key_event(&mut app, make_key(KeyCode::Char('j')));
+        handle_key(&mut app, make_key(KeyCode::Char('j')));
         assert_eq!(app.preview_state.scroll_offset, 1);
     }
 
@@ -632,7 +656,7 @@ mod tests {
         app.focused_panel = FocusedPanel::Preview;
         app.preview_state.total_lines = 100;
         app.preview_state.scroll_offset = 5;
-        handle_key_event(&mut app, make_key(KeyCode::Char('k')));
+        handle_key(&mut app, make_key(KeyCode::Char('k')));
         assert_eq!(app.preview_state.scroll_offset, 4);
     }
 
@@ -642,7 +666,7 @@ mod tests {
         app.focused_panel = FocusedPanel::Preview;
         app.preview_state.total_lines = 100;
         app.preview_state.scroll_offset = 50;
-        handle_key_event(&mut app, make_key(KeyCode::Char('g')));
+        handle_key(&mut app, make_key(KeyCode::Char('g')));
         assert_eq!(app.preview_state.scroll_offset, 0);
     }
 
@@ -651,7 +675,7 @@ mod tests {
         let (_dir, mut app) = setup_app();
         app.focused_panel = FocusedPanel::Preview;
         app.preview_state.total_lines = 100;
-        handle_key_event(&mut app, make_key(KeyCode::Char('G')));
+        handle_key(&mut app, make_key(KeyCode::Char('G')));
         assert_eq!(app.preview_state.scroll_offset, 99);
     }
 
@@ -660,12 +684,12 @@ mod tests {
         let (_dir, mut app) = setup_app();
         app.focused_panel = FocusedPanel::Preview;
         assert!(!app.preview_state.line_wrap);
-        handle_key_event(
+        handle_key(
             &mut app,
             make_key_with_modifiers(KeyCode::Char('w'), KeyModifiers::CONTROL),
         );
         assert!(app.preview_state.line_wrap);
-        handle_key_event(
+        handle_key(
             &mut app,
             make_key_with_modifiers(KeyCode::Char('w'), KeyModifiers::CONTROL),
         );
@@ -677,7 +701,7 @@ mod tests {
         let (_dir, mut app) = setup_app();
         app.focused_panel = FocusedPanel::Preview;
         let idx = app.tree_state.selected_index;
-        handle_key_event(&mut app, make_key(KeyCode::Char('j')));
+        handle_key(&mut app, make_key(KeyCode::Char('j')));
         assert_eq!(app.tree_state.selected_index, idx);
     }
 
@@ -687,9 +711,9 @@ mod tests {
     fn space_toggles_multi_select() {
         let (_dir, mut app) = setup_app();
         app.tree_state.selected_index = 1;
-        handle_key_event(&mut app, make_key(KeyCode::Char(' ')));
+        handle_key(&mut app, make_key(KeyCode::Char(' ')));
         assert!(app.tree_state.multi_selected.contains(&1));
-        handle_key_event(&mut app, make_key(KeyCode::Char(' ')));
+        handle_key(&mut app, make_key(KeyCode::Char(' ')));
         assert!(!app.tree_state.multi_selected.contains(&1));
     }
 
@@ -697,11 +721,11 @@ mod tests {
     fn esc_clears_multi_select() {
         let (_dir, mut app) = setup_app();
         app.tree_state.selected_index = 1;
-        handle_key_event(&mut app, make_key(KeyCode::Char(' ')));
+        handle_key(&mut app, make_key(KeyCode::Char(' ')));
         app.tree_state.selected_index = 2;
-        handle_key_event(&mut app, make_key(KeyCode::Char(' ')));
+        handle_key(&mut app, make_key(KeyCode::Char(' ')));
         assert_eq!(app.tree_state.multi_selected.len(), 2);
-        handle_key_event(&mut app, make_key(KeyCode::Esc));
+        handle_key(&mut app, make_key(KeyCode::Esc));
         assert!(app.tree_state.multi_selected.is_empty());
     }
 
@@ -709,9 +733,9 @@ mod tests {
     fn navigation_preserves_multi_select() {
         let (_dir, mut app) = setup_app();
         app.tree_state.selected_index = 1;
-        handle_key_event(&mut app, make_key(KeyCode::Char(' ')));
+        handle_key(&mut app, make_key(KeyCode::Char(' ')));
         // Navigate down
-        handle_key_event(&mut app, make_key(KeyCode::Char('j')));
+        handle_key(&mut app, make_key(KeyCode::Char('j')));
         // Selection should persist
         assert!(app.tree_state.multi_selected.contains(&1));
     }
@@ -722,7 +746,7 @@ mod tests {
     fn y_copies_focused_item_to_clipboard() {
         let (_dir, mut app) = setup_app();
         app.tree_state.selected_index = 3; // file_a.txt
-        handle_key_event(&mut app, make_key(KeyCode::Char('y')));
+        handle_key(&mut app, make_key(KeyCode::Char('y')));
         assert_eq!(app.clipboard.len(), 1);
         assert_eq!(
             app.clipboard.operation,
@@ -734,7 +758,7 @@ mod tests {
     fn x_cuts_focused_item_to_clipboard() {
         let (_dir, mut app) = setup_app();
         app.tree_state.selected_index = 3;
-        handle_key_event(&mut app, make_key(KeyCode::Char('x')));
+        handle_key(&mut app, make_key(KeyCode::Char('x')));
         assert_eq!(app.clipboard.len(), 1);
         assert_eq!(
             app.clipboard.operation,
@@ -746,10 +770,10 @@ mod tests {
     fn y_copies_multi_selected_items() {
         let (_dir, mut app) = setup_app();
         app.tree_state.selected_index = 1;
-        handle_key_event(&mut app, make_key(KeyCode::Char(' ')));
+        handle_key(&mut app, make_key(KeyCode::Char(' ')));
         app.tree_state.selected_index = 3;
-        handle_key_event(&mut app, make_key(KeyCode::Char(' ')));
-        handle_key_event(&mut app, make_key(KeyCode::Char('y')));
+        handle_key(&mut app, make_key(KeyCode::Char(' ')));
+        handle_key(&mut app, make_key(KeyCode::Char('y')));
         assert_eq!(app.clipboard.len(), 2);
         assert_eq!(
             app.clipboard.operation,
@@ -761,7 +785,7 @@ mod tests {
     fn copy_sets_status_message() {
         let (_dir, mut app) = setup_app();
         app.tree_state.selected_index = 3;
-        handle_key_event(&mut app, make_key(KeyCode::Char('y')));
+        handle_key(&mut app, make_key(KeyCode::Char('y')));
         assert!(app.status_message.is_some());
         let (msg, _) = app.status_message.as_ref().unwrap();
         assert!(msg.contains("copied"));
@@ -771,7 +795,7 @@ mod tests {
     fn cut_sets_status_message() {
         let (_dir, mut app) = setup_app();
         app.tree_state.selected_index = 3;
-        handle_key_event(&mut app, make_key(KeyCode::Char('x')));
+        handle_key(&mut app, make_key(KeyCode::Char('x')));
         assert!(app.status_message.is_some());
         let (msg, _) = app.status_message.as_ref().unwrap();
         assert!(msg.contains("cut"));
@@ -779,32 +803,50 @@ mod tests {
 
     // === Paste tests ===
 
-    #[test]
-    fn paste_copy_creates_duplicate() {
+    #[tokio::test]
+    async fn paste_copy_creates_duplicate() {
         let (dir, mut app) = setup_app();
+        let (tx, mut rx) = mpsc::unbounded_channel::<Event>();
         // Copy file_a.txt (index 3)
         app.tree_state.selected_index = 3;
-        handle_key_event(&mut app, make_key(KeyCode::Char('y')));
+        app.copy_to_clipboard();
         // Navigate to beta dir (index 2) and paste
         app.tree_state.selected_index = 2;
-        // Expand beta so it becomes the current dir
-        handle_key_event(&mut app, make_key(KeyCode::Enter));
-        handle_key_event(&mut app, make_key(KeyCode::Char('p')));
+        app.expand_selected();
+        app.paste_clipboard_async(tx);
+        // Wait for completion
+        loop {
+            if let Some(evt) = rx.recv().await {
+                if let Event::OperationComplete(result) = evt {
+                    app.handle_operation_complete(result);
+                    break;
+                }
+            }
+        }
         assert!(dir.path().join("beta").join("file_a.txt").exists());
         // Original still exists
         assert!(dir.path().join("file_a.txt").exists());
     }
 
-    #[test]
-    fn paste_cut_moves_file() {
+    #[tokio::test]
+    async fn paste_cut_moves_file() {
         let (dir, mut app) = setup_app();
+        let (tx, mut rx) = mpsc::unbounded_channel::<Event>();
         // Cut file_a.txt (index 3)
         app.tree_state.selected_index = 3;
-        handle_key_event(&mut app, make_key(KeyCode::Char('x')));
+        app.cut_to_clipboard();
         // Navigate to beta dir
         app.tree_state.selected_index = 2;
-        handle_key_event(&mut app, make_key(KeyCode::Enter));
-        handle_key_event(&mut app, make_key(KeyCode::Char('p')));
+        app.expand_selected();
+        app.paste_clipboard_async(tx);
+        loop {
+            if let Some(evt) = rx.recv().await {
+                if let Event::OperationComplete(result) = evt {
+                    app.handle_operation_complete(result);
+                    break;
+                }
+            }
+        }
         assert!(dir.path().join("beta").join("file_a.txt").exists());
         // Original removed
         assert!(!dir.path().join("file_a.txt").exists());
@@ -815,21 +857,30 @@ mod tests {
     #[test]
     fn paste_empty_clipboard_shows_message() {
         let (_dir, mut app) = setup_app();
-        handle_key_event(&mut app, make_key(KeyCode::Char('p')));
+        handle_key(&mut app, make_key(KeyCode::Char('p')));
         assert!(app.status_message.is_some());
         let (msg, _) = app.status_message.as_ref().unwrap();
         assert!(msg.contains("empty"));
     }
 
-    #[test]
-    fn paste_copy_preserves_clipboard() {
+    #[tokio::test]
+    async fn paste_copy_preserves_clipboard() {
         let (dir, mut app) = setup_app();
+        let (tx, mut rx) = mpsc::unbounded_channel::<Event>();
         app.tree_state.selected_index = 3;
-        handle_key_event(&mut app, make_key(KeyCode::Char('y')));
+        app.copy_to_clipboard();
         // Paste into beta
         app.tree_state.selected_index = 2;
-        handle_key_event(&mut app, make_key(KeyCode::Enter));
-        handle_key_event(&mut app, make_key(KeyCode::Char('p')));
+        app.expand_selected();
+        app.paste_clipboard_async(tx);
+        loop {
+            if let Some(evt) = rx.recv().await {
+                if let Event::OperationComplete(result) = evt {
+                    app.handle_operation_complete(result);
+                    break;
+                }
+            }
+        }
         assert!(dir.path().join("beta").join("file_a.txt").exists());
         // Clipboard still populated (copy doesn't clear it)
         assert!(!app.clipboard.is_empty());

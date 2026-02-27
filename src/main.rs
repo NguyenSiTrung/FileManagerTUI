@@ -39,6 +39,7 @@ async fn main() -> error::Result<()> {
     let mut tui = Tui::new()?;
     let mut app = App::new(&path)?;
     let mut events = EventHandler::new(Duration::from_millis(16));
+    let event_tx = events.sender();
 
     loop {
         tui.terminal_mut().draw(|frame| {
@@ -46,9 +47,11 @@ async fn main() -> error::Result<()> {
         })?;
 
         match events.next().await? {
-            Event::Key(key) => handler::handle_key_event(&mut app, key),
+            Event::Key(key) => handler::handle_key_event(&mut app, key, &event_tx),
             Event::Tick => {}
             Event::Resize(_, _) => {}
+            Event::Progress(update) => app.handle_progress(update),
+            Event::OperationComplete(result) => app.handle_operation_complete(result),
         }
 
         if app.should_quit {
