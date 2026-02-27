@@ -41,7 +41,7 @@ async fn main() -> error::Result<()> {
 
     loop {
         tui.terminal_mut().draw(|frame| {
-            ui::render(&app, frame);
+            ui::render(&mut app, frame);
         })?;
 
         match events.next().await? {

@@ -194,6 +194,81 @@ impl TreeState {
         }
     }
 
+    /// Expand the currently selected directory node.
+    pub fn expand_selected(&mut self) {
+        if self.flat_items.is_empty() {
+            return;
+        }
+        let selected = &self.flat_items[self.selected_index];
+        if selected.node_type != NodeType::Directory {
+            return;
+        }
+        let path = selected.path.clone();
+        if let Some(node) = Self::find_node_mut(&mut self.root, &path) {
+            if !node.is_expanded {
+                let _ = node.load_children();
+                node.is_expanded = true;
+                self.flatten();
+            }
+        }
+    }
+
+    /// Collapse the currently selected directory, or jump to parent.
+    pub fn collapse_selected(&mut self) {
+        if self.flat_items.is_empty() {
+            return;
+        }
+        let selected = &self.flat_items[self.selected_index];
+        let path = selected.path.clone();
+
+        // If it's an expanded directory, collapse it
+        if selected.node_type == NodeType::Directory && selected.is_expanded {
+            if let Some(node) = Self::find_node_mut(&mut self.root, &path) {
+                node.is_expanded = false;
+                self.flatten();
+            }
+            return;
+        }
+
+        // Otherwise, jump to parent directory
+        if let Some(parent_path) = path.parent() {
+            let parent_path = parent_path.to_path_buf();
+            for (i, item) in self.flat_items.iter().enumerate() {
+                if item.path == parent_path {
+                    self.selected_index = i;
+                    return;
+                }
+            }
+        }
+    }
+
+    /// Find a mutable reference to a node by path.
+    fn find_node_mut<'a>(node: &'a mut TreeNode, target: &Path) -> Option<&'a mut TreeNode> {
+        if node.path == target {
+            return Some(node);
+        }
+        if let Some(children) = &mut node.children {
+            for child in children.iter_mut() {
+                if let Some(found) = Self::find_node_mut(child, target) {
+                    return Some(found);
+                }
+            }
+        }
+        None
+    }
+
+    /// Update the scroll offset to ensure the selected item is visible.
+    pub fn update_scroll(&mut self, visible_height: usize) {
+        if visible_height == 0 {
+            return;
+        }
+        if self.selected_index < self.scroll_offset {
+            self.scroll_offset = self.selected_index;
+        } else if self.selected_index >= self.scroll_offset + visible_height {
+            self.scroll_offset = self.selected_index - visible_height + 1;
+        }
+    }
+
     /// Toggle visibility of hidden files and re-flatten.
     pub fn toggle_hidden(&mut self) {
         self.show_hidden = !self.show_hidden;
