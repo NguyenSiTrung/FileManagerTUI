@@ -6,6 +6,7 @@ use syntect::highlighting::Theme;
 use syntect::parsing::SyntaxSet;
 
 use crate::error::Result;
+use crate::fs::clipboard::ClipboardState;
 use crate::fs::tree::{NodeType, TreeState};
 use crate::preview_content;
 
@@ -96,6 +97,8 @@ pub struct App {
     pub syntax_theme: Theme,
     /// Tracks which tree index was last previewed, to avoid re-loading on every frame.
     pub last_previewed_index: Option<usize>,
+    /// Internal clipboard for copy/cut/paste operations.
+    pub clipboard: ClipboardState,
 }
 
 impl App {
@@ -115,6 +118,7 @@ impl App {
             syntax_set,
             syntax_theme,
             last_previewed_index: None,
+            clipboard: ClipboardState::new(),
         })
     }
 
