@@ -4,24 +4,28 @@ use std::path::Path;
 use crate::error::Result;
 
 /// Create an empty file at the given path.
+#[allow(dead_code)]
 pub fn create_file(path: &Path) -> Result<()> {
     fs::File::create(path)?;
     Ok(())
 }
 
 /// Create a new directory at the given path.
+#[allow(dead_code)]
 pub fn create_dir(path: &Path) -> Result<()> {
     fs::create_dir(path)?;
     Ok(())
 }
 
 /// Rename (move) a file or directory from one path to another.
+#[allow(dead_code)]
 pub fn rename(from: &Path, to: &Path) -> Result<()> {
     fs::rename(from, to)?;
     Ok(())
 }
 
 /// Delete a file or directory. Directories are removed recursively.
+#[allow(dead_code)]
 pub fn delete(path: &Path) -> Result<()> {
     if path.is_dir() {
         fs::remove_dir_all(path)?;
