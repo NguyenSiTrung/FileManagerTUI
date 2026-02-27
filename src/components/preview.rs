@@ -49,10 +49,7 @@ impl<'a> Widget for PreviewWidget<'a> {
         if self.preview_state.content_lines.is_empty() {
             // Show placeholder text
             let msg = "No preview";
-            let line = Line::from(Span::styled(
-                msg,
-                Style::default().fg(Color::DarkGray),
-            ));
+            let line = Line::from(Span::styled(msg, Style::default().fg(Color::DarkGray)));
             buf.set_line(inner.x, inner.y, &line, inner.width);
             return;
         }
@@ -62,7 +59,10 @@ impl<'a> Widget for PreviewWidget<'a> {
         let start = self.preview_state.scroll_offset;
         let end = (start + visible_height).min(self.preview_state.content_lines.len());
 
-        for (i, line) in self.preview_state.content_lines[start..end].iter().enumerate() {
+        for (i, line) in self.preview_state.content_lines[start..end]
+            .iter()
+            .enumerate()
+        {
             let y = inner.y + i as u16;
             buf.set_line(inner.x, y, line, inner.width);
         }
@@ -84,7 +84,14 @@ mod tests {
         widget.render(area, &mut buf);
         // The inner area should contain "No preview"
         let content: String = (0..30)
-            .map(|x| buf.cell((x, 1)).unwrap().symbol().chars().next().unwrap_or(' '))
+            .map(|x| {
+                buf.cell((x, 1))
+                    .unwrap()
+                    .symbol()
+                    .chars()
+                    .next()
+                    .unwrap_or(' ')
+            })
             .collect();
         assert!(content.contains("No preview"));
     }
@@ -103,7 +110,14 @@ mod tests {
         let mut buf = Buffer::empty(area);
         widget.render(area, &mut buf);
         let row0: String = (0..20)
-            .map(|x| buf.cell((x, 0)).unwrap().symbol().chars().next().unwrap_or(' '))
+            .map(|x| {
+                buf.cell((x, 0))
+                    .unwrap()
+                    .symbol()
+                    .chars()
+                    .next()
+                    .unwrap_or(' ')
+            })
             .collect();
         assert!(row0.contains("line 1"));
     }
@@ -123,7 +137,14 @@ mod tests {
         let mut buf = Buffer::empty(area);
         widget.render(area, &mut buf);
         let row0: String = (0..20)
-            .map(|x| buf.cell((x, 0)).unwrap().symbol().chars().next().unwrap_or(' '))
+            .map(|x| {
+                buf.cell((x, 0))
+                    .unwrap()
+                    .symbol()
+                    .chars()
+                    .next()
+                    .unwrap_or(' ')
+            })
             .collect();
         assert!(row0.contains("line 2"));
     }
