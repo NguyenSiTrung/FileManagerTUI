@@ -528,6 +528,97 @@ fn is_leap_year(year: u64) -> bool {
     (year.is_multiple_of(4) && !year.is_multiple_of(100)) || year.is_multiple_of(400)
 }
 
+/// Generate a summary display for a directory.
+///
+/// Shows: directory name, file count, subdirectory count, total size.
+/// Caps recursive walk to avoid hanging on huge trees.
+pub fn load_directory_summary(path: &Path) -> (Vec<Line<'static>>, usize) {
+    let label_style = Style::default()
+        .fg(Color::Cyan)
+        .add_modifier(Modifier::BOLD);
+    let value_style = Style::default().fg(Color::White);
+
+    let dir_name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.to_string_lossy().to_string());
+
+    let mut file_count: u64 = 0;
+    let mut dir_count: u64 = 0;
+    let mut total_size: u64 = 0;
+    let mut entries_scanned: u64 = 0;
+    const MAX_ENTRIES: u64 = 10_000;
+
+    // Walk directory iteratively with a stack
+    let mut stack = vec![path.to_path_buf()];
+    let mut capped = false;
+
+    while let Some(current) = stack.pop() {
+        let entries = match fs::read_dir(&current) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+
+        for entry in entries.flatten() {
+            entries_scanned += 1;
+            if entries_scanned > MAX_ENTRIES {
+                capped = true;
+                break;
+            }
+
+            let meta = match entry.metadata() {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+
+            if meta.is_dir() {
+                dir_count += 1;
+                stack.push(entry.path());
+            } else {
+                file_count += 1;
+                total_size += meta.len();
+            }
+        }
+
+        if capped {
+            break;
+        }
+    }
+
+    let size_str = format_size(total_size);
+
+    let mut lines = vec![
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  Directory: ", label_style),
+            Span::styled(dir_name, value_style),
+        ]),
+        Line::from(vec![
+            Span::styled("  Files: ", label_style),
+            Span::styled(file_count.to_string(), value_style),
+        ]),
+        Line::from(vec![
+            Span::styled("  Subdirectories: ", label_style),
+            Span::styled(dir_count.to_string(), value_style),
+        ]),
+        Line::from(vec![
+            Span::styled("  Total Size: ", label_style),
+            Span::styled(size_str, value_style),
+        ]),
+    ];
+
+    if capped {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            format!("  (scan capped at {} entries)", MAX_ENTRIES),
+            Style::default().fg(Color::Yellow),
+        )));
+    }
+
+    let total = lines.len();
+    (lines, total)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -827,5 +918,57 @@ mod tests {
         assert_eq!(format_permissions(0o644), "rw-r--r--");
         assert_eq!(format_permissions(0o777), "rwxrwxrwx");
         assert_eq!(format_permissions(0o000), "---------");
+    }
+
+    // === Directory summary tests ===
+
+    #[test]
+    fn directory_summary_basic() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir(dir.path().join("subdir")).unwrap();
+        let mut f = File::create(dir.path().join("file.txt")).unwrap();
+        writeln!(f, "hello world").unwrap();
+        File::create(dir.path().join("file2.txt")).unwrap();
+
+        let (lines, total) = load_directory_summary(dir.path());
+        assert!(total >= 5);
+        let all_text: String = lines
+            .iter()
+            .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
+            .collect();
+        assert!(all_text.contains("Files:"));
+        assert!(all_text.contains("2"));
+        assert!(all_text.contains("Subdirectories:"));
+        assert!(all_text.contains("1"));
+    }
+
+    #[test]
+    fn directory_summary_empty_dir() {
+        let dir = TempDir::new().unwrap();
+        let (lines, total) = load_directory_summary(dir.path());
+        assert!(total >= 5);
+        let all_text: String = lines
+            .iter()
+            .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
+            .collect();
+        assert!(all_text.contains("Files:"));
+        assert!(all_text.contains("0"));
+        assert!(all_text.contains("0 B"));
+    }
+
+    #[test]
+    fn directory_summary_nested() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join("a/b")).unwrap();
+        File::create(dir.path().join("a/b/deep.txt")).unwrap();
+
+        let (lines, _) = load_directory_summary(dir.path());
+        let all_text: String = lines
+            .iter()
+            .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
+            .collect();
+        // Should count nested file and both subdirs
+        assert!(all_text.contains("1")); // 1 file
+        assert!(all_text.contains("2")); // 2 subdirs (a, b)
     }
 }

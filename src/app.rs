@@ -293,6 +293,23 @@ impl App {
         };
 
         // Only preview files, not directories
+        if item.node_type == NodeType::Directory {
+            let path = item.path.clone();
+            let (lines, total) = preview_content::load_directory_summary(&path);
+            self.preview_state = PreviewState {
+                current_path: Some(path),
+                content_lines: lines,
+                scroll_offset: 0,
+                view_mode: ViewMode::default(),
+                line_wrap: false,
+                total_lines: total,
+                is_large_file: false,
+                head_lines: preview_content::DEFAULT_HEAD_LINES,
+                tail_lines: preview_content::DEFAULT_TAIL_LINES,
+            };
+            return;
+        }
+
         if item.node_type != NodeType::File {
             self.preview_state = PreviewState::default();
             return;
