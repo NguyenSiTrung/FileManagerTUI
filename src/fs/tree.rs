@@ -368,9 +368,8 @@ impl TreeNode {
 
     /// Load the next page of children for a paginated directory.
     ///
-    /// Skips already-loaded entries by checking against the existing child
-    /// paths, then loads up to `page_size` new entries. Appends them to
-    /// the existing children vec.
+    /// Uses `loaded_offset` to index directly into the sorted snapshot.
+    /// O(1) access — no iteration, no HashSet dedup.
     ///
     /// Returns the number of newly loaded entries.
     pub fn load_next_page(&mut self, page_size: usize) -> Result<usize> {
@@ -378,7 +377,25 @@ impl TreeNode {
             return Ok(0);
         }
 
-        // Collect already-loaded child paths for dedup
+        // If we have a snapshot, use O(1) index-based access
+        if let Some(ref snapshot) = self.snapshot {
+            let page_entries = snapshot.page(self.loaded_offset, page_size);
+            let new_nodes =
+                Self::load_nodes_from_snapshot(page_entries, &self.path, self.depth + 1);
+            let newly_loaded = new_nodes.len();
+
+            let children = self.children.get_or_insert_with(Vec::new);
+            children.extend(new_nodes);
+
+            self.loaded_offset += newly_loaded;
+            self.loaded_child_count += newly_loaded;
+            let total = snapshot.len();
+            self.has_more_children = self.loaded_offset < total;
+
+            return Ok(newly_loaded);
+        }
+
+        // Fallback for dirs without snapshot (backward compat / small dirs reloaded)
         let existing: std::collections::HashSet<PathBuf> = self
             .children
             .as_ref()
@@ -398,7 +415,6 @@ impl TreeNode {
                 Err(_) => continue,
             };
             let path = entry.path();
-            // Skip already-loaded entries
             if existing.contains(&path) {
                 continue;
             }
