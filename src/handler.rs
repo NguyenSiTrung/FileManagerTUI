@@ -223,6 +223,7 @@ fn execute_input_operation(app: &mut App, kind: &DialogKind, input: &str) {
                 Ok(()) => {
                     app.set_status_message(format!("Created file: {}", input));
                     app.tree_state.reload_dir(&dir);
+                    app.invalidate_search_cache();
                 }
                 Err(e) => {
                     app.set_status_message(format!("Error: {}", e));
@@ -236,6 +237,7 @@ fn execute_input_operation(app: &mut App, kind: &DialogKind, input: &str) {
                 Ok(()) => {
                     app.set_status_message(format!("Created directory: {}", input));
                     app.tree_state.reload_dir(&dir);
+                    app.invalidate_search_cache();
                 }
                 Err(e) => {
                     app.set_status_message(format!("Error: {}", e));
@@ -253,6 +255,7 @@ fn execute_input_operation(app: &mut App, kind: &DialogKind, input: &str) {
                         });
                         app.set_status_message(format!("Renamed to: {}", input));
                         app.tree_state.reload_dir(parent);
+                        app.invalidate_search_cache();
                     }
                     Err(e) => {
                         app.set_status_message(format!("Error: {}", e));
@@ -286,6 +289,7 @@ fn handle_delete_confirm(app: &mut App, key: KeyEvent, targets: Vec<std::path::P
                         app.tree_state.reload_dir(parent);
                     }
                 }
+                app.invalidate_search_cache();
             } else {
                 app.set_status_message(format!("Error: {}", errors.join("; ")));
             }
@@ -1160,5 +1164,143 @@ mod tests {
         handle_key(&mut app, make_key(KeyCode::Backspace));
         // Filter cleared, back to full tree
         assert!(!app.tree_state.is_filtering);
+    }
+
+    // === Integration tests ===
+
+    #[test]
+    fn search_then_navigate_end_to_end() {
+        let (dir, mut app) = setup_app();
+        // Create nested file
+        fs::create_dir_all(dir.path().join("alpha").join("nested")).unwrap();
+        File::create(dir.path().join("alpha").join("nested").join("deep.txt")).unwrap();
+        app.invalidate_search_cache();
+
+        // Open search
+        handle_key(
+            &mut app,
+            make_key_with_modifiers(KeyCode::Char('p'), KeyModifiers::CONTROL),
+        );
+        assert_eq!(app.mode, AppMode::Search);
+
+        // Type query
+        for c in "deep".chars() {
+            handle_key(&mut app, make_key(KeyCode::Char(c)));
+        }
+        assert!(!app.search_state.results.is_empty());
+
+        // Confirm
+        handle_key(&mut app, make_key(KeyCode::Enter));
+        assert_eq!(app.mode, AppMode::Normal);
+
+        // Verify tree selection
+        let selected = &app.tree_state.flat_items[app.tree_state.selected_index];
+        assert_eq!(selected.name, "deep.txt");
+    }
+
+    #[test]
+    fn filter_then_navigate_end_to_end() {
+        let (_dir, mut app) = setup_app();
+        let total = app.tree_state.flat_items.len();
+
+        // Activate filter
+        handle_key(&mut app, make_key(KeyCode::Char('/')));
+        for c in "file".chars() {
+            handle_key(&mut app, make_key(KeyCode::Char(c)));
+        }
+        assert!(app.tree_state.flat_items.len() <= total);
+        assert!(app.tree_state.is_filtering);
+
+        // Accept filter
+        handle_key(&mut app, make_key(KeyCode::Enter));
+        assert_eq!(app.mode, AppMode::Normal);
+        assert!(app.tree_state.is_filtering);
+
+        // Navigate in filtered view
+        handle_key(&mut app, make_key(KeyCode::Char('j')));
+    }
+
+    #[test]
+    fn search_cache_invalidated_after_create() {
+        let (dir, mut app) = setup_app();
+        // Build cache
+        app.open_search();
+        app.close_search();
+        assert!(app.search_state.cached_paths.is_some());
+
+        // Create a file via dialog
+        handle_key(&mut app, make_key(KeyCode::Char('a')));
+        for c in "new_file.txt".chars() {
+            handle_key(&mut app, make_key(KeyCode::Char(c)));
+        }
+        handle_key(&mut app, make_key(KeyCode::Enter));
+
+        // Cache should be invalidated
+        assert!(app.search_state.cached_paths.is_none());
+        assert!(dir.path().join("new_file.txt").exists());
+    }
+
+    #[test]
+    fn search_cache_invalidated_after_delete() {
+        let (dir, mut app) = setup_app();
+        // Build cache
+        app.open_search();
+        app.close_search();
+        assert!(app.search_state.cached_paths.is_some());
+
+        // Select file_a.txt (index 3) and delete
+        app.tree_state.selected_index = 3;
+        handle_key(&mut app, make_key(KeyCode::Char('d')));
+        handle_key(&mut app, make_key(KeyCode::Char('y')));
+
+        // Cache should be invalidated
+        assert!(app.search_state.cached_paths.is_none());
+    }
+
+    #[test]
+    fn search_special_characters_in_filename() {
+        let (dir, mut app) = setup_app();
+        // Create file with special characters
+        File::create(dir.path().join("test (1).txt")).unwrap();
+        app.invalidate_search_cache();
+
+        app.open_search();
+        for c in "test (1)".chars() {
+            app.search_input_char(c);
+        }
+        assert!(!app.search_state.results.is_empty());
+    }
+
+    #[test]
+    fn ctrl_p_and_slash_work_from_preview_focus() {
+        let (_dir, mut app) = setup_app();
+        app.focused_panel = crate::app::FocusedPanel::Preview;
+
+        // Ctrl+P should work from preview panel (global key)
+        handle_key(
+            &mut app,
+            make_key_with_modifiers(KeyCode::Char('p'), KeyModifiers::CONTROL),
+        );
+        assert_eq!(app.mode, AppMode::Search);
+        handle_key(&mut app, make_key(KeyCode::Esc));
+
+        // / should work from preview panel (global key)
+        handle_key(&mut app, make_key(KeyCode::Char('/')));
+        assert_eq!(app.mode, AppMode::Filter);
+    }
+
+    #[test]
+    fn no_regression_tree_navigation() {
+        let (_dir, mut app) = setup_app();
+        // Basic navigation should still work
+        handle_key(&mut app, make_key(KeyCode::Char('j')));
+        assert_eq!(app.tree_state.selected_index, 1);
+        handle_key(&mut app, make_key(KeyCode::Char('k')));
+        assert_eq!(app.tree_state.selected_index, 0);
+        handle_key(&mut app, make_key(KeyCode::Char('G')));
+        assert_eq!(
+            app.tree_state.selected_index,
+            app.tree_state.flat_items.len() - 1
+        );
     }
 }

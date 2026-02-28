@@ -453,6 +453,7 @@ impl App {
 
         // Refresh dest dir
         self.tree_state.reload_dir(&result.dest_dir);
+        self.invalidate_search_cache();
 
         // For cut/move, also refresh source parents
         if result.was_cut {
@@ -827,6 +828,7 @@ impl App {
     /// Expand the selected directory (or no-op on files).
     pub fn expand_selected(&mut self) {
         self.tree_state.expand_selected();
+        self.invalidate_search_cache();
     }
 
     /// Collapse the selected directory, or jump to parent if on a file or collapsed directory.
@@ -837,6 +839,7 @@ impl App {
     /// Toggle hidden file visibility.
     pub fn toggle_hidden(&mut self) {
         self.tree_state.toggle_hidden();
+        self.invalidate_search_cache();
     }
 
     // === Search (Ctrl+P) methods ===
@@ -990,7 +993,6 @@ impl App {
     }
 
     /// Invalidate the cached path index (call after tree mutations).
-    #[allow(dead_code)]
     pub fn invalidate_search_cache(&mut self) {
         self.search_state.cached_paths = None;
     }

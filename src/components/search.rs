@@ -78,7 +78,9 @@ impl<'a> Widget for SearchWidget<'a> {
             .bg(Color::White)
             .fg(Color::Black)
             .add_modifier(Modifier::BOLD);
-        let prompt_style = Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD);
+        let prompt_style = Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD);
 
         let input_spans = vec![
             Span::styled("> ", prompt_style),
@@ -94,7 +96,15 @@ impl<'a> Widget for SearchWidget<'a> {
             let count_str = if self.state.query.is_empty() {
                 "Type to search...".to_string()
             } else {
-                format!("{} result{}", self.state.results.len(), if self.state.results.len() == 1 { "" } else { "s" })
+                format!(
+                    "{} result{}",
+                    self.state.results.len(),
+                    if self.state.results.len() == 1 {
+                        ""
+                    } else {
+                        "s"
+                    }
+                )
             };
             let sep_line = Line::from(Span::styled(
                 format!("─── {} ", count_str),
@@ -202,12 +212,7 @@ impl<'a> Widget for SearchWidget<'a> {
                 .fg(Color::DarkGray)
                 .add_modifier(Modifier::DIM);
             let hint_line = Line::from(Span::styled(hint, hint_style));
-            buf.set_line(
-                inner.x,
-                inner.y + inner.height - 1,
-                &hint_line,
-                inner.width,
-            );
+            buf.set_line(inner.x, inner.y + inner.height - 1, &hint_line, inner.width);
         }
     }
 }
