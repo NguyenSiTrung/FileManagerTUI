@@ -32,5 +32,5 @@
 
 ---
 
-## [ ] Track: Large Directory Robustness & Edge Cases
+## [~] Track: Large Directory Robustness & Edge Cases
 *Link: [./conductor/tracks/large-dir-robust_20260301/](./conductor/tracks/large-dir-robust_20260301/)*

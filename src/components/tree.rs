@@ -201,9 +201,7 @@ impl<'a> Widget for TreeWidget<'a> {
 
             // Build multi-span line: name + optional count badge for collapsed dirs
             let name_span = Span::styled(line_content, style);
-            let line = if item.node_type == NodeType::Directory
-                && !item.is_expanded
-                && !is_selected
+            let line = if item.node_type == NodeType::Directory && !item.is_expanded && !is_selected
             {
                 if let Some(count) = item.child_count {
                     let badge = format!(" ({} items)", count);

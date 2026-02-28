@@ -658,14 +658,22 @@ fn handle_tree_keys(app: &mut App, key: KeyEvent, event_tx: &mpsc::UnboundedSend
 
         // Clipboard operations (skip LoadMore nodes)
         KeyCode::Char('y') => {
-            if app.tree_state.flat_items.get(app.tree_state.selected_index)
-                .is_some_and(|i| i.node_type != NodeType::LoadMore) {
+            if app
+                .tree_state
+                .flat_items
+                .get(app.tree_state.selected_index)
+                .is_some_and(|i| i.node_type != NodeType::LoadMore)
+            {
                 app.copy_to_clipboard();
             }
         }
         KeyCode::Char('x') => {
-            if app.tree_state.flat_items.get(app.tree_state.selected_index)
-                .is_some_and(|i| i.node_type != NodeType::LoadMore) {
+            if app
+                .tree_state
+                .flat_items
+                .get(app.tree_state.selected_index)
+                .is_some_and(|i| i.node_type != NodeType::LoadMore)
+            {
                 app.cut_to_clipboard();
             }
         }

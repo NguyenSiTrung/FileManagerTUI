@@ -1,9 +1,137 @@
 use std::collections::HashSet;
+use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use crate::error::Result;
+
+/// A lightweight entry in a directory snapshot.
+/// Only stores the name and whether it's a directory — no expensive stat() call.
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct SnapshotEntry {
+    pub name: OsString,
+    pub is_dir: bool,
+}
+
+/// A snapshot of a directory's contents for efficient paginated access.
+///
+/// Collected via a single `read_dir()` pass. Sorted once. Paginated by index.
+/// Full `TreeNode` metadata (stat) is loaded only for the current visible page.
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct DirSnapshot {
+    /// All entries in sorted order.
+    pub entries: Vec<SnapshotEntry>,
+    /// Number of entries skipped due to permission errors during collection.
+    pub skipped_count: usize,
+    /// Whether the snapshot was capped at a maximum size.
+    pub capped: bool,
+}
+
+#[allow(dead_code)]
+impl DirSnapshot {
+    /// Collect a directory snapshot in a single `read_dir()` pass.
+    ///
+    /// Returns a snapshot with lightweight entries (name + is_dir flag).
+    /// Permission-denied and broken symlink entries are skipped and counted.
+    /// The snapshot is unsorted — call `sort()` before pagination.
+    pub fn collect(path: &Path) -> Result<Self> {
+        Self::collect_with_limit(path, usize::MAX)
+    }
+
+    /// Collect a directory snapshot with a maximum entry limit.
+    ///
+    /// If the directory has more entries than `max_entries`, only the first
+    /// `max_entries` are collected and `capped` is set to true.
+    pub fn collect_with_limit(path: &Path, max_entries: usize) -> Result<Self> {
+        let read_dir = fs::read_dir(path)?;
+        let mut entries = Vec::new();
+        let mut skipped_count = 0;
+        let mut capped = false;
+
+        for entry_result in read_dir {
+            if entries.len() >= max_entries {
+                capped = true;
+                break;
+            }
+            let entry = match entry_result {
+                Ok(e) => e,
+                Err(_) => {
+                    skipped_count += 1;
+                    continue;
+                }
+            };
+            // Use file_type() which is usually free (no extra stat on most OS)
+            let is_dir = match entry.file_type() {
+                Ok(ft) => ft.is_dir(),
+                Err(_) => {
+                    skipped_count += 1;
+                    continue;
+                }
+            };
+            entries.push(SnapshotEntry {
+                name: entry.file_name(),
+                is_dir,
+            });
+        }
+
+        Ok(Self {
+            entries,
+            skipped_count,
+            capped,
+        })
+    }
+
+    /// Sort the snapshot entries.
+    ///
+    /// Applies the same sort logic as `TreeState::sort_children_of`:
+    /// - `dirs_first`: directories before files
+    /// - `sort_by`: name (case-insensitive), size, or modified
+    ///
+    /// For snapshot sorting, only Name sort is meaningful (we don't have
+    /// size/modified metadata). Size and Modified fall back to name sort.
+    pub fn sort(&mut self, sort_by: &SortBy, dirs_first: bool) {
+        self.entries.sort_by(|a, b| {
+            let mut cmp = std::cmp::Ordering::Equal;
+            if dirs_first {
+                cmp = b.is_dir.cmp(&a.is_dir);
+            }
+            // Snapshot only has name — all sort modes fall back to name
+            cmp.then_with(|| {
+                let a_name = a.name.to_string_lossy().to_lowercase();
+                let b_name = b.name.to_string_lossy().to_lowercase();
+                match sort_by {
+                    SortBy::Name => a_name.cmp(&b_name),
+                    // For Size/Modified, we don't have the metadata in snapshot,
+                    // so sort by name as a stable fallback. The loaded TreeNodes
+                    // will be re-sorted with full metadata by sort_children_of.
+                    SortBy::Size | SortBy::Modified => a_name.cmp(&b_name),
+                }
+            })
+        });
+    }
+
+    /// Get the total number of entries in the snapshot.
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Check if the snapshot is empty.
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// Get a page of entries from the snapshot.
+    ///
+    /// Returns a slice of entries from `offset` with at most `count` entries.
+    pub fn page(&self, offset: usize, count: usize) -> &[SnapshotEntry] {
+        let start = offset.min(self.entries.len());
+        let end = (start + count).min(self.entries.len());
+        &self.entries[start..end]
+    }
+}
 
 /// Type of filesystem node.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -43,6 +171,10 @@ pub struct TreeNode {
     pub loaded_child_count: usize,
     /// Whether more children remain to be loaded.
     pub has_more_children: bool,
+    /// Sorted snapshot for O(1) paginated access into large directories.
+    pub snapshot: Option<DirSnapshot>,
+    /// Index into the snapshot of the next unloaded entry.
+    pub loaded_offset: usize,
 }
 
 impl TreeNode {
@@ -81,6 +213,8 @@ impl TreeNode {
             total_child_count: None,
             loaded_child_count: 0,
             has_more_children: false,
+            snapshot: None,
+            loaded_offset: 0,
         })
     }
 
@@ -429,8 +563,7 @@ impl TreeState {
                 let has_load_more = node.has_more_children;
 
                 for (i, child) in visible_children.iter().enumerate() {
-                    let is_last_child =
-                        i == visible_children.len() - 1 && !has_load_more;
+                    let is_last_child = i == visible_children.len() - 1 && !has_load_more;
                     Self::flatten_node(child, items, show_hidden, is_last_child, false);
                 }
 
@@ -1449,5 +1582,149 @@ mod tests {
             0
         );
         assert!(!state.root.has_more_children);
+    }
+
+    // === DirSnapshot tests ===
+
+    #[test]
+    fn snapshot_collect_basic() {
+        let dir = setup_test_dir();
+        let snapshot = DirSnapshot::collect(dir.path()).unwrap();
+        // 5 entries: alpha, beta, file_a.txt, file_b.rs, .hidden
+        assert_eq!(snapshot.len(), 5);
+        assert_eq!(snapshot.skipped_count, 0);
+        assert!(!snapshot.capped);
+    }
+
+    #[test]
+    fn snapshot_collect_empty_dir() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir(dir.path().join("empty")).unwrap();
+        let snapshot = DirSnapshot::collect(&dir.path().join("empty")).unwrap();
+        assert!(snapshot.is_empty());
+        assert_eq!(snapshot.skipped_count, 0);
+    }
+
+    #[test]
+    fn snapshot_collect_permission_error() {
+        // Collecting from a nonexistent dir should return an error
+        let result = DirSnapshot::collect(Path::new("/nonexistent/path/that/does/not/exist"));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn snapshot_sort_dirs_first_by_name() {
+        let dir = setup_test_dir();
+        let mut snapshot = DirSnapshot::collect(dir.path()).unwrap();
+        snapshot.sort(&SortBy::Name, true);
+
+        let names: Vec<String> = snapshot
+            .entries
+            .iter()
+            .map(|e| e.name.to_string_lossy().to_string())
+            .collect();
+
+        // Dirs first (alpha, beta), then files (.hidden, file_a.txt, file_b.rs)
+        // Within dirs: alpha < beta
+        assert_eq!(names[0], "alpha");
+        assert_eq!(names[1], "beta");
+        // Files sorted alphabetically (case-insensitive): .hidden < file_a.txt < file_b.rs
+        assert_eq!(names[2], ".hidden");
+        assert_eq!(names[3], "file_a.txt");
+        assert_eq!(names[4], "file_b.rs");
+    }
+
+    #[test]
+    fn snapshot_sort_no_dirs_first() {
+        let dir = setup_test_dir();
+        let mut snapshot = DirSnapshot::collect(dir.path()).unwrap();
+        snapshot.sort(&SortBy::Name, false);
+
+        let names: Vec<String> = snapshot
+            .entries
+            .iter()
+            .map(|e| e.name.to_string_lossy().to_string())
+            .collect();
+
+        // All sorted alphabetically: .hidden, alpha, beta, file_a.txt, file_b.rs
+        assert_eq!(names[0], ".hidden");
+        assert_eq!(names[1], "alpha");
+        assert_eq!(names[2], "beta");
+        assert_eq!(names[3], "file_a.txt");
+        assert_eq!(names[4], "file_b.rs");
+    }
+
+    #[test]
+    fn snapshot_collect_with_limit() {
+        let dir = setup_large_dir(50);
+        let snapshot = DirSnapshot::collect_with_limit(dir.path(), 10).unwrap();
+        assert_eq!(snapshot.len(), 10);
+        assert!(snapshot.capped);
+    }
+
+    #[test]
+    fn snapshot_collect_with_limit_not_capped() {
+        let dir = setup_test_dir();
+        let snapshot = DirSnapshot::collect_with_limit(dir.path(), 100).unwrap();
+        assert_eq!(snapshot.len(), 5);
+        assert!(!snapshot.capped);
+    }
+
+    #[test]
+    fn snapshot_page_access() {
+        let dir = setup_large_dir(20);
+        let mut snapshot = DirSnapshot::collect(dir.path()).unwrap();
+        snapshot.sort(&SortBy::Name, false);
+
+        // First page of 5
+        let page1 = snapshot.page(0, 5);
+        assert_eq!(page1.len(), 5);
+
+        // Second page of 5
+        let page2 = snapshot.page(5, 5);
+        assert_eq!(page2.len(), 5);
+
+        // Last page (partial)
+        let last_page = snapshot.page(15, 10);
+        assert_eq!(last_page.len(), 5);
+
+        // Beyond end
+        let beyond = snapshot.page(20, 5);
+        assert_eq!(beyond.len(), 0);
+    }
+
+    #[test]
+    fn snapshot_entries_have_correct_is_dir() {
+        let dir = setup_test_dir();
+        let snapshot = DirSnapshot::collect(dir.path()).unwrap();
+
+        let dirs: Vec<&SnapshotEntry> = snapshot.entries.iter().filter(|e| e.is_dir).collect();
+        let files: Vec<&SnapshotEntry> = snapshot.entries.iter().filter(|e| !e.is_dir).collect();
+
+        assert_eq!(dirs.len(), 2); // alpha, beta
+        assert_eq!(files.len(), 3); // .hidden, file_a.txt, file_b.rs
+    }
+
+    #[test]
+    fn snapshot_sort_is_stable() {
+        let dir = setup_large_dir(20);
+        let mut snapshot1 = DirSnapshot::collect(dir.path()).unwrap();
+        let mut snapshot2 = snapshot1.clone();
+
+        snapshot1.sort(&SortBy::Name, true);
+        snapshot2.sort(&SortBy::Name, true);
+
+        let names1: Vec<String> = snapshot1
+            .entries
+            .iter()
+            .map(|e| e.name.to_string_lossy().to_string())
+            .collect();
+        let names2: Vec<String> = snapshot2
+            .entries
+            .iter()
+            .map(|e| e.name.to_string_lossy().to_string())
+            .collect();
+
+        assert_eq!(names1, names2);
     }
 }
