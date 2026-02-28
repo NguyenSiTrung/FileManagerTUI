@@ -30,6 +30,9 @@ pub struct GeneralConfig {
     pub max_entries_per_page: Option<u32>,
     /// Maximum entries for deep search filesystem walk (default: 10000).
     pub search_max_entries: Option<u32>,
+    /// Maximum entries in a DirSnapshot (default: 500000).
+    /// Limits memory usage for very large directories. Clamped to 10000..5000000.
+    pub snapshot_max_entries: Option<u32>,
 }
 
 /// Preview panel settings.
@@ -154,6 +157,12 @@ pub const MIN_ENTRIES_PER_PAGE: u32 = 100;
 pub const MAX_ENTRIES_PER_PAGE: u32 = 50_000;
 /// Default max entries for deep search walk.
 pub const DEFAULT_SEARCH_MAX_ENTRIES: u32 = 10_000;
+/// Default max entries for DirSnapshot.
+pub const DEFAULT_SNAPSHOT_MAX_ENTRIES: u32 = 500_000;
+/// Minimum allowed value for snapshot_max_entries.
+pub const MIN_SNAPSHOT_MAX_ENTRIES: u32 = 10_000;
+/// Maximum allowed value for snapshot_max_entries.
+pub const MAX_SNAPSHOT_MAX_ENTRIES: u32 = 5_000_000;
 
 // ── Config file locator ──────────────────────────────────────────────────────
 
@@ -227,6 +236,10 @@ impl AppConfig {
                     .general
                     .search_max_entries
                     .or(self.general.search_max_entries),
+                snapshot_max_entries: other
+                    .general
+                    .snapshot_max_entries
+                    .or(self.general.snapshot_max_entries),
             },
             preview: PreviewConfig {
                 max_full_preview_bytes: other
@@ -423,6 +436,16 @@ impl AppConfig {
         self.general
             .search_max_entries
             .unwrap_or(DEFAULT_SEARCH_MAX_ENTRIES) as usize
+    }
+
+    /// Max entries for DirSnapshot.
+    /// Clamped to [MIN_SNAPSHOT_MAX_ENTRIES, MAX_SNAPSHOT_MAX_ENTRIES].
+    pub fn snapshot_max_entries(&self) -> usize {
+        let raw = self
+            .general
+            .snapshot_max_entries
+            .unwrap_or(DEFAULT_SNAPSHOT_MAX_ENTRIES);
+        raw.clamp(MIN_SNAPSHOT_MAX_ENTRIES, MAX_SNAPSHOT_MAX_ENTRIES) as usize
     }
 }
 

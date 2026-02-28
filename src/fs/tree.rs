@@ -100,8 +100,9 @@ impl DirSnapshot {
     /// Returns a snapshot with lightweight entries (name + is_dir flag).
     /// Permission-denied and broken symlink entries are skipped and counted.
     /// The snapshot is unsorted — call `sort()` before pagination.
+    /// Capped at 500K entries by default to prevent unbounded memory usage.
     pub fn collect(path: &Path) -> Result<Self> {
-        Self::collect_with_limit(path, usize::MAX)
+        Self::collect_with_limit(path, crate::config::DEFAULT_SNAPSHOT_MAX_ENTRIES as usize)
     }
 
     /// Collect a directory snapshot with a maximum entry limit.
