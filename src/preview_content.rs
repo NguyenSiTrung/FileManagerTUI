@@ -10,12 +10,6 @@ use syntect::parsing::SyntaxSet;
 
 use crate::app::ViewMode;
 
-/// Default max file size before switching to head+tail mode (1 MB).
-pub const DEFAULT_MAX_FULL_PREVIEW_BYTES: u64 = 1_048_576;
-/// Default number of head lines in head+tail mode.
-pub const DEFAULT_HEAD_LINES: usize = 50;
-/// Default number of tail lines in head+tail mode.
-pub const DEFAULT_TAIL_LINES: usize = 20;
 /// Line count adjustment step for +/- keys.
 pub const LINE_COUNT_STEP: usize = 10;
 

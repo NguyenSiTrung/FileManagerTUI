@@ -113,17 +113,17 @@ async fn main() -> error::Result<()> {
 
     // Load configuration: file sources + CLI overrides
     let cli_overrides = cli.as_config_overrides();
-    let _config = AppConfig::load(cli.config.as_deref(), Some(&cli_overrides));
+    let config = AppConfig::load(cli.config.as_deref(), Some(&cli_overrides));
 
     install_panic_hook();
 
     let mut tui = Tui::new()?;
-    let mut app = App::new(&path)?;
+    let mut app = App::new(&path, config)?;
     let mut events = EventHandler::new(Duration::from_millis(16));
     let event_tx = events.sender();
 
     // Initialize filesystem watcher (using merged config)
-    let _watcher = if !_config.watcher_enabled() {
+    let _watcher = if !app.config.watcher_enabled() {
         app.watcher_active = false;
         None
     } else {
@@ -134,7 +134,7 @@ async fn main() -> error::Result<()> {
 
         match FsWatcher::new(
             &path,
-            Duration::from_millis(_config.debounce_ms()),
+            Duration::from_millis(app.config.debounce_ms()),
             ignore_patterns,
             fs::watcher::DEFAULT_FLOOD_THRESHOLD,
             event_tx.clone(),

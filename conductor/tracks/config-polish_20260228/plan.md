@@ -11,13 +11,13 @@
   - [x] Merge logic: later sources fill in `None` fields from earlier sources
   - [x] Write unit tests for default values, TOML parsing, merge behavior, missing file handling
 
-- [ ] Task 2: Extend CLI argument parsing with full options
+- [x] Task 2: Extend CLI argument parsing with full options *(89f0f1e)*
   <!-- files: src/main.rs -->
   <!-- depends: task1 -->
-  - [ ] Add all clap args: `--config`, `--no-preview`, `--no-watcher`, `--no-icons`, `--head-lines`, `--tail-lines`, `--max-preview`, `--theme`, `--no-mouse`
-  - [ ] Create `CliArgs::into_config_overrides()` to produce partial `AppConfig` from CLI flags
-  - [ ] Wire CLI overrides as highest-priority source in `AppConfig::load()`
-  - [ ] Write tests for CLI flag → config override mapping
+  - [x] Add all clap args: `--config`, `--no-preview`, `--no-watcher`, `--no-icons`, `--head-lines`, `--tail-lines`, `--max-preview`, `--theme`, `--no-mouse`
+  - [x] Create `CliArgs::as_config_overrides()` to produce partial `AppConfig` from CLI flags
+  - [x] Wire CLI overrides as highest-priority source in `AppConfig::load()`
+  - [x] Write tests for CLI flag → config override mapping
 
 - [ ] Task 3: Integrate `AppConfig` into `App` and runtime
   <!-- files: src/app.rs, src/main.rs -->

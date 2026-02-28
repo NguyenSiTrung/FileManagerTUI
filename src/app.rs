@@ -10,6 +10,7 @@ use syntect::highlighting::Theme;
 use syntect::parsing::SyntaxSet;
 use tokio::sync::mpsc;
 
+use crate::config::AppConfig;
 use crate::error::Result;
 use crate::fs::clipboard::{ClipboardOp, ClipboardState};
 use crate::fs::tree::{NodeType, TreeState};
@@ -140,6 +141,8 @@ pub enum UndoAction {
 
 /// Main application state.
 pub struct App {
+    /// Merged configuration (CLI + file + defaults).
+    pub config: AppConfig,
     pub tree_state: TreeState,
     pub should_quit: bool,
     #[allow(dead_code)]
@@ -170,12 +173,17 @@ pub struct App {
 }
 
 impl App {
-    /// Create a new App rooted at the given path.
-    pub fn new(path: &Path) -> Result<Self> {
-        let tree_state = TreeState::new(path)?;
+    /// Create a new App rooted at the given path, using the provided config.
+    pub fn new(path: &Path, config: AppConfig) -> Result<Self> {
+        let mut tree_state = TreeState::new(path)?;
+        // Apply config: show_hidden
+        tree_state.show_hidden = config.show_hidden();
+        tree_state.flatten();
+
         let syntax_set = SyntaxSet::load_defaults_newlines();
-        let syntax_theme = preview_content::load_theme(None);
+        let syntax_theme = preview_content::load_theme(Some(config.syntax_theme_name()));
         Ok(Self {
+            config,
             tree_state,
             should_quit: false,
             mode: AppMode::Normal,
@@ -651,8 +659,8 @@ impl App {
                 line_wrap: false,
                 total_lines: total,
                 is_large_file: false,
-                head_lines: preview_content::DEFAULT_HEAD_LINES,
-                tail_lines: preview_content::DEFAULT_TAIL_LINES,
+                head_lines: self.config.head_lines(),
+                tail_lines: self.config.tail_lines(),
             };
             return;
         }
@@ -676,8 +684,8 @@ impl App {
                 line_wrap: false,
                 total_lines: total,
                 is_large_file: false,
-                head_lines: preview_content::DEFAULT_HEAD_LINES,
-                tail_lines: preview_content::DEFAULT_TAIL_LINES,
+                head_lines: self.config.head_lines(),
+                tail_lines: self.config.tail_lines(),
             };
             return;
         }
@@ -693,20 +701,21 @@ impl App {
                 line_wrap: false,
                 total_lines: total,
                 is_large_file: false,
-                head_lines: preview_content::DEFAULT_HEAD_LINES,
-                tail_lines: preview_content::DEFAULT_TAIL_LINES,
+                head_lines: self.config.head_lines(),
+                tail_lines: self.config.tail_lines(),
             };
             return;
         }
 
-        // Check file size for large-file mode
+        // Check file size for large-file mode (using config values)
         let file_size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+        let max_preview = self.config.max_full_preview_bytes();
+        let head = self.config.head_lines();
+        let tail = self.config.tail_lines();
 
-        let is_large = file_size > preview_content::DEFAULT_MAX_FULL_PREVIEW_BYTES;
+        let is_large = file_size > max_preview;
 
         if is_large {
-            let head = preview_content::DEFAULT_HEAD_LINES;
-            let tail = preview_content::DEFAULT_TAIL_LINES;
             let (lines, total) = preview_content::load_head_tail_content(
                 &path,
                 &self.syntax_set,
@@ -740,8 +749,8 @@ impl App {
                 line_wrap: false,
                 total_lines: total,
                 is_large_file: false,
-                head_lines: preview_content::DEFAULT_HEAD_LINES,
-                tail_lines: preview_content::DEFAULT_TAIL_LINES,
+                head_lines: head,
+                tail_lines: tail,
             };
         }
     }
@@ -1179,7 +1188,7 @@ mod tests {
         File::create(dir.path().join("file_a.txt")).unwrap();
         File::create(dir.path().join("file_b.rs")).unwrap();
         File::create(dir.path().join(".hidden")).unwrap();
-        let app = App::new(dir.path()).unwrap();
+        let app = App::new(dir.path(), crate::config::AppConfig::default()).unwrap();
         (dir, app)
     }
 
