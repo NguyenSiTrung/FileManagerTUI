@@ -935,6 +935,11 @@ impl App {
     /// Close the fuzzy finder overlay without navigating.
     pub fn close_search(&mut self) {
         self.mode = AppMode::Normal;
+        // Filesystem events were silently dropped while in Search mode,
+        // so invalidate the cache so the next open_search() rebuilds it.
+        self.invalidate_search_cache();
+        // Force preview refresh in case selection changed externally.
+        self.last_previewed_index = None;
     }
 
     /// Insert a character into the search query and re-score.
@@ -1129,6 +1134,10 @@ impl App {
         self.tree_state.is_filtering = false;
         self.tree_state.flatten();
         self.mode = AppMode::Normal;
+        // Filesystem events were silently dropped while in Filter mode,
+        // so invalidate the search cache and force preview refresh.
+        self.invalidate_search_cache();
+        self.last_previewed_index = None;
     }
 
     /// Accept the current filter and return to normal mode (filtered view stays).
@@ -1159,7 +1168,18 @@ impl App {
     ///
     /// Preserves: selected path, scroll offset, expanded directories.
     /// Clears: multi-select, search cache.
+    ///
+    /// Skipped when in Search or Filter mode to avoid destroying the search
+    /// cache or overwriting the filtered flat_items view.
     pub fn handle_fs_change(&mut self, paths: Vec<PathBuf>) {
+        // Don't process filesystem changes while search/filter is active:
+        // - Search: would invalidate_search_cache(), clearing cached_paths so
+        //   fuzzy scoring returns no results.
+        // - Filter: would call flatten() which rebuilds flat_items without the
+        //   filter, undoing the filtered view.
+        if matches!(self.mode, AppMode::Search | AppMode::Filter) {
+            return;
+        }
         // Capture current state
         let selected_path = self
             .tree_state
@@ -2065,15 +2085,68 @@ mod tests {
     #[test]
     fn handle_fs_change_invalidates_search_cache() {
         let (dir, mut app) = setup_app();
-        // Build search cache
+        // Build search cache by opening and closing,
+        // then rebuild it manually since close_search invalidates.
         app.open_search();
         app.close_search();
+        // Rebuild the cache after close.
+        app.search_state.cached_paths = Some(app.build_path_index());
         assert!(app.search_state.cached_paths.is_some());
 
-        // Trigger fs change
+        // Trigger fs change in Normal mode
         File::create(dir.path().join("cache_buster.txt")).unwrap();
         app.handle_fs_change(vec![dir.path().join("cache_buster.txt")]);
         assert!(app.search_state.cached_paths.is_none());
+    }
+
+    #[test]
+    fn fs_change_skipped_during_search_mode() {
+        let (_dir, mut app) = setup_app();
+        // Open search — builds path cache and sets mode to Search
+        app.open_search();
+        assert!(app.search_state.cached_paths.is_some());
+        assert_eq!(app.mode, AppMode::Search);
+
+        // While in Search mode, fs change should be silently ignored
+        app.handle_fs_change(vec![app.tree_state.root.path.clone()]);
+        // Cache must NOT be invalidated while searching
+        assert!(
+            app.search_state.cached_paths.is_some(),
+            "search cache should survive fs events during search mode"
+        );
+    }
+
+    #[test]
+    fn fs_change_skipped_during_filter_mode() {
+        let (_dir, mut app) = setup_app();
+        app.start_filter();
+        app.filter_input_char('f');
+        let filtered_count = app.tree_state.flat_items.len();
+        assert_eq!(app.mode, AppMode::Filter);
+
+        // While in Filter mode, fs change should be silently ignored
+        app.handle_fs_change(vec![app.tree_state.root.path.clone()]);
+        // flat_items should still be the filtered set, not the full tree
+        assert_eq!(
+            app.tree_state.flat_items.len(),
+            filtered_count,
+            "filtered view should survive fs events during filter mode"
+        );
+    }
+
+    #[test]
+    fn fs_change_works_after_closing_search() {
+        let (dir, mut app) = setup_app();
+        // Open and close search to return to Normal mode
+        app.open_search();
+        app.close_search();
+        assert_eq!(app.mode, AppMode::Normal);
+
+        // Now fs change should process normally
+        let original_count = app.tree_state.flat_items.len();
+        File::create(dir.path().join("new_file.txt")).unwrap();
+        app.handle_fs_change(vec![dir.path().join("new_file.txt")]);
+        assert!(app.tree_state.flat_items.len() > original_count);
     }
 
     #[test]

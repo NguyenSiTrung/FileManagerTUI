@@ -1379,9 +1379,8 @@ mod tests {
     #[test]
     fn search_cache_invalidated_after_create() {
         let (dir, mut app) = setup_app();
-        // Build cache
-        app.open_search();
-        app.close_search();
+        // Directly set a cached path list to simulate a prior search
+        app.search_state.cached_paths = Some(vec![dir.path().join("file_a.txt")]);
         assert!(app.search_state.cached_paths.is_some());
 
         // Create a file via dialog
@@ -1398,10 +1397,9 @@ mod tests {
 
     #[test]
     fn search_cache_invalidated_after_delete() {
-        let (dir, mut app) = setup_app();
-        // Build cache
-        app.open_search();
-        app.close_search();
+        let (_dir, mut app) = setup_app();
+        // Directly set a cached path list to simulate a prior search
+        app.search_state.cached_paths = Some(vec![]);
         assert!(app.search_state.cached_paths.is_some());
 
         // Select file_a.txt (index 3) and delete
