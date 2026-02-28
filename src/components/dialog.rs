@@ -71,6 +71,9 @@ impl<'a> Widget for DialogWidget<'a> {
             } => {
                 render_progress_dialog(message, *current, *total, self.theme, area, buf);
             }
+            DialogKind::SaveConfirm => {
+                render_save_confirm_dialog(self.theme, area, buf);
+            }
         }
     }
 }
@@ -302,6 +305,46 @@ fn render_progress_dialog(
         .add_modifier(Modifier::DIM);
     let hint_line = Line::from(Span::styled(hint, hint_style));
     if inner.height > 2 {
+        buf.set_line(inner.x, inner.y + inner.height - 1, &hint_line, inner.width);
+    }
+}
+
+fn render_save_confirm_dialog(theme: &ThemeColors, area: Rect, buf: &mut Buffer) {
+    let dialog_width = 50u16.min(area.width.saturating_sub(4));
+    let dialog_height = 6;
+    let rect = DialogWidget::centered_rect(dialog_width, dialog_height, area);
+
+    Clear.render(rect, buf);
+
+    let block = Block::default()
+        .title(" Unsaved Changes ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(theme.warning_fg))
+        .padding(Padding::horizontal(1));
+
+    let inner = block.inner(rect);
+    block.render(rect, buf);
+
+    if inner.height == 0 || inner.width == 0 {
+        return;
+    }
+
+    // Question text
+    let msg = Line::from(Span::styled(
+        "Save changes before leaving?",
+        Style::default()
+            .fg(theme.status_fg)
+            .add_modifier(Modifier::BOLD),
+    ));
+    buf.set_line(inner.x, inner.y + inner.height / 2, &msg, inner.width);
+
+    // Hint at bottom
+    let hint = "[y] Save  [n] Discard  [c/Esc] Cancel";
+    let hint_style = Style::default()
+        .fg(theme.dim_fg)
+        .add_modifier(Modifier::DIM);
+    let hint_line = Line::from(Span::styled(hint, hint_style));
+    if inner.height > 1 {
         buf.set_line(inner.x, inner.y + inner.height - 1, &hint_line, inner.width);
     }
 }

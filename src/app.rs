@@ -41,6 +41,8 @@ pub enum DialogKind {
         current: usize,
         total: usize,
     },
+    /// Save confirmation when exiting edit mode with unsaved changes.
+    SaveConfirm,
 }
 
 /// Which panel currently has focus.
@@ -125,7 +127,6 @@ pub enum AppMode {
     Search,
     Filter,
     Help,
-    #[allow(dead_code)]
     Edit,
 }
 
@@ -192,7 +193,6 @@ pub struct App {
     /// Last rendered terminal panel area (for mouse click mapping).
     pub terminal_area: Rect,
     /// Editor state for the preview panel edit mode.
-    #[allow(dead_code)]
     pub editor_state: Option<EditorState>,
 }
 
@@ -829,6 +829,79 @@ impl App {
             self.preview_state.total_lines.max(1)
         } else {
             self.preview_state.content_lines.len()
+        }
+    }
+
+    /// Enter edit mode for the currently previewed file.
+    /// Returns false if editing is not possible (binary, directory, etc.).
+    pub fn enter_edit_mode(&mut self) -> bool {
+        // Must be in Normal mode with preview focused
+        if self.mode != AppMode::Normal || self.focused_panel != FocusedPanel::Preview {
+            return false;
+        }
+
+        let path = match &self.preview_state.current_path {
+            Some(p) => p.clone(),
+            None => return false,
+        };
+
+        // Guard: directories cannot be edited
+        if let Some(item) = self
+            .tree_state
+            .flat_items
+            .get(self.tree_state.selected_index)
+        {
+            if item.node_type == NodeType::Directory {
+                return false;
+            }
+        }
+
+        // Guard: binary files cannot be edited
+        if crate::preview_content::is_binary_file(&path) {
+            self.set_status_message("Cannot edit binary files".to_string());
+            return false;
+        }
+
+        // Load file into editor state
+        match EditorState::from_file(&path) {
+            Ok(state) => {
+                self.editor_state = Some(state);
+                self.mode = AppMode::Edit;
+                true
+            }
+            Err(e) => {
+                self.set_status_message(format!("Cannot edit: {}", e));
+                false
+            }
+        }
+    }
+
+    /// Exit edit mode and return to normal mode.
+    /// Does NOT check for unsaved changes — caller should handle save confirmation.
+    pub fn exit_edit_mode(&mut self) {
+        self.editor_state = None;
+        self.mode = AppMode::Normal;
+        // Force re-preview of the current file to reflect any saved changes
+        self.last_previewed_index = None;
+    }
+
+    /// Save the editor buffer to disk.
+    /// Returns Ok(()) on success or Err with message on failure.
+    pub fn save_editor_buffer(&mut self) -> std::result::Result<(), String> {
+        if let Some(ref mut editor) = self.editor_state {
+            match editor.save() {
+                Ok(()) => {
+                    self.set_status_message("File saved".to_string());
+                    Ok(())
+                }
+                Err(e) => {
+                    let msg = format!("Save failed: {}", e);
+                    self.set_status_message(msg.clone());
+                    Err(msg)
+                }
+            }
+        } else {
+            Err("No editor state".to_string())
         }
     }
 

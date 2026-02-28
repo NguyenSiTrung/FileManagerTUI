@@ -109,10 +109,235 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent, event_tx: &mpsc::Unbounded
 }
 
 /// Handle keys when in Edit mode (editing a file in the preview panel).
-#[allow(dead_code)]
-fn handle_editor_keys(_app: &mut App, _key: KeyEvent) {
-    // Phase 2 will implement the full editor key handling.
-    // For now, Esc exits edit mode.
+fn handle_editor_keys(app: &mut App, key: KeyEvent) {
+    // If find bar is active, handle find/replace keys first
+    if app
+        .editor_state
+        .as_ref()
+        .is_some_and(|e| e.find_state.active)
+    {
+        handle_editor_find_keys(app, key);
+        return;
+    }
+
+    match key.code {
+        // Exit edit mode
+        KeyCode::Esc => {
+            let is_modified = app.editor_state.as_ref().is_some_and(|e| e.modified);
+            if is_modified {
+                // Show save confirmation dialog
+                app.mode = AppMode::Dialog(DialogKind::SaveConfirm);
+            } else {
+                app.exit_edit_mode();
+            }
+        }
+
+        // Save
+        KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            let _ = app.save_editor_buffer();
+        }
+
+        // Undo/Redo
+        KeyCode::Char('z') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            if let Some(ref mut editor) = app.editor_state {
+                editor.undo();
+            }
+        }
+        KeyCode::Char('y') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            if let Some(ref mut editor) = app.editor_state {
+                editor.redo();
+            }
+        }
+
+        // Find / Replace
+        KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            if let Some(ref mut editor) = app.editor_state {
+                editor.open_find();
+            }
+        }
+        KeyCode::Char('h') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            if let Some(ref mut editor) = app.editor_state {
+                editor.open_find_replace();
+            }
+        }
+
+        // Editor clipboard
+        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            if let Some(ref mut editor) = app.editor_state {
+                editor.copy_line();
+            }
+        }
+        KeyCode::Char('x') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            if let Some(ref mut editor) = app.editor_state {
+                editor.cut_line();
+            }
+        }
+        KeyCode::Char('v') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            if let Some(ref mut editor) = app.editor_state {
+                editor.paste();
+            }
+        }
+
+        // Navigation with Ctrl modifiers
+        KeyCode::Home if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            if let Some(ref mut editor) = app.editor_state {
+                editor.move_to_top();
+            }
+        }
+        KeyCode::End if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            if let Some(ref mut editor) = app.editor_state {
+                editor.move_to_bottom();
+            }
+        }
+
+        // Basic navigation
+        KeyCode::Up => {
+            if let Some(ref mut editor) = app.editor_state {
+                editor.move_up();
+            }
+        }
+        KeyCode::Down => {
+            if let Some(ref mut editor) = app.editor_state {
+                editor.move_down();
+            }
+        }
+        KeyCode::Left => {
+            if let Some(ref mut editor) = app.editor_state {
+                editor.move_left();
+            }
+        }
+        KeyCode::Right => {
+            if let Some(ref mut editor) = app.editor_state {
+                editor.move_right();
+            }
+        }
+        KeyCode::Home => {
+            if let Some(ref mut editor) = app.editor_state {
+                editor.move_home();
+            }
+        }
+        KeyCode::End => {
+            if let Some(ref mut editor) = app.editor_state {
+                editor.move_end();
+            }
+        }
+        KeyCode::PageUp => {
+            if let Some(ref mut editor) = app.editor_state {
+                editor.page_up();
+            }
+        }
+        KeyCode::PageDown => {
+            if let Some(ref mut editor) = app.editor_state {
+                editor.page_down();
+            }
+        }
+
+        // Editing
+        KeyCode::Enter => {
+            if let Some(ref mut editor) = app.editor_state {
+                editor.insert_newline();
+                editor.ensure_cursor_visible();
+            }
+        }
+        KeyCode::Backspace => {
+            if let Some(ref mut editor) = app.editor_state {
+                editor.delete_char_before();
+                editor.ensure_cursor_visible();
+            }
+        }
+        KeyCode::Delete => {
+            if let Some(ref mut editor) = app.editor_state {
+                editor.delete_char_at();
+            }
+        }
+        KeyCode::Tab if key.modifiers.contains(KeyModifiers::SHIFT) => {
+            if let Some(ref mut editor) = app.editor_state {
+                editor.dedent();
+            }
+        }
+        KeyCode::Tab => {
+            if let Some(ref mut editor) = app.editor_state {
+                editor.insert_tab();
+            }
+        }
+
+        // Character input
+        KeyCode::Char(c) => {
+            if let Some(ref mut editor) = app.editor_state {
+                editor.insert_char(c);
+                editor.ensure_cursor_visible();
+            }
+        }
+
+        _ => {}
+    }
+}
+
+/// Handle keys when the find/replace bar is active in editor mode.
+fn handle_editor_find_keys(app: &mut App, key: KeyEvent) {
+    let editor = match app.editor_state.as_mut() {
+        Some(e) => e,
+        None => return,
+    };
+
+    match key.code {
+        KeyCode::Esc => {
+            editor.close_find();
+            app.mode = AppMode::Edit;
+        }
+        KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
+            editor.find_previous();
+        }
+        KeyCode::Enter => {
+            if editor.find_state.replace_mode && editor.find_state.in_replace_field {
+                editor.replace_current();
+            } else {
+                editor.find_next();
+            }
+        }
+        KeyCode::Tab => {
+            if editor.find_state.replace_mode {
+                editor.find_state.in_replace_field = !editor.find_state.in_replace_field;
+            }
+        }
+        KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            if editor.find_state.replace_mode {
+                let count = editor.replace_all();
+                app.set_status_message(format!(
+                    "Replaced {} occurrence{}",
+                    count,
+                    if count == 1 { "" } else { "s" }
+                ));
+            }
+        }
+        KeyCode::Backspace => {
+            if editor.find_state.in_replace_field {
+                if editor.find_state.replacement_cursor > 0 {
+                    let pos = editor.find_state.replacement_cursor;
+                    editor.find_state.replacement.remove(pos - 1);
+                    editor.find_state.replacement_cursor -= 1;
+                }
+            } else if editor.find_state.query_cursor > 0 {
+                let pos = editor.find_state.query_cursor;
+                editor.find_state.query.remove(pos - 1);
+                editor.find_state.query_cursor -= 1;
+                editor.update_find_matches();
+            }
+        }
+        KeyCode::Char(c) => {
+            if editor.find_state.in_replace_field {
+                let pos = editor.find_state.replacement_cursor;
+                editor.find_state.replacement.insert(pos, c);
+                editor.find_state.replacement_cursor += 1;
+            } else {
+                let pos = editor.find_state.query_cursor;
+                editor.find_state.query.insert(pos, c);
+                editor.find_state.query_cursor += 1;
+                editor.update_find_matches();
+            }
+        }
+        _ => {}
+    }
 }
 
 fn handle_normal_mode(app: &mut App, key: KeyEvent, event_tx: &mpsc::UnboundedSender<Event>) {
@@ -294,6 +519,10 @@ fn handle_tree_keys(app: &mut App, key: KeyEvent, event_tx: &mpsc::UnboundedSend
 
 fn handle_preview_keys(app: &mut App, key: KeyEvent) {
     match key.code {
+        // Enter edit mode
+        KeyCode::Char('e') => {
+            app.enter_edit_mode();
+        }
         // Line-by-line scroll
         KeyCode::Char('j') | KeyCode::Down => app.preview_scroll_down(),
         KeyCode::Char('k') | KeyCode::Up => app.preview_scroll_up(),
@@ -502,6 +731,9 @@ fn handle_dialog_mode(app: &mut App, key: KeyEvent) {
         DialogKind::Progress { .. } => {
             handle_progress_dialog(app, key);
         }
+        DialogKind::SaveConfirm => {
+            handle_save_confirm(app, key);
+        }
         _ => {
             handle_input_dialog(app, key, kind);
         }
@@ -636,6 +868,28 @@ fn handle_progress_dialog(app: &mut App, key: KeyEvent) {
         app.cancel_operation();
         app.close_dialog();
         app.set_status_message("Operation cancelled".to_string());
+    }
+}
+
+/// Handle the save confirmation dialog when exiting edit mode with unsaved changes.
+/// Y/y = Save and exit, N/n = Discard and exit, Esc/C/c = Cancel (stay in edit mode).
+fn handle_save_confirm(app: &mut App, key: KeyEvent) {
+    match key.code {
+        KeyCode::Char('y') | KeyCode::Char('Y') => {
+            let _ = app.save_editor_buffer();
+            app.close_dialog();
+            app.exit_edit_mode();
+        }
+        KeyCode::Char('n') | KeyCode::Char('N') => {
+            app.close_dialog();
+            app.exit_edit_mode();
+            app.set_status_message("Changes discarded".to_string());
+        }
+        KeyCode::Esc | KeyCode::Char('c') | KeyCode::Char('C') => {
+            // Cancel — return to edit mode
+            app.mode = AppMode::Edit;
+        }
+        _ => {}
     }
 }
 
