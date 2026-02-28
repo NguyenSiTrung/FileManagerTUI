@@ -22,5 +22,5 @@
 
 ---
 
-## [~] Track: Preview Panel Edit Mode
+## [x] Track: Preview Panel Edit Mode
 *Link: [./conductor/tracks/preview-edit_20260228/](./conductor/tracks/preview-edit_20260228/)*
