@@ -37,6 +37,25 @@ pub enum EditorAction {
     Compound { actions: Vec<EditorAction> },
 }
 
+/// Represents a text selection range in the editor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Selection {
+    /// Anchor position (where selection started): (line, col).
+    pub anchor_line: usize,
+    pub anchor_col: usize,
+    // The cursor end of the selection moves with Shift+Arrow.
+    // The actual cursor_line/cursor_col in EditorState is the "active" end.
+}
+
+impl Selection {
+    pub fn new(line: usize, col: usize) -> Self {
+        Self {
+            anchor_line: line,
+            anchor_col: col,
+        }
+    }
+}
+
 /// State for the find/replace bar.
 #[derive(Debug, Default)]
 #[allow(dead_code)]
@@ -99,6 +118,8 @@ pub struct EditorState {
     pub group_start_col: usize,
     /// Whether the current group is a deletion group (vs insert).
     pub group_is_delete: bool,
+    /// Active text selection (None if no selection).
+    pub selection: Option<Selection>,
 }
 
 /// Maximum entries in the undo stack.
@@ -148,6 +169,7 @@ impl EditorState {
             group_start_line: 0,
             group_start_col: 0,
             group_is_delete: false,
+            selection: None,
         }
     }
 
@@ -182,6 +204,7 @@ impl EditorState {
             .map(|l| l.len())
             .unwrap_or(0);
         self.cursor_col = col.min(line_len);
+        self.selection = None;
         self.ensure_cursor_visible();
     }
 
@@ -320,7 +343,11 @@ impl EditorState {
     // ── Buffer mutation methods ───────────────────────────────────────
 
     /// Insert a character at the current cursor position.
+    /// If there is a selection, delete it first.
     pub fn insert_char(&mut self, ch: char) {
+        if self.selection.is_some() {
+            self.delete_selection();
+        }
         self.record_char_insert(self.cursor_line, self.cursor_col, ch);
         if let Some(line) = self.buffer.get_mut(self.cursor_line) {
             // Find byte index from char column
@@ -332,7 +359,12 @@ impl EditorState {
     }
 
     /// Delete the character before the cursor (Backspace).
+    /// If there is a selection, delete it instead.
     pub fn delete_char_before(&mut self) {
+        if self.selection.is_some() {
+            self.delete_selection();
+            return;
+        }
         if self.cursor_col > 0 {
             // Extract char info before mutating
             let cur_line = self.cursor_line;
@@ -365,7 +397,12 @@ impl EditorState {
     }
 
     /// Delete the character at the cursor (Delete key).
+    /// If there is a selection, delete it instead.
     pub fn delete_char_at(&mut self) {
+        if self.selection.is_some() {
+            self.delete_selection();
+            return;
+        }
         let line_len = self.current_line_len();
         if self.cursor_col < line_len {
             // Extract info before mutating
@@ -396,7 +433,11 @@ impl EditorState {
 
     /// Split the current line at the cursor position (Enter).
     /// Implements auto-indent: copies leading whitespace from the current line.
+    /// If there is a selection, delete it first.
     pub fn insert_newline(&mut self) {
+        if self.selection.is_some() {
+            self.delete_selection();
+        }
         self.flush_group();
 
         if let Some(line) = self.buffer.get(self.cursor_line) {
@@ -423,8 +464,9 @@ impl EditorState {
 
     // ── Navigation ────────────────────────────────────────────────────
 
-    /// Move cursor up one line.
+    /// Move cursor up one line (clears selection).
     pub fn move_up(&mut self) {
+        self.selection = None;
         if self.cursor_line > 0 {
             self.cursor_line -= 1;
             self.clamp_cursor();
@@ -432,8 +474,9 @@ impl EditorState {
         }
     }
 
-    /// Move cursor down one line.
+    /// Move cursor down one line (clears selection).
     pub fn move_down(&mut self) {
+        self.selection = None;
         if self.cursor_line + 1 < self.buffer.len() {
             self.cursor_line += 1;
             self.clamp_cursor();
@@ -441,8 +484,9 @@ impl EditorState {
         }
     }
 
-    /// Move cursor left one character.
+    /// Move cursor left one character (clears selection).
     pub fn move_left(&mut self) {
+        self.selection = None;
         if self.cursor_col > 0 {
             self.cursor_col -= 1;
         } else if self.cursor_line > 0 {
@@ -452,8 +496,9 @@ impl EditorState {
         }
     }
 
-    /// Move cursor right one character.
+    /// Move cursor right one character (clears selection).
     pub fn move_right(&mut self) {
+        self.selection = None;
         let line_len = self.current_line_len();
         if self.cursor_col < line_len {
             self.cursor_col += 1;
@@ -464,42 +509,303 @@ impl EditorState {
         }
     }
 
-    /// Move cursor to the start of the current line.
+    /// Move cursor to the start of the current line (clears selection).
     pub fn move_home(&mut self) {
+        self.selection = None;
         self.cursor_col = 0;
     }
 
-    /// Move cursor to the end of the current line.
+    /// Move cursor to the end of the current line (clears selection).
     pub fn move_end(&mut self) {
+        self.selection = None;
         self.cursor_col = self.current_line_len();
     }
 
-    /// Move cursor to the first line.
+    /// Move cursor to the first line (clears selection).
     pub fn move_to_top(&mut self) {
+        self.selection = None;
         self.cursor_line = 0;
         self.cursor_col = 0;
         self.ensure_cursor_visible();
     }
 
-    /// Move cursor to the last line.
+    /// Move cursor to the last line (clears selection).
     pub fn move_to_bottom(&mut self) {
+        self.selection = None;
         self.cursor_line = self.buffer.len().saturating_sub(1);
         self.clamp_cursor();
         self.ensure_cursor_visible();
     }
 
-    /// Move cursor up by one page.
+    /// Move cursor up by one page (clears selection).
     pub fn page_up(&mut self) {
+        self.selection = None;
         let jump = self.visible_height.max(1);
         self.cursor_line = self.cursor_line.saturating_sub(jump);
         self.clamp_cursor();
         self.ensure_cursor_visible();
     }
 
-    /// Move cursor down by one page.
+    /// Move cursor down by one page (clears selection).
     pub fn page_down(&mut self) {
+        self.selection = None;
         let jump = self.visible_height.max(1);
         self.cursor_line = (self.cursor_line + jump).min(self.buffer.len().saturating_sub(1));
+        self.clamp_cursor();
+        self.ensure_cursor_visible();
+    }
+
+    // ── Selection-aware navigation (Shift+Arrow) ─────────────────────
+
+    /// Ensure a selection anchor exists; if not, set it at the current cursor pos.
+    fn ensure_selection_anchor(&mut self) {
+        if self.selection.is_none() {
+            self.selection = Some(Selection::new(self.cursor_line, self.cursor_col));
+        }
+    }
+
+    /// Extend selection upward one line.
+    pub fn select_up(&mut self) {
+        self.ensure_selection_anchor();
+        if self.cursor_line > 0 {
+            self.cursor_line -= 1;
+            self.clamp_cursor();
+            self.ensure_cursor_visible();
+        }
+    }
+
+    /// Extend selection downward one line.
+    pub fn select_down(&mut self) {
+        self.ensure_selection_anchor();
+        if self.cursor_line + 1 < self.buffer.len() {
+            self.cursor_line += 1;
+            self.clamp_cursor();
+            self.ensure_cursor_visible();
+        }
+    }
+
+    /// Extend selection left one character.
+    pub fn select_left(&mut self) {
+        self.ensure_selection_anchor();
+        if self.cursor_col > 0 {
+            self.cursor_col -= 1;
+        } else if self.cursor_line > 0 {
+            self.cursor_line -= 1;
+            self.cursor_col = self.current_line_len();
+            self.ensure_cursor_visible();
+        }
+    }
+
+    /// Extend selection right one character.
+    pub fn select_right(&mut self) {
+        self.ensure_selection_anchor();
+        let line_len = self.current_line_len();
+        if self.cursor_col < line_len {
+            self.cursor_col += 1;
+        } else if self.cursor_line + 1 < self.buffer.len() {
+            self.cursor_line += 1;
+            self.cursor_col = 0;
+            self.ensure_cursor_visible();
+        }
+    }
+
+    /// Extend selection to start of current line.
+    pub fn select_home(&mut self) {
+        self.ensure_selection_anchor();
+        self.cursor_col = 0;
+    }
+
+    /// Extend selection to end of current line.
+    pub fn select_end(&mut self) {
+        self.ensure_selection_anchor();
+        self.cursor_col = self.current_line_len();
+    }
+
+    /// Extend selection to beginning of document.
+    pub fn select_to_top(&mut self) {
+        self.ensure_selection_anchor();
+        self.cursor_line = 0;
+        self.cursor_col = 0;
+        self.ensure_cursor_visible();
+    }
+
+    /// Extend selection to end of document.
+    pub fn select_to_bottom(&mut self) {
+        self.ensure_selection_anchor();
+        self.cursor_line = self.buffer.len().saturating_sub(1);
+        self.cursor_col = self.current_line_len();
+        self.ensure_cursor_visible();
+    }
+
+    /// Extend selection up by one page.
+    pub fn select_page_up(&mut self) {
+        self.ensure_selection_anchor();
+        let jump = self.visible_height.max(1);
+        self.cursor_line = self.cursor_line.saturating_sub(jump);
+        self.clamp_cursor();
+        self.ensure_cursor_visible();
+    }
+
+    /// Extend selection down by one page.
+    pub fn select_page_down(&mut self) {
+        self.ensure_selection_anchor();
+        let jump = self.visible_height.max(1);
+        self.cursor_line = (self.cursor_line + jump).min(self.buffer.len().saturating_sub(1));
+        self.clamp_cursor();
+        self.ensure_cursor_visible();
+    }
+
+    /// Select all text in the buffer (Ctrl+A).
+    pub fn select_all(&mut self) {
+        self.selection = Some(Selection::new(0, 0));
+        self.cursor_line = self.buffer.len().saturating_sub(1);
+        self.cursor_col = self.current_line_len();
+    }
+
+    // ── Selection helpers ─────────────────────────────────────────────
+
+    /// Get the ordered (start, end) of the current selection as ((line, col), (line, col)).
+    /// Returns None if there is no selection.
+    pub fn selection_range(&self) -> Option<((usize, usize), (usize, usize))> {
+        let sel = self.selection.as_ref()?;
+        let a = (sel.anchor_line, sel.anchor_col);
+        let b = (self.cursor_line, self.cursor_col);
+        if a <= b {
+            Some((a, b))
+        } else {
+            Some((b, a))
+        }
+    }
+
+    /// Check if a character position (line, col) is within the current selection.
+    pub fn is_selected(&self, line: usize, col: usize) -> bool {
+        if let Some(((sl, sc), (el, ec))) = self.selection_range() {
+            if line < sl || line > el {
+                return false;
+            }
+            if line == sl && line == el {
+                return col >= sc && col < ec;
+            }
+            if line == sl {
+                return col >= sc;
+            }
+            if line == el {
+                return col < ec;
+            }
+            true // line is strictly between start and end
+        } else {
+            false
+        }
+    }
+
+    /// Get the selected text as a String. Returns empty string if no selection.
+    pub fn selected_text(&self) -> String {
+        let range = match self.selection_range() {
+            Some(r) => r,
+            None => return String::new(),
+        };
+        let ((sl, sc), (el, ec)) = range;
+        if sl == el {
+            // Single-line selection
+            if let Some(line) = self.buffer.get(sl) {
+                let start = char_to_byte_index(line, sc);
+                let end = char_to_byte_index(line, ec);
+                return line[start..end].to_string();
+            }
+            return String::new();
+        }
+        // Multi-line selection
+        let mut result = String::new();
+        for line_idx in sl..=el {
+            if let Some(line) = self.buffer.get(line_idx) {
+                if line_idx == sl {
+                    let start = char_to_byte_index(line, sc);
+                    result.push_str(&line[start..]);
+                    result.push('\n');
+                } else if line_idx == el {
+                    let end = char_to_byte_index(line, ec);
+                    result.push_str(&line[..end]);
+                } else {
+                    result.push_str(line);
+                    result.push('\n');
+                }
+            }
+        }
+        result
+    }
+
+    /// Delete the currently selected text and position cursor at the start of selection.
+    /// Records a compound undo action. Clears the selection afterwards.
+    pub fn delete_selection(&mut self) {
+        let range = match self.selection_range() {
+            Some(r) => r,
+            None => return,
+        };
+        let ((sl, sc), (el, ec)) = range;
+        self.selection = None;
+        self.flush_group();
+
+        if sl == el {
+            // Single-line deletion
+            if let Some(line) = self.buffer.get(sl) {
+                let start = char_to_byte_index(line, sc);
+                let end = char_to_byte_index(line, ec);
+                let deleted = line[start..end].to_string();
+                self.buffer[sl].replace_range(start..end, "");
+                self.record_action(EditorAction::DeleteGroup {
+                    line: sl,
+                    start_col: sc,
+                    chars: deleted,
+                });
+            }
+        } else {
+            // Multi-line deletion: we'll build a compound action
+            let mut actions = Vec::new();
+
+            // Collect the tail of the end line (part after ec)
+            let end_tail = if let Some(line) = self.buffer.get(el) {
+                let end_byte = char_to_byte_index(line, ec);
+                line[end_byte..].to_string()
+            } else {
+                String::new()
+            };
+
+            // Remove lines from el down to sl+1 (in reverse to keep indices valid)
+            for line_idx in (sl + 1..=el).rev() {
+                if line_idx < self.buffer.len() {
+                    let content = self.buffer.remove(line_idx);
+                    actions.push(EditorAction::RemoveLine {
+                        line: line_idx,
+                        content,
+                    });
+                }
+            }
+
+            // Truncate the start line at sc, then append end_tail
+            if let Some(line) = self.buffer.get_mut(sl) {
+                let start_byte = char_to_byte_index(line, sc);
+                let deleted_part = line[start_byte..].to_string();
+                line.truncate(start_byte);
+                line.push_str(&end_tail);
+                if !deleted_part.is_empty() {
+                    actions.push(EditorAction::DeleteGroup {
+                        line: sl,
+                        start_col: sc,
+                        chars: deleted_part,
+                    });
+                }
+            }
+
+            if !actions.is_empty() {
+                // Reverse actions so they replay correctly
+                actions.reverse();
+                self.record_action(EditorAction::Compound { actions });
+            }
+        }
+
+        self.cursor_line = sl;
+        self.cursor_col = sc;
+        self.modified = true;
         self.clamp_cursor();
         self.ensure_cursor_visible();
     }
@@ -726,15 +1032,27 @@ impl EditorState {
 
     // ── Clipboard ─────────────────────────────────────────────────────
 
-    /// Copy the current line to the editor clipboard.
+    /// Copy to editor clipboard. If there's a selection, copy the selected text;
+    /// otherwise, copy the current line.
     pub fn copy_line(&mut self) {
-        if let Some(line) = self.buffer.get(self.cursor_line) {
+        if self.selection.is_some() {
+            let text = self.selected_text();
+            if !text.is_empty() {
+                self.editor_clipboard = text.lines().map(String::from).collect();
+            }
+        } else if let Some(line) = self.buffer.get(self.cursor_line) {
             self.editor_clipboard = vec![line.clone()];
         }
     }
 
-    /// Cut the current line (copy + remove).
+    /// Cut to editor clipboard. If there's a selection, cut the selected text;
+    /// otherwise, cut the current line.
     pub fn cut_line(&mut self) {
+        if self.selection.is_some() {
+            self.copy_line();
+            self.delete_selection();
+            return;
+        }
         if self.buffer.len() <= 1 {
             // Don't remove the last line, just copy and clear it
             self.copy_line();
@@ -763,10 +1081,15 @@ impl EditorState {
         self.modified = true;
     }
 
-    /// Paste clipboard content at the cursor position (inserts lines below cursor).
+    /// Paste clipboard content. If clipboard was from a selection (inline text),
+    /// insert at cursor position. Otherwise, insert lines below cursor.
     pub fn paste(&mut self) {
         if self.editor_clipboard.is_empty() {
             return;
+        }
+        // If there's an active selection, delete it first
+        if self.selection.is_some() {
+            self.delete_selection();
         }
         self.flush_group();
         let mut actions = Vec::new();
@@ -807,7 +1130,11 @@ impl EditorState {
     }
 
     /// Insert one indentation unit at cursor position.
+    /// If there is a selection, delete it first.
     pub fn insert_tab(&mut self) {
+        if self.selection.is_some() {
+            self.delete_selection();
+        }
         let indent = self.detect_indent();
         self.flush_group();
         if let Some(line) = self.buffer.get_mut(self.cursor_line) {

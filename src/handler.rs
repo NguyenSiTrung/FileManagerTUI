@@ -207,6 +207,13 @@ fn handle_editor_keys(app: &mut App, key: KeyEvent) {
             }
         }
 
+        // Select all (Ctrl+A)
+        KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            if let Some(ref mut editor) = app.editor_state {
+                editor.select_all();
+            }
+        }
+
         // Find / Replace
         KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             if let Some(ref mut editor) = app.editor_state {
@@ -233,6 +240,66 @@ fn handle_editor_keys(app: &mut App, key: KeyEvent) {
         KeyCode::Char('v') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             if let Some(ref mut editor) = app.editor_state {
                 editor.paste();
+            }
+        }
+
+        // Selection-aware navigation (Shift+Arrow) — must match before plain navigation
+        KeyCode::Home
+            if key
+                .modifiers
+                .contains(KeyModifiers::CONTROL | KeyModifiers::SHIFT) =>
+        {
+            if let Some(ref mut editor) = app.editor_state {
+                editor.select_to_top();
+            }
+        }
+        KeyCode::End
+            if key
+                .modifiers
+                .contains(KeyModifiers::CONTROL | KeyModifiers::SHIFT) =>
+        {
+            if let Some(ref mut editor) = app.editor_state {
+                editor.select_to_bottom();
+            }
+        }
+        KeyCode::Up if key.modifiers.contains(KeyModifiers::SHIFT) => {
+            if let Some(ref mut editor) = app.editor_state {
+                editor.select_up();
+            }
+        }
+        KeyCode::Down if key.modifiers.contains(KeyModifiers::SHIFT) => {
+            if let Some(ref mut editor) = app.editor_state {
+                editor.select_down();
+            }
+        }
+        KeyCode::Left if key.modifiers.contains(KeyModifiers::SHIFT) => {
+            if let Some(ref mut editor) = app.editor_state {
+                editor.select_left();
+            }
+        }
+        KeyCode::Right if key.modifiers.contains(KeyModifiers::SHIFT) => {
+            if let Some(ref mut editor) = app.editor_state {
+                editor.select_right();
+            }
+        }
+        KeyCode::Home if key.modifiers.contains(KeyModifiers::SHIFT) => {
+            if let Some(ref mut editor) = app.editor_state {
+                editor.select_home();
+            }
+        }
+        KeyCode::End if key.modifiers.contains(KeyModifiers::SHIFT) => {
+            if let Some(ref mut editor) = app.editor_state {
+                editor.select_end();
+            }
+        }
+        KeyCode::PageUp if key.modifiers.contains(KeyModifiers::SHIFT) => {
+            if let Some(ref mut editor) = app.editor_state {
+                editor.select_page_up();
+            }
+        }
+        KeyCode::PageDown if key.modifiers.contains(KeyModifiers::SHIFT) => {
+            if let Some(ref mut editor) = app.editor_state {
+                editor.select_page_down();
             }
         }
 

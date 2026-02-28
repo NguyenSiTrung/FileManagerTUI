@@ -205,6 +205,26 @@ const EDITOR_KEYS: &[KeyEntry] = &[
         description: "Page up / page down",
     },
     KeyEntry {
+        key: "Shift+Arrows",
+        description: "Select text (char/line)",
+    },
+    KeyEntry {
+        key: "Shift+Home/End",
+        description: "Select to line start/end",
+    },
+    KeyEntry {
+        key: "Shift+Ctrl+Home/End",
+        description: "Select to file start/end",
+    },
+    KeyEntry {
+        key: "Shift+PgUp/PgDn",
+        description: "Select page up/down",
+    },
+    KeyEntry {
+        key: "Ctrl+A",
+        description: "Select all",
+    },
+    KeyEntry {
         key: "Tab / Shift+Tab",
         description: "Indent / dedent",
     },
@@ -218,11 +238,11 @@ const EDITOR_KEYS: &[KeyEntry] = &[
     },
     KeyEntry {
         key: "Ctrl+C",
-        description: "Copy line",
+        description: "Copy (selection or line)",
     },
     KeyEntry {
         key: "Ctrl+X",
-        description: "Cut line",
+        description: "Cut (selection or line)",
     },
     KeyEntry {
         key: "Ctrl+V",

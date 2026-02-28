@@ -148,6 +148,7 @@ impl<'a> Widget for EditorWidget<'a> {
                         let char_col = col_offset as usize;
                         let is_cursor = is_current_line && char_col == self.editor.cursor_col;
                         let is_find_match = self.is_find_match(line_idx, char_col);
+                        let is_sel = self.editor.is_selected(line_idx, char_col);
 
                         let fg = ratatui::style::Color::Rgb(
                             style.foreground.r,
@@ -163,6 +164,10 @@ impl<'a> Widget for EditorWidget<'a> {
                             Style::default()
                                 .fg(ratatui::style::Color::Black)
                                 .bg(self.theme.editor_find_match_bg)
+                        } else if is_sel {
+                            Style::default()
+                                .fg(fg)
+                                .bg(self.theme.editor_selection_bg)
                         } else if is_current_line {
                             Style::default()
                                 .fg(fg)

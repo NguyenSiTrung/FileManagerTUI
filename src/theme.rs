@@ -57,6 +57,7 @@ pub struct ThemeColors {
     pub editor_current_line_bg: Color,
     pub editor_find_match_bg: Color,
     pub editor_find_bar_bg: Color,
+    pub editor_selection_bg: Color,
 }
 
 // ── Built-in palettes ────────────────────────────────────────────────────────
@@ -107,6 +108,7 @@ pub fn dark_theme() -> ThemeColors {
         editor_current_line_bg: Color::Rgb(49, 50, 68), // #313244 (surface0)
         editor_find_match_bg: Color::Rgb(249, 226, 175), // #f9e2af (yellow)
         editor_find_bar_bg: Color::Rgb(49, 50, 68), // #313244 (surface0)
+        editor_selection_bg: Color::Rgb(68, 71, 90), // #44475a (selection blue)
     }
 }
 
@@ -156,6 +158,7 @@ pub fn light_theme() -> ThemeColors {
         editor_current_line_bg: Color::Rgb(230, 233, 239), // #e6e9ef (surface0)
         editor_find_match_bg: Color::Rgb(223, 142, 29), // #df8e1d (yellow)
         editor_find_bar_bg: Color::Rgb(230, 233, 239), // #e6e9ef
+        editor_selection_bg: Color::Rgb(172, 209, 233), // #acd1e9 (selection blue)
     }
 }
 
