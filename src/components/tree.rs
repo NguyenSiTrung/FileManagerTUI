@@ -1,23 +1,26 @@
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Widget},
 };
 
 use crate::fs::tree::{FlatItem, NodeType, TreeState};
+use crate::theme::ThemeColors;
 
 /// Tree widget that renders the file tree with box-drawing characters.
 pub struct TreeWidget<'a> {
     tree_state: &'a TreeState,
+    theme: &'a ThemeColors,
     block: Option<Block<'a>>,
 }
 
 impl<'a> TreeWidget<'a> {
-    pub fn new(tree_state: &'a TreeState) -> Self {
+    pub fn new(tree_state: &'a TreeState, theme: &'a ThemeColors) -> Self {
         Self {
             tree_state,
+            theme,
             block: None,
         }
     }
@@ -117,21 +120,23 @@ impl<'a> Widget for TreeWidget<'a> {
 
             let style = if is_selected {
                 Style::default()
-                    .bg(Color::DarkGray)
-                    .fg(Color::White)
+                    .bg(self.theme.tree_selected_bg)
+                    .fg(self.theme.tree_selected_fg)
                     .add_modifier(Modifier::BOLD)
             } else if is_multi_selected {
                 Style::default()
-                    .bg(Color::Rgb(40, 40, 80))
-                    .fg(Color::Yellow)
+                    .bg(self.theme.accent_fg)
+                    .fg(self.theme.warning_fg)
                     .add_modifier(Modifier::BOLD)
+            } else if item.is_hidden {
+                Style::default().fg(self.theme.tree_hidden_fg)
             } else {
                 match item.node_type {
                     NodeType::Directory => Style::default()
-                        .fg(Color::Blue)
+                        .fg(self.theme.tree_dir_fg)
                         .add_modifier(Modifier::BOLD),
-                    NodeType::Symlink => Style::default().fg(Color::Cyan),
-                    NodeType::File => Style::default(),
+                    NodeType::Symlink => Style::default().fg(self.theme.info_fg),
+                    NodeType::File => Style::default().fg(self.theme.tree_file_fg),
                 }
             };
 

@@ -1,25 +1,28 @@
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
-    style::{Color, Style},
+    style::Style,
     text::{Line, Span},
     widgets::{Block, Widget},
 };
 
 use crate::app::PreviewState;
+use crate::theme::ThemeColors;
 
 /// Preview widget that renders file content in the preview panel.
 #[allow(dead_code)]
 pub struct PreviewWidget<'a> {
     preview_state: &'a PreviewState,
+    theme: &'a ThemeColors,
     block: Option<Block<'a>>,
 }
 
 impl<'a> PreviewWidget<'a> {
     #[allow(dead_code)]
-    pub fn new(preview_state: &'a PreviewState) -> Self {
+    pub fn new(preview_state: &'a PreviewState, theme: &'a ThemeColors) -> Self {
         Self {
             preview_state,
+            theme,
             block: None,
         }
     }
@@ -49,7 +52,7 @@ impl<'a> Widget for PreviewWidget<'a> {
         if self.preview_state.content_lines.is_empty() {
             // Show placeholder text
             let msg = "No preview";
-            let line = Line::from(Span::styled(msg, Style::default().fg(Color::DarkGray)));
+            let line = Line::from(Span::styled(msg, Style::default().fg(self.theme.dim_fg)));
             buf.set_line(inner.x, inner.y, &line, inner.width);
             return;
         }
@@ -72,12 +75,18 @@ impl<'a> Widget for PreviewWidget<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::theme;
     use ratatui::{buffer::Buffer, layout::Rect, widgets::Borders};
+
+    fn test_theme() -> ThemeColors {
+        theme::dark_theme()
+    }
 
     #[test]
     fn test_empty_preview_shows_placeholder() {
         let state = PreviewState::default();
-        let widget = PreviewWidget::new(&state)
+        let tc = test_theme();
+        let widget = PreviewWidget::new(&state, &tc)
             .block(Block::default().borders(Borders::ALL).title(" Preview "));
         let area = Rect::new(0, 0, 30, 5);
         let mut buf = Buffer::empty(area);
@@ -105,7 +114,8 @@ mod tests {
             Line::from("line 3"),
         ];
         state.total_lines = 3;
-        let widget = PreviewWidget::new(&state);
+        let tc = test_theme();
+        let widget = PreviewWidget::new(&state, &tc);
         let area = Rect::new(0, 0, 20, 5);
         let mut buf = Buffer::empty(area);
         widget.render(area, &mut buf);
@@ -132,7 +142,8 @@ mod tests {
         ];
         state.total_lines = 3;
         state.scroll_offset = 1;
-        let widget = PreviewWidget::new(&state);
+        let tc = test_theme();
+        let widget = PreviewWidget::new(&state, &tc);
         let area = Rect::new(0, 0, 20, 3);
         let mut buf = Buffer::empty(area);
         widget.render(area, &mut buf);
@@ -152,7 +163,8 @@ mod tests {
     #[test]
     fn test_zero_area_no_panic() {
         let state = PreviewState::default();
-        let widget = PreviewWidget::new(&state);
+        let tc = test_theme();
+        let widget = PreviewWidget::new(&state, &tc);
         let area = Rect::new(0, 0, 0, 0);
         let mut buf = Buffer::empty(area);
         widget.render(area, &mut buf);

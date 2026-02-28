@@ -1,6 +1,6 @@
 use ratatui::{
     layout::{Constraint, Direction, Layout},
-    style::{Color, Style},
+    style::Style,
     widgets::{Block, Borders},
     Frame,
 };
@@ -19,6 +19,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
     app.update_preview();
 
     let area = frame.area();
+    let theme = app.theme_colors.clone();
 
     // Split into main area + status bar (1 line)
     let chunks = Layout::default()
@@ -38,9 +39,9 @@ pub fn render(app: &mut App, frame: &mut Frame) {
     let tree_area = panels[0];
     let preview_area = panels[1];
 
-    // Determine border styles based on focus
-    let focused_border = Style::default().fg(Color::Cyan);
-    let unfocused_border = Style::default();
+    // Determine border styles based on focus (using theme colors)
+    let focused_border = Style::default().fg(theme.border_focused_fg);
+    let unfocused_border = Style::default().fg(theme.border_fg);
 
     let (tree_border_style, preview_border_style) = match app.focused_panel {
         FocusedPanel::Tree => (focused_border, unfocused_border),
@@ -56,7 +57,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         .borders(Borders::ALL)
         .border_style(tree_border_style);
 
-    let tree_widget = TreeWidget::new(&app.tree_state).block(tree_block);
+    let tree_widget = TreeWidget::new(&app.tree_state, &theme).block(tree_block);
     frame.render_widget(tree_widget, tree_area);
 
     // Render preview panel
@@ -92,7 +93,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         .borders(Borders::ALL)
         .border_style(preview_border_style);
 
-    let preview_widget = PreviewWidget::new(&app.preview_state).block(preview_block);
+    let preview_widget = PreviewWidget::new(&app.preview_state, &theme).block(preview_block);
     frame.render_widget(preview_widget, preview_area);
 
     // Clear expired status messages
@@ -113,7 +114,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         })
         .unwrap_or_default();
 
-    let mut status_widget = StatusBarWidget::new(&path_str, &file_info);
+    let mut status_widget = StatusBarWidget::new(&path_str, &file_info, &theme);
 
     // Show clipboard info if clipboard has content
     let clipboard_info_str;
@@ -154,13 +155,13 @@ pub fn render(app: &mut App, frame: &mut Frame) {
 
     // Render dialog overlay on top if in dialog mode
     if matches!(app.mode, AppMode::Dialog(_)) {
-        let dialog_widget = DialogWidget::new(&app.mode, &app.dialog_state);
+        let dialog_widget = DialogWidget::new(&app.mode, &app.dialog_state, &theme);
         frame.render_widget(dialog_widget, area);
     }
 
     // Render search overlay on top if in search mode
     if app.mode == AppMode::Search {
-        let search_widget = SearchWidget::new(&app.search_state);
+        let search_widget = SearchWidget::new(&app.search_state, &theme);
         frame.render_widget(search_widget, area);
     }
 }

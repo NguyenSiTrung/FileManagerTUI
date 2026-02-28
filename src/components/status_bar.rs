@@ -1,15 +1,18 @@
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::Widget,
 };
+
+use crate::theme::ThemeColors;
 
 /// Status bar widget that displays file path, info, key hints, or status messages.
 pub struct StatusBarWidget<'a> {
     path_str: &'a str,
     file_info: &'a str,
+    theme: &'a ThemeColors,
     status_message: Option<&'a str>,
     is_error: bool,
     clipboard_info: Option<&'a str>,
@@ -17,10 +20,11 @@ pub struct StatusBarWidget<'a> {
 }
 
 impl<'a> StatusBarWidget<'a> {
-    pub fn new(path_str: &'a str, file_info: &'a str) -> Self {
+    pub fn new(path_str: &'a str, file_info: &'a str, theme: &'a ThemeColors) -> Self {
         Self {
             path_str,
             file_info,
+            theme,
             status_message: None,
             is_error: false,
             clipboard_info: None,
@@ -55,9 +59,11 @@ impl<'a> Widget for StatusBarWidget<'a> {
 
         if let Some(msg) = self.status_message {
             let style = if self.is_error {
-                Style::default().bg(Color::Red).fg(Color::White)
+                Style::default()
+                    .bg(self.theme.error_fg)
+                    .fg(self.theme.status_fg)
             } else {
-                Style::default().fg(Color::Green)
+                Style::default().fg(self.theme.success_fg)
             };
 
             // Pad or truncate message to fill full width
@@ -112,10 +118,10 @@ impl<'a> Widget for StatusBarWidget<'a> {
             .saturating_sub(path_display.len())
             .saturating_sub(info_display.len());
 
-        let path_style = Style::default().fg(Color::White);
-        let info_style = Style::default().fg(Color::Cyan);
+        let path_style = Style::default().fg(self.theme.status_fg);
+        let info_style = Style::default().fg(self.theme.info_fg);
         let hints_style = Style::default()
-            .fg(Color::DarkGray)
+            .fg(self.theme.dim_fg)
             .add_modifier(Modifier::DIM);
 
         let mut spans = vec![
@@ -129,7 +135,7 @@ impl<'a> Widget for StatusBarWidget<'a> {
         let clipboard_len = clipboard_display.len();
         if clipboard_len > 0 {
             let clipboard_style = Style::default()
-                .fg(Color::Magenta)
+                .fg(self.theme.accent_fg)
                 .add_modifier(Modifier::BOLD);
             spans.push(Span::raw(" "));
             spans.push(Span::styled(clipboard_display.to_string(), clipboard_style));
@@ -138,7 +144,7 @@ impl<'a> Widget for StatusBarWidget<'a> {
         // Add watcher status indicator if present
         if let Some(watcher_str) = self.watcher_status {
             let watcher_style = Style::default()
-                .fg(Color::Yellow)
+                .fg(self.theme.warning_fg)
                 .add_modifier(Modifier::BOLD);
             spans.push(Span::raw(" "));
             spans.push(Span::styled(watcher_str.to_string(), watcher_style));
@@ -160,10 +166,17 @@ impl<'a> Widget for StatusBarWidget<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::theme;
+    use ratatui::style::Color;
+
+    fn test_theme() -> ThemeColors {
+        theme::dark_theme()
+    }
 
     #[test]
     fn test_basic_widget_creation() {
-        let widget = StatusBarWidget::new("/home/user/file.txt", "1.2 KB | File | rw-r--r--");
+        let tc = test_theme();
+        let widget = StatusBarWidget::new("/home/user/file.txt", "1.2 KB | File | rw-r--r--", &tc);
         assert_eq!(widget.path_str, "/home/user/file.txt");
         assert_eq!(widget.file_info, "1.2 KB | File | rw-r--r--");
         assert!(widget.status_message.is_none());
@@ -172,8 +185,9 @@ mod tests {
 
     #[test]
     fn test_status_message_success() {
-        let widget =
-            StatusBarWidget::new("/path", "info").status_message("File copied successfully", false);
+        let tc = test_theme();
+        let widget = StatusBarWidget::new("/path", "info", &tc)
+            .status_message("File copied successfully", false);
 
         let area = Rect::new(0, 0, 80, 1);
         let mut buf = Buffer::empty(area);
@@ -184,15 +198,16 @@ mod tests {
             .collect();
         assert!(content.contains("File copied successfully"));
 
-        // Check green foreground style on first cell
+        // Check green foreground style on first cell (theme success color)
         let cell = buf.cell((0, 0)).unwrap();
-        assert_eq!(cell.fg, Color::Green);
+        assert_eq!(cell.fg, Color::Rgb(166, 227, 161));
     }
 
     #[test]
     fn test_status_message_error() {
+        let tc = test_theme();
         let widget =
-            StatusBarWidget::new("/path", "info").status_message("Permission denied", true);
+            StatusBarWidget::new("/path", "info", &tc).status_message("Permission denied", true);
 
         let area = Rect::new(0, 0, 80, 1);
         let mut buf = Buffer::empty(area);
@@ -203,15 +218,16 @@ mod tests {
             .collect();
         assert!(content.contains("Permission denied"));
 
-        // Check error style: red background, white foreground
+        // Check error style: theme error background, theme status fg
         let cell = buf.cell((0, 0)).unwrap();
-        assert_eq!(cell.bg, Color::Red);
-        assert_eq!(cell.fg, Color::White);
+        assert_eq!(cell.bg, Color::Rgb(243, 139, 168));
+        assert_eq!(cell.fg, Color::Rgb(205, 214, 244));
     }
 
     #[test]
     fn test_normal_bar_rendering() {
-        let widget = StatusBarWidget::new("/home/user/project", "4.0 KB | Dir | rwxr-xr-x");
+        let tc = test_theme();
+        let widget = StatusBarWidget::new("/home/user/project", "4.0 KB | Dir | rwxr-xr-x", &tc);
 
         let area = Rect::new(0, 0, 100, 1);
         let mut buf = Buffer::empty(area);
@@ -228,7 +244,8 @@ mod tests {
 
     #[test]
     fn test_zero_area_does_not_panic() {
-        let widget = StatusBarWidget::new("/path", "info");
+        let tc = test_theme();
+        let widget = StatusBarWidget::new("/path", "info", &tc);
         let area = Rect::new(0, 0, 0, 0);
         let mut buf = Buffer::empty(area);
         widget.render(area, &mut buf);
@@ -236,7 +253,8 @@ mod tests {
 
     #[test]
     fn test_clipboard_info_displayed() {
-        let widget = StatusBarWidget::new("/path", "info").clipboard_info("📋 2 items");
+        let tc = test_theme();
+        let widget = StatusBarWidget::new("/path", "info", &tc).clipboard_info("📋 2 items");
 
         let area = Rect::new(0, 0, 120, 1);
         let mut buf = Buffer::empty(area);

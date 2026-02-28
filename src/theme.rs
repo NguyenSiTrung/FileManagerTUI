@@ -158,7 +158,7 @@ fn parse_or(hex_opt: Option<&str>, fallback: Color) -> Color {
 /// - `"custom"`: start from dark palette, then override with custom hex values
 pub fn resolve_theme(config: &ThemeConfig) -> ThemeColors {
     let scheme = config.scheme.as_deref().unwrap_or("dark");
-    let base = match scheme {
+    match scheme {
         "light" => light_theme(),
         "custom" => {
             let mut theme = dark_theme();
@@ -168,8 +168,7 @@ pub fn resolve_theme(config: &ThemeConfig) -> ThemeColors {
             theme
         }
         _ => dark_theme(), // "dark" or any unrecognized value
-    };
-    base
+    }
 }
 
 /// Apply custom hex color overrides on top of an existing theme.

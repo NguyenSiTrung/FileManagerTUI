@@ -1,22 +1,28 @@
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Padding, Widget},
 };
 
 use crate::app::{AppMode, DialogKind, DialogState};
+use crate::theme::ThemeColors;
 
 /// Dialog widget that renders a centered modal overlay.
 pub struct DialogWidget<'a> {
     mode: &'a AppMode,
     dialog_state: &'a DialogState,
+    theme: &'a ThemeColors,
 }
 
 impl<'a> DialogWidget<'a> {
-    pub fn new(mode: &'a AppMode, dialog_state: &'a DialogState) -> Self {
-        Self { mode, dialog_state }
+    pub fn new(mode: &'a AppMode, dialog_state: &'a DialogState, theme: &'a ThemeColors) -> Self {
+        Self {
+            mode,
+            dialog_state,
+            theme,
+        }
     }
 
     /// Calculate a centered rectangle within the given area.
@@ -38,32 +44,44 @@ impl<'a> Widget for DialogWidget<'a> {
 
         match kind {
             DialogKind::CreateFile => {
-                render_input_dialog("Create New File", self.dialog_state, area, buf);
+                render_input_dialog("Create New File", self.dialog_state, self.theme, area, buf);
             }
             DialogKind::CreateDirectory => {
-                render_input_dialog("Create New Directory", self.dialog_state, area, buf);
+                render_input_dialog(
+                    "Create New Directory",
+                    self.dialog_state,
+                    self.theme,
+                    area,
+                    buf,
+                );
             }
             DialogKind::Rename { .. } => {
-                render_input_dialog("Rename", self.dialog_state, area, buf);
+                render_input_dialog("Rename", self.dialog_state, self.theme, area, buf);
             }
             DialogKind::DeleteConfirm { targets } => {
-                render_confirm_dialog(targets, area, buf);
+                render_confirm_dialog(targets, self.theme, area, buf);
             }
             DialogKind::Error { message } => {
-                render_error_dialog(message, area, buf);
+                render_error_dialog(message, self.theme, area, buf);
             }
             DialogKind::Progress {
                 message,
                 current,
                 total,
             } => {
-                render_progress_dialog(message, *current, *total, area, buf);
+                render_progress_dialog(message, *current, *total, self.theme, area, buf);
             }
         }
     }
 }
 
-fn render_input_dialog(title: &str, state: &DialogState, area: Rect, buf: &mut Buffer) {
+fn render_input_dialog(
+    title: &str,
+    state: &DialogState,
+    theme: &ThemeColors,
+    area: Rect,
+    buf: &mut Buffer,
+) {
     let dialog_width = 50.min(area.width.saturating_sub(4));
     let dialog_height = 5;
     let rect = DialogWidget::centered_rect(dialog_width, dialog_height, area);
@@ -73,7 +91,7 @@ fn render_input_dialog(title: &str, state: &DialogState, area: Rect, buf: &mut B
     let block = Block::default()
         .title(format!(" {} ", title))
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Cyan))
+        .border_style(Style::default().fg(theme.dialog_border_fg))
         .padding(Padding::horizontal(1));
 
     let inner = block.inner(rect);
@@ -104,10 +122,10 @@ fn render_input_dialog(title: &str, state: &DialogState, area: Rect, buf: &mut B
         before
     };
 
-    let input_style = Style::default().fg(Color::White);
+    let input_style = Style::default().fg(theme.status_fg);
     let cursor_style = Style::default()
-        .bg(Color::White)
-        .fg(Color::Black)
+        .bg(theme.status_fg)
+        .fg(theme.dialog_bg)
         .add_modifier(Modifier::BOLD);
 
     let spans = vec![
@@ -122,7 +140,7 @@ fn render_input_dialog(title: &str, state: &DialogState, area: Rect, buf: &mut B
     // Render hint at bottom
     let hint = "[Enter] Confirm  [Esc] Cancel";
     let hint_style = Style::default()
-        .fg(Color::DarkGray)
+        .fg(theme.dim_fg)
         .add_modifier(Modifier::DIM);
     let hint_line = Line::from(Span::styled(hint, hint_style));
     if inner.height > 1 {
@@ -130,7 +148,12 @@ fn render_input_dialog(title: &str, state: &DialogState, area: Rect, buf: &mut B
     }
 }
 
-fn render_confirm_dialog(targets: &[std::path::PathBuf], area: Rect, buf: &mut Buffer) {
+fn render_confirm_dialog(
+    targets: &[std::path::PathBuf],
+    theme: &ThemeColors,
+    area: Rect,
+    buf: &mut Buffer,
+) {
     let max_name_len = targets
         .iter()
         .filter_map(|p| p.file_name())
@@ -149,7 +172,7 @@ fn render_confirm_dialog(targets: &[std::path::PathBuf], area: Rect, buf: &mut B
     let block = Block::default()
         .title(" Delete Confirmation ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Red))
+        .border_style(Style::default().fg(theme.error_fg))
         .padding(Padding::horizontal(1));
 
     let inner = block.inner(rect);
@@ -163,7 +186,7 @@ fn render_confirm_dialog(targets: &[std::path::PathBuf], area: Rect, buf: &mut B
     let header = Line::from(Span::styled(
         "Delete the following?",
         Style::default()
-            .fg(Color::Yellow)
+            .fg(theme.warning_fg)
             .add_modifier(Modifier::BOLD),
     ));
     buf.set_line(inner.x, inner.y, &header, inner.width);
@@ -177,7 +200,7 @@ fn render_confirm_dialog(targets: &[std::path::PathBuf], area: Rect, buf: &mut B
             .unwrap_or_else(|| target.to_string_lossy().to_string());
         let line = Line::from(Span::styled(
             format!("  • {}", name),
-            Style::default().fg(Color::White),
+            Style::default().fg(theme.status_fg),
         ));
         buf.set_line(inner.x, inner.y + 2 + i as u16, &line, inner.width);
     }
@@ -185,13 +208,13 @@ fn render_confirm_dialog(targets: &[std::path::PathBuf], area: Rect, buf: &mut B
     // Render hint at bottom
     let hint = "[y] Yes  [n/Esc] Cancel";
     let hint_style = Style::default()
-        .fg(Color::DarkGray)
+        .fg(theme.dim_fg)
         .add_modifier(Modifier::DIM);
     let hint_line = Line::from(Span::styled(hint, hint_style));
     buf.set_line(inner.x, inner.y + inner.height - 1, &hint_line, inner.width);
 }
 
-fn render_error_dialog(message: &str, area: Rect, buf: &mut Buffer) {
+fn render_error_dialog(message: &str, theme: &ThemeColors, area: Rect, buf: &mut Buffer) {
     let dialog_width = (message.len() as u16 + 6)
         .max(30)
         .min(area.width.saturating_sub(4));
@@ -203,7 +226,7 @@ fn render_error_dialog(message: &str, area: Rect, buf: &mut Buffer) {
     let block = Block::default()
         .title(" Error ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Red))
+        .border_style(Style::default().fg(theme.error_fg))
         .padding(Padding::horizontal(1));
 
     let inner = block.inner(rect);
@@ -214,13 +237,13 @@ fn render_error_dialog(message: &str, area: Rect, buf: &mut Buffer) {
     }
 
     // Error message
-    let msg_line = Line::from(Span::styled(message, Style::default().fg(Color::Red)));
+    let msg_line = Line::from(Span::styled(message, Style::default().fg(theme.error_fg)));
     buf.set_line(inner.x, inner.y + inner.height / 2, &msg_line, inner.width);
 
     // Hint
     let hint = "[Enter/Esc] Dismiss";
     let hint_style = Style::default()
-        .fg(Color::DarkGray)
+        .fg(theme.dim_fg)
         .add_modifier(Modifier::DIM);
     let hint_line = Line::from(Span::styled(hint, hint_style));
     if inner.height > 1 {
@@ -232,6 +255,7 @@ fn render_progress_dialog(
     current_file: &str,
     current: usize,
     total: usize,
+    theme: &ThemeColors,
     area: Rect,
     buf: &mut Buffer,
 ) {
@@ -245,7 +269,7 @@ fn render_progress_dialog(
     let block = Block::default()
         .title(title)
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Yellow))
+        .border_style(Style::default().fg(theme.warning_fg))
         .padding(Padding::horizontal(1));
 
     let inner = block.inner(rect);
@@ -258,7 +282,7 @@ fn render_progress_dialog(
     // Current file being processed
     let file_line = Line::from(Span::styled(
         current_file.to_string(),
-        Style::default().fg(Color::White),
+        Style::default().fg(theme.status_fg),
     ));
     buf.set_line(inner.x, inner.y, &file_line, inner.width);
 
@@ -267,14 +291,14 @@ fn render_progress_dialog(
         let bar_width = inner.width as usize;
         let filled = (current * bar_width) / total;
         let bar: String = "█".repeat(filled) + &"░".repeat(bar_width.saturating_sub(filled));
-        let bar_line = Line::from(Span::styled(bar, Style::default().fg(Color::Cyan)));
+        let bar_line = Line::from(Span::styled(bar, Style::default().fg(theme.info_fg)));
         buf.set_line(inner.x, inner.y + 1, &bar_line, inner.width);
     }
 
     // Hint at bottom
     let hint = "[Esc] Cancel";
     let hint_style = Style::default()
-        .fg(Color::DarkGray)
+        .fg(theme.dim_fg)
         .add_modifier(Modifier::DIM);
     let hint_line = Line::from(Span::styled(hint, hint_style));
     if inner.height > 2 {
@@ -285,7 +309,12 @@ fn render_progress_dialog(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::theme;
     use std::path::PathBuf;
+
+    fn test_theme() -> ThemeColors {
+        theme::dark_theme()
+    }
 
     #[test]
     fn test_input_dialog_renders() {
@@ -294,7 +323,8 @@ mod tests {
             input: "test.txt".to_string(),
             cursor_position: 8,
         };
-        let widget = DialogWidget::new(&mode, &state);
+        let tc = test_theme();
+        let widget = DialogWidget::new(&mode, &state, &tc);
         let area = Rect::new(0, 0, 80, 24);
         let mut buf = Buffer::empty(area);
         widget.render(area, &mut buf);
@@ -314,7 +344,8 @@ mod tests {
             input: "old_name.txt".to_string(),
             cursor_position: 12,
         };
-        let widget = DialogWidget::new(&mode, &state);
+        let tc = test_theme();
+        let widget = DialogWidget::new(&mode, &state, &tc);
         let area = Rect::new(0, 0, 80, 24);
         let mut buf = Buffer::empty(area);
         widget.render(area, &mut buf);
@@ -334,7 +365,8 @@ mod tests {
             targets: targets.clone(),
         });
         let state = DialogState::default();
-        let widget = DialogWidget::new(&mode, &state);
+        let tc = test_theme();
+        let widget = DialogWidget::new(&mode, &state, &tc);
         let area = Rect::new(0, 0, 80, 24);
         let mut buf = Buffer::empty(area);
         widget.render(area, &mut buf);
@@ -351,7 +383,8 @@ mod tests {
             message: "Permission denied".to_string(),
         });
         let state = DialogState::default();
-        let widget = DialogWidget::new(&mode, &state);
+        let tc = test_theme();
+        let widget = DialogWidget::new(&mode, &state, &tc);
         let area = Rect::new(0, 0, 80, 24);
         let mut buf = Buffer::empty(area);
         widget.render(area, &mut buf);
@@ -365,7 +398,8 @@ mod tests {
     fn test_no_dialog_mode_noop() {
         let mode = AppMode::Normal;
         let state = DialogState::default();
-        let widget = DialogWidget::new(&mode, &state);
+        let tc = test_theme();
+        let widget = DialogWidget::new(&mode, &state, &tc);
         let area = Rect::new(0, 0, 80, 24);
         let mut buf = Buffer::empty(area);
         widget.render(area, &mut buf);

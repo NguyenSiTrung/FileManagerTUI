@@ -1,22 +1,28 @@
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Padding, Widget},
 };
 
 use crate::app::SearchState;
+use crate::theme::ThemeColors;
 
 /// Fuzzy finder overlay widget (Ctrl+P).
 pub struct SearchWidget<'a> {
     state: &'a SearchState,
+    theme: &'a ThemeColors,
     block: Option<Block<'a>>,
 }
 
 impl<'a> SearchWidget<'a> {
-    pub fn new(state: &'a SearchState) -> Self {
-        Self { state, block: None }
+    pub fn new(state: &'a SearchState, theme: &'a ThemeColors) -> Self {
+        Self {
+            state,
+            theme,
+            block: None,
+        }
     }
 
     #[allow(dead_code)]
@@ -50,7 +56,7 @@ impl<'a> Widget for SearchWidget<'a> {
         let block = Block::default()
             .title(" Fuzzy Finder (Ctrl+P) ")
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Cyan))
+            .border_style(Style::default().fg(self.theme.dialog_border_fg))
             .padding(Padding::horizontal(1));
 
         let inner = block.inner(rect);
@@ -73,13 +79,13 @@ impl<'a> Widget for SearchWidget<'a> {
             (query.as_str(), " ", "")
         };
 
-        let input_style = Style::default().fg(Color::White);
+        let input_style = Style::default().fg(self.theme.status_fg);
         let cursor_style = Style::default()
-            .bg(Color::White)
-            .fg(Color::Black)
+            .bg(self.theme.status_fg)
+            .fg(self.theme.dialog_bg)
             .add_modifier(Modifier::BOLD);
         let prompt_style = Style::default()
-            .fg(Color::Cyan)
+            .fg(self.theme.info_fg)
             .add_modifier(Modifier::BOLD);
 
         let input_spans = vec![
@@ -108,7 +114,7 @@ impl<'a> Widget for SearchWidget<'a> {
             };
             let sep_line = Line::from(Span::styled(
                 format!("─── {} ", count_str),
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(self.theme.dim_fg),
             ));
             buf.set_line(inner.x, inner.y + 1, &sep_line, inner.width);
         }
@@ -151,7 +157,7 @@ impl<'a> Widget for SearchWidget<'a> {
                 spans.push(Span::styled(
                     "▸ ",
                     Style::default()
-                        .fg(Color::Cyan)
+                        .fg(self.theme.info_fg)
                         .add_modifier(Modifier::BOLD),
                 ));
             } else {
@@ -160,12 +166,12 @@ impl<'a> Widget for SearchWidget<'a> {
 
             // Path with highlighted match chars
             let base_style = if is_selected {
-                Style::default().fg(Color::White)
+                Style::default().fg(self.theme.status_fg)
             } else {
-                Style::default().fg(Color::Gray)
+                Style::default().fg(self.theme.dim_fg)
             };
             let highlight_style = Style::default()
-                .fg(Color::Yellow)
+                .fg(self.theme.warning_fg)
                 .add_modifier(Modifier::BOLD);
 
             // Build spans char by char, grouping consecutive same-style chars
@@ -209,7 +215,7 @@ impl<'a> Widget for SearchWidget<'a> {
         if inner.height > 3 {
             let hint = "[Enter] Open  [Esc] Close  [↑↓] Navigate";
             let hint_style = Style::default()
-                .fg(Color::DarkGray)
+                .fg(self.theme.dim_fg)
                 .add_modifier(Modifier::DIM);
             let hint_line = Line::from(Span::styled(hint, hint_style));
             buf.set_line(inner.x, inner.y + inner.height - 1, &hint_line, inner.width);
@@ -221,7 +227,12 @@ impl<'a> Widget for SearchWidget<'a> {
 mod tests {
     use super::*;
     use crate::app::SearchResult;
+    use crate::theme;
     use std::path::PathBuf;
+
+    fn test_theme() -> ThemeColors {
+        theme::dark_theme()
+    }
 
     fn buffer_to_string(buf: &Buffer, area: Rect) -> String {
         let mut s = String::new();
@@ -237,7 +248,8 @@ mod tests {
     #[test]
     fn test_empty_search_renders() {
         let state = SearchState::default();
-        let widget = SearchWidget::new(&state);
+        let tc = test_theme();
+        let widget = SearchWidget::new(&state, &tc);
         let area = Rect::new(0, 0, 80, 24);
         let mut buf = Buffer::empty(area);
         widget.render(area, &mut buf);
@@ -267,7 +279,8 @@ mod tests {
             },
         ];
 
-        let widget = SearchWidget::new(&state);
+        let tc = test_theme();
+        let widget = SearchWidget::new(&state, &tc);
         let area = Rect::new(0, 0, 80, 24);
         let mut buf = Buffer::empty(area);
         widget.render(area, &mut buf);
@@ -299,7 +312,8 @@ mod tests {
             },
         ];
 
-        let widget = SearchWidget::new(&state);
+        let tc = test_theme();
+        let widget = SearchWidget::new(&state, &tc);
         let area = Rect::new(0, 0, 80, 24);
         let mut buf = Buffer::empty(area);
         widget.render(area, &mut buf);
@@ -311,7 +325,8 @@ mod tests {
     #[test]
     fn test_small_area_no_panic() {
         let state = SearchState::default();
-        let widget = SearchWidget::new(&state);
+        let tc = test_theme();
+        let widget = SearchWidget::new(&state, &tc);
         let area = Rect::new(0, 0, 10, 3);
         let mut buf = Buffer::empty(area);
         widget.render(area, &mut buf);
