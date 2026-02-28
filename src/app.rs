@@ -13,6 +13,7 @@ use tokio::sync::mpsc;
 
 use crate::components::help::HelpState;
 use crate::config::AppConfig;
+use crate::editor::EditorState;
 use crate::error::Result;
 use crate::fs::clipboard::{ClipboardOp, ClipboardState};
 use crate::fs::tree::{NodeType, TreeState};
@@ -188,6 +189,9 @@ pub struct App {
     pub terminal_state: TerminalState,
     /// Last rendered terminal panel area (for mouse click mapping).
     pub terminal_area: Rect,
+    /// Editor state for the preview panel edit mode.
+    #[allow(dead_code)]
+    pub editor_state: Option<EditorState>,
 }
 
 impl App {
@@ -229,6 +233,7 @@ impl App {
             preview_area: Rect::default(),
             terminal_state: TerminalState::default(),
             terminal_area: Rect::default(),
+            editor_state: None,
         })
     }
 

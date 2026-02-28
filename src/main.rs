@@ -1,6 +1,7 @@
 mod app;
 mod components;
 mod config;
+mod editor;
 mod error;
 mod event;
 mod fs;
