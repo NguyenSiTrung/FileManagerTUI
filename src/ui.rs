@@ -36,9 +36,9 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Min(3),       // main (tree + preview)
+                Constraint::Min(3),            // main (tree + preview)
                 Constraint::Length(term_rows), // terminal panel
-                Constraint::Length(1),    // status bar
+                Constraint::Length(1),         // status bar
             ])
             .split(area)
     } else {
@@ -76,12 +76,11 @@ pub fn render(app: &mut App, frame: &mut Frame) {
     let focused_border = Style::default().fg(theme.border_focused_fg);
     let unfocused_border = Style::default().fg(theme.border_fg);
 
-    let (tree_border_style, preview_border_style, terminal_border_style) =
-        match app.focused_panel {
-            FocusedPanel::Tree => (focused_border, unfocused_border, unfocused_border),
-            FocusedPanel::Preview => (unfocused_border, focused_border, unfocused_border),
-            FocusedPanel::Terminal => (unfocused_border, unfocused_border, focused_border),
-        };
+    let (tree_border_style, preview_border_style, terminal_border_style) = match app.focused_panel {
+        FocusedPanel::Tree => (focused_border, unfocused_border, unfocused_border),
+        FocusedPanel::Preview => (unfocused_border, focused_border, unfocused_border),
+        FocusedPanel::Terminal => (unfocused_border, unfocused_border, focused_border),
+    };
 
     // Update scroll offset to keep selected item visible
     let visible_height = tree_area.height.saturating_sub(2) as usize; // account for border
@@ -158,9 +157,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
             && (app.terminal_state.emulator.visible_rows() != inner_rows
                 || app.terminal_state.emulator.visible_cols() != inner_cols)
         {
-            app.terminal_state
-                .emulator
-                .resize(inner_rows, inner_cols);
+            app.terminal_state.emulator.resize(inner_rows, inner_cols);
             // Tell PTY about the new size
             if let Some(ref pty) = app.terminal_state.pty {
                 let _ = pty.resize(inner_rows as u16, inner_cols as u16);

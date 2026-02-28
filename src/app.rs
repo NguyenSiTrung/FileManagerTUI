@@ -408,7 +408,9 @@ impl App {
                 match crate::terminal::pty::PtyProcess::spawn(&shell, &cwd, rows, cols, pty_tx) {
                     Ok(pty) => {
                         self.terminal_state.pty = Some(pty);
-                        self.terminal_state.emulator.resize(rows as usize, cols as usize);
+                        self.terminal_state
+                            .emulator
+                            .resize(rows as usize, cols as usize);
 
                         // Bridge PTY output to the main event loop
                         let event_tx = event_tx.clone();
@@ -446,8 +448,7 @@ impl App {
     /// Resize the terminal panel downward (bigger terminal, smaller main area).
     pub fn resize_terminal_down(&mut self) {
         if self.terminal_state.visible && self.terminal_state.height_percent < 80 {
-            self.terminal_state.height_percent =
-                (self.terminal_state.height_percent + 5).min(80);
+            self.terminal_state.height_percent = (self.terminal_state.height_percent + 5).min(80);
         }
     }
 
@@ -2414,8 +2415,11 @@ mod tests {
             app.clamp_preview_scroll();
         }
 
-        assert_eq!(app.preview_state.scroll_offset, 50.min(expected_max),
-            "After scrolling 50 times, offset should be 50 (or max if less)");
+        assert_eq!(
+            app.preview_state.scroll_offset,
+            50.min(expected_max),
+            "After scrolling 50 times, offset should be 50 (or max if less)"
+        );
     }
 
     #[test]
@@ -2446,8 +2450,10 @@ mod tests {
         app.clamp_preview_scroll();
 
         // Scroll offset should be preserved since we're still viewing the same file
-        assert_eq!(app.preview_state.scroll_offset, 25,
-            "Scroll offset should be preserved after FS change event for same file");
+        assert_eq!(
+            app.preview_state.scroll_offset, 25,
+            "Scroll offset should be preserved after FS change event for same file"
+        );
     }
 
     #[test]
@@ -2473,7 +2479,9 @@ mod tests {
         app.update_preview();
 
         // Scroll should reset to 0 for different file
-        assert_eq!(app.preview_state.scroll_offset, 0,
-            "Scroll should reset when switching to a different file");
+        assert_eq!(
+            app.preview_state.scroll_offset, 0,
+            "Scroll should reset when switching to a different file"
+        );
     }
 }

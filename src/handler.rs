@@ -78,7 +78,8 @@ pub fn handle_mouse_event(
                 app.focused_panel = FocusedPanel::Preview;
                 app.preview_scroll_down();
             } else if app.terminal_state.visible && is_in_rect(col, row, app.terminal_area) {
-                app.terminal_state.scroll_offset = app.terminal_state.scroll_offset.saturating_sub(1);
+                app.terminal_state.scroll_offset =
+                    app.terminal_state.scroll_offset.saturating_sub(1);
             }
         }
         _ => {}
@@ -292,7 +293,13 @@ fn handle_terminal_keys(app: &mut App, key: KeyEvent) {
         //
         // Scrollback navigation (Shift+Up/Down)
         KeyCode::Up if key.modifiers.contains(KeyModifiers::SHIFT) => {
-            if app.terminal_state.scroll_offset < app.terminal_state.emulator.total_lines().saturating_sub(app.terminal_state.emulator.visible_rows()) {
+            if app.terminal_state.scroll_offset
+                < app
+                    .terminal_state
+                    .emulator
+                    .total_lines()
+                    .saturating_sub(app.terminal_state.emulator.visible_rows())
+            {
                 app.terminal_state.scroll_offset += 1;
             }
             return;
@@ -303,13 +310,18 @@ fn handle_terminal_keys(app: &mut App, key: KeyEvent) {
         }
         KeyCode::PageUp if key.modifiers.contains(KeyModifiers::SHIFT) => {
             let jump = app.terminal_state.emulator.visible_rows() / 2;
-            let max = app.terminal_state.emulator.total_lines().saturating_sub(app.terminal_state.emulator.visible_rows());
+            let max = app
+                .terminal_state
+                .emulator
+                .total_lines()
+                .saturating_sub(app.terminal_state.emulator.visible_rows());
             app.terminal_state.scroll_offset = (app.terminal_state.scroll_offset + jump).min(max);
             return;
         }
         KeyCode::PageDown if key.modifiers.contains(KeyModifiers::SHIFT) => {
             let jump = app.terminal_state.emulator.visible_rows() / 2;
-            app.terminal_state.scroll_offset = app.terminal_state.scroll_offset.saturating_sub(jump);
+            app.terminal_state.scroll_offset =
+                app.terminal_state.scroll_offset.saturating_sub(jump);
             return;
         }
         _ => {}
@@ -333,7 +345,9 @@ fn key_event_to_bytes(key: &KeyEvent) -> Vec<u8> {
         KeyCode::Char(c) => {
             if key.modifiers.contains(KeyModifiers::CONTROL) {
                 // Ctrl+A..Z → 0x01..0x1A
-                let ctrl_byte = (c.to_ascii_lowercase() as u8).wrapping_sub(b'a').wrapping_add(1);
+                let ctrl_byte = (c.to_ascii_lowercase() as u8)
+                    .wrapping_sub(b'a')
+                    .wrapping_add(1);
                 if ctrl_byte <= 26 {
                     return vec![ctrl_byte];
                 }

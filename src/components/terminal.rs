@@ -123,7 +123,11 @@ mod tests {
 
         // First row should contain "Hello World"
         let content: String = (0..11)
-            .map(|x| buf.cell((x, 0)).map(|c| c.symbol().chars().next().unwrap_or(' ')).unwrap_or(' '))
+            .map(|x| {
+                buf.cell((x, 0))
+                    .map(|c| c.symbol().chars().next().unwrap_or(' '))
+                    .unwrap_or(' ')
+            })
             .collect();
         assert_eq!(content, "Hello World");
     }

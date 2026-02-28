@@ -456,8 +456,7 @@ impl<'a> vte::Perform for Performer<'a> {
                 for _ in 0..n {
                     if row < self.rows {
                         self.grid.pop(); // remove last line
-                        self.grid
-                            .insert(row, vec![Cell::default(); self.cols]);
+                        self.grid.insert(row, vec![Cell::default(); self.cols]);
                     }
                 }
             }
