@@ -82,6 +82,8 @@ impl Cli {
                 show_hidden: None,
                 confirm_delete: None,
                 mouse: if self.no_mouse { Some(false) } else { None },
+                max_entries_per_page: None,
+                search_max_entries: None,
             },
             preview: PreviewConfig {
                 max_full_preview_bytes: self.max_preview,

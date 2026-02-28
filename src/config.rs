@@ -25,6 +25,11 @@ pub struct GeneralConfig {
     pub confirm_delete: Option<bool>,
     /// Enable mouse support.
     pub mouse: Option<bool>,
+    /// Maximum entries to load per page when expanding a directory (default: 1000).
+    /// Clamped to 100..50000.
+    pub max_entries_per_page: Option<u32>,
+    /// Maximum entries for deep search filesystem walk (default: 10000).
+    pub search_max_entries: Option<u32>,
 }
 
 /// Preview panel settings.
@@ -141,6 +146,14 @@ pub const DEFAULT_HEAD_LINES: usize = 50;
 pub const DEFAULT_TAIL_LINES: usize = 20;
 /// Default debounce interval in milliseconds.
 pub const DEFAULT_DEBOUNCE_MS: u64 = 300;
+/// Default max entries per page for directory pagination.
+pub const DEFAULT_MAX_ENTRIES_PER_PAGE: u32 = 1_000;
+/// Minimum allowed value for max_entries_per_page.
+pub const MIN_ENTRIES_PER_PAGE: u32 = 100;
+/// Maximum allowed value for max_entries_per_page.
+pub const MAX_ENTRIES_PER_PAGE: u32 = 50_000;
+/// Default max entries for deep search walk.
+pub const DEFAULT_SEARCH_MAX_ENTRIES: u32 = 10_000;
 
 // ── Config file locator ──────────────────────────────────────────────────────
 
@@ -206,6 +219,14 @@ impl AppConfig {
                 show_hidden: other.general.show_hidden.or(self.general.show_hidden),
                 confirm_delete: other.general.confirm_delete.or(self.general.confirm_delete),
                 mouse: other.general.mouse.or(self.general.mouse),
+                max_entries_per_page: other
+                    .general
+                    .max_entries_per_page
+                    .or(self.general.max_entries_per_page),
+                search_max_entries: other
+                    .general
+                    .search_max_entries
+                    .or(self.general.search_max_entries),
             },
             preview: PreviewConfig {
                 max_full_preview_bytes: other
@@ -386,6 +407,23 @@ impl AppConfig {
     pub fn terminal_scrollback(&self) -> usize {
         self.terminal.scrollback_lines.unwrap_or(1000)
     }
+
+    /// Max entries to load per page when expanding large directories.
+    /// Clamped to [MIN_ENTRIES_PER_PAGE, MAX_ENTRIES_PER_PAGE].
+    pub fn max_entries_per_page(&self) -> usize {
+        let raw = self
+            .general
+            .max_entries_per_page
+            .unwrap_or(DEFAULT_MAX_ENTRIES_PER_PAGE);
+        raw.clamp(MIN_ENTRIES_PER_PAGE, MAX_ENTRIES_PER_PAGE) as usize
+    }
+
+    /// Max entries for deep search filesystem walk.
+    pub fn search_max_entries(&self) -> usize {
+        self.general
+            .search_max_entries
+            .unwrap_or(DEFAULT_SEARCH_MAX_ENTRIES) as usize
+    }
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
@@ -412,6 +450,8 @@ mod tests {
         assert_eq!(cfg.dirs_first(), true);
         assert_eq!(cfg.use_icons(), true);
         assert_eq!(cfg.theme_scheme(), "dark");
+        assert_eq!(cfg.max_entries_per_page(), 1000);
+        assert_eq!(cfg.search_max_entries(), 10000);
     }
 
     #[test]
@@ -636,5 +676,62 @@ border_fg = "#565f89"
         assert_eq!(custom.border_fg.as_deref(), Some("#565f89"));
         // Unset custom colors are None
         assert!(custom.dialog_bg.is_none());
+    }
+
+    #[test]
+    fn test_pagination_config_parsing() {
+        let toml = r#"
+[general]
+max_entries_per_page = 2000
+search_max_entries = 5000
+"#;
+        let cfg: AppConfig = toml::from_str(toml).expect("parse failed");
+        assert_eq!(cfg.max_entries_per_page(), 2000);
+        assert_eq!(cfg.search_max_entries(), 5000);
+    }
+
+    #[test]
+    fn test_pagination_config_clamping() {
+        // Below minimum
+        let cfg = AppConfig {
+            general: GeneralConfig {
+                max_entries_per_page: Some(10),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert_eq!(cfg.max_entries_per_page(), 100); // clamped to MIN
+
+        // Above maximum
+        let cfg = AppConfig {
+            general: GeneralConfig {
+                max_entries_per_page: Some(100_000),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert_eq!(cfg.max_entries_per_page(), 50_000); // clamped to MAX
+    }
+
+    #[test]
+    fn test_pagination_config_merge() {
+        let base = AppConfig {
+            general: GeneralConfig {
+                max_entries_per_page: Some(500),
+                search_max_entries: Some(8000),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let over = AppConfig {
+            general: GeneralConfig {
+                max_entries_per_page: Some(3000),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let merged = base.merge(&over);
+        assert_eq!(merged.max_entries_per_page(), 3000); // overridden
+        assert_eq!(merged.search_max_entries(), 8000); // from base
     }
 }
