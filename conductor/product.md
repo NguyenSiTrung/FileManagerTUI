@@ -32,6 +32,7 @@ A single static binary that provides a VS Code-like file explorer experience in 
 5. **Filesystem Watcher** — Auto-refresh tree on external changes
 6. **ML-Aware** — Special handling for .ipynb, .pt, .h5, .csv, .parquet, .yaml files
 7. **Configurable** — TOML config, CLI args, themes, keybindings
+8. **Embedded Terminal** — Integrated PTY shell panel with VT100 emulation, dynamic resize, and scrollback
 
 ## Non-Functional Requirements
 - Binary size target: < 10MB (static musl build)

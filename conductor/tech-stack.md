@@ -20,6 +20,8 @@
 | `serde` | 1 | Config file deserialization (derive feature) |
 | `toml` | 0.8 | TOML config file parsing |
 | `dirs` | 5 | Platform-specific config directory resolution |
+| `portable-pty` | 0.8 | Cross-platform pseudo-terminal (PTY) creation |
+| `vte` | 0.13 | VT100/xterm escape sequence parser for terminal emulation |
 
 ## Build & Distribution
 - **Release profile**: `opt-level = "z"`, LTO, single codegen unit, stripped
@@ -33,4 +35,4 @@
 - Event-driven TUI loop (crossterm poll → handler dispatch → render)
 - Lazy directory loading (on-demand tree expansion)
 - Async file operations (tokio tasks for large copy/delete)
-- Module structure: `main.rs`, `app.rs`, `event.rs`, `handler.rs`, `ui.rs`, `tui.rs`, `error.rs`, `config.rs`, `theme.rs`, `preview_content.rs`, `components/` (tree, preview, status_bar, dialog, search, help), `fs/` (tree, operations, watcher, clipboard)
+- Module structure: `main.rs`, `app.rs`, `event.rs`, `handler.rs`, `ui.rs`, `tui.rs`, `error.rs`, `config.rs`, `theme.rs`, `preview_content.rs`, `components/` (tree, preview, status_bar, dialog, search, help, terminal), `fs/` (tree, operations, watcher, clipboard), `terminal/` (mod, pty, emulator)

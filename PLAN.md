@@ -112,13 +112,18 @@ file-manager-tui/
 │   │   ├── preview.rs          # File preview StatefulWidget
 │   │   ├── status_bar.rs       # Bottom bar widget
 │   │   ├── dialog.rs           # Modal dialog widget (input, confirm, progress)
-│   │   └── search.rs           # Fuzzy search overlay widget
-│   └── fs/
-│       ├── mod.rs              # Re-exports
-│       ├── tree.rs             # TreeNode data structure + operations
-│       ├── operations.rs       # Filesystem CRUD with error handling
-│       ├── watcher.rs          # File system watcher (notify crate)
-│       └── clipboard.rs        # Copy/cut buffer management
+│   │   ├── search.rs           # Fuzzy search overlay widget
+│   │   └── terminal.rs         # Terminal panel widget
+│   ├── fs/
+│   │   ├── mod.rs              # Re-exports
+│   │   ├── tree.rs             # TreeNode data structure + operations
+│   │   ├── operations.rs       # Filesystem CRUD with error handling
+│   │   ├── watcher.rs          # File system watcher (notify crate)
+│   │   └── clipboard.rs        # Copy/cut buffer management
+│   └── terminal/
+│       ├── mod.rs              # Re-exports, PtyProcess struct
+│       ├── pty.rs              # PTY creation and async I/O
+│       └── emulator.rs         # VTE-based terminal emulator with screen buffer
 └── # Tests are inline modules (#[cfg(test)] mod tests) within each source file
 ```
 
@@ -141,6 +146,8 @@ file-manager-tui/
 | `serde`          | `1`      | Config file deserialization (derive feature)          |
 | `toml`           | `0.8`    | TOML config file parsing                             |
 | `dirs`           | `5`      | Platform-specific config directory resolution        |
+| `portable-pty`   | `0.8`    | Cross-platform pseudo-terminal (PTY) creation         |
+| `vte`            | `0.13`   | VT100/xterm escape sequence parser                    |
 
 ### Cargo.toml
 
@@ -165,6 +172,8 @@ serde_json = "1"
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
 dirs = "5"
+portable-pty = "0.8"
+vte = "0.13"
 
 [dev-dependencies]
 tempfile = "3"
@@ -952,6 +961,24 @@ automatically in the tree.
 - [x] Release binary via GitHub Actions (CI + release workflows)
 
 **Deliverable**: Configurable, polished, ready for daily use in KubeFlow.
+
+---
+
+### Milestone 8: Embedded Terminal Panel ✅
+**Goal**: Integrated PTY shell panel within the file manager.
+
+- [x] `terminal/mod.rs`: Module structure, PtyProcess struct for shell spawning
+- [x] `terminal/pty.rs`: `portable-pty` integration with reader/writer cloning and async I/O
+- [x] `terminal/emulator.rs`: VTE-based terminal emulator with screen buffer and scrollback
+- [x] `components/terminal.rs`: Terminal panel widget rendering (ratatui)
+- [x] `handler.rs`: Terminal input routing (before global keys, key→VT100 byte conversion)
+- [x] `ui.rs`: Conditional 3-row layout `[main, terminal, status]` with dynamic resize
+- [x] `event.rs`: `TerminalOutput` event variant for PTY→emulator bridge
+- [x] `config.rs`: `[terminal]` config section (enabled, default_shell, scrollback_lines)
+- [x] CLI flag: `--no-terminal` to disable embedded terminal
+- [x] Help overlay: terminal keybindings documented
+
+**Deliverable**: Press `Ctrl+T` to toggle terminal panel with full interactive shell.
 
 ---
 

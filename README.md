@@ -21,6 +21,7 @@ A fast, keyboard-driven terminal file manager built with Rust and [Ratatui](http
 - **File watcher** — auto-refresh on filesystem changes with debounce
 - **Jupyter notebook preview** — renders `.ipynb` cells with syntax highlighting
 - **Large file handling** — head/tail preview mode for files over configurable threshold
+- **Embedded terminal** — integrated PTY shell panel with VT100 emulation, dynamic resize, and scrollback
 
 ## Installation
 
@@ -70,6 +71,9 @@ fm -c ~/.config/fm-tui/config.toml ~/projects
 
 # Minimal mode (no icons, no mouse, no watcher)
 fm --no-icons --no-mouse --no-watcher
+
+# Disable embedded terminal
+fm --no-terminal
 
 # Light theme
 fm --theme light
@@ -129,6 +133,18 @@ fm --theme light
 | `Ctrl+W` | Toggle line wrap |
 | `Ctrl+T` | Cycle view mode (head/tail/full for large files) |
 | `+` / `-` | Adjust head/tail lines |
+
+### Terminal Panel
+
+| Key | Action |
+|-----|--------|
+| `Ctrl+T` | Toggle terminal panel |
+| `Ctrl+↑` | Decrease terminal height |
+| `Ctrl+↓` | Increase terminal height |
+| `Esc` | Unfocus terminal (return to tree) |
+| `Tab` | Cycle focus (tree → preview → terminal) |
+
+> When the terminal is focused, all other keys are forwarded to the shell.
 
 ### General
 
@@ -235,12 +251,17 @@ src/
 │   ├── status_bar.rs  # Status bar widget
 │   ├── dialog.rs      # Modal dialog widget
 │   ├── search.rs      # Fuzzy finder overlay
-│   └── help.rs        # Help overlay widget
-└── fs/
-    ├── tree.rs        # Tree data structure, sorting, filtering
-    ├── operations.rs  # File CRUD operations
-    ├── clipboard.rs   # Copy/cut/paste state
-    └── watcher.rs     # Filesystem watcher with debounce
+│   ├── help.rs        # Help overlay widget
+│   └── terminal.rs    # Terminal panel widget
+├── fs/
+│   ├── tree.rs        # Tree data structure, sorting, filtering
+│   ├── operations.rs  # File CRUD operations
+│   ├── clipboard.rs   # Copy/cut/paste state
+│   └── watcher.rs     # Filesystem watcher with debounce
+└── terminal/
+    ├── mod.rs         # Module exports, PtyProcess struct
+    ├── pty.rs         # PTY creation and async I/O
+    └── emulator.rs    # VTE-based terminal emulator
 ```
 
 ## Development

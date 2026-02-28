@@ -1,28 +1,11 @@
 {
-    "last_refresh": "2026-02-28T11:02:30+07:00",
-    "scope": "all",
-    "changes_applied": [
-        "tech-stack.md: Moved serde/toml/dirs from Planned M7 to Core Dependencies; removed unicode-width (unused); added theme.rs + full module listing to Architecture",
-        "PLAN.md §4: Added notify-debouncer-mini, thiserror, serde_json to deps table; fixed package name to file_manager_tui; added dev-dependencies section",
-        "PLAN.md §12: Marked all Milestone 7 items as complete (config, CLI, themes, help, mouse, icons, sort, README, CI/CD); Milestone 7 header now shows ✅"
+    "last_refresh": "2026-02-28T13:55:00+07:00",
+    "changes": [
+        "tech-stack.md: Added portable-pty 0.8 and vte 0.13 dependencies, updated module structure",
+        "product.md: Added Embedded Terminal as Key Feature #8",
+        "PLAN.md: Added 2 deps to table and Cargo.toml snippet, added terminal/ to project structure, added Milestone 8",
+        "README.md: Added terminal feature, keybindings section, architecture tree, --no-terminal CLI flag",
+        "Beads: Closed FileManagerTUI-xvg.1 and FileManagerTUI-xvg.4 (stuck in_progress)"
     ],
-    "drift_detected": {
-        "tech_stack": [
-            "serde/toml/dirs were listed as Planned M7 — moved to Core (now implemented)",
-            "unicode-width listed but never added to Cargo.toml — removed",
-            "theme.rs module existed but was not documented"
-        ],
-        "plan_md": [
-            "8 Milestone 7 items were unchecked but fully implemented in codebase",
-            "Dependencies table was missing notify-debouncer-mini, thiserror, serde_json",
-            "Package name was file-manager-tui but actual is file_manager_tui",
-            "syntect features in sample Cargo.toml differed from actual"
-        ],
-        "no_drift": [
-            "product.md",
-            "workflow.md",
-            "tracks.md",
-            "patterns.md"
-        ]
-    }
+    "drift_source": "terminal-panel_20260228 track completed and archived without propagating to top-level docs"
 }
