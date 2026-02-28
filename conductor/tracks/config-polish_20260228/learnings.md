@@ -50,3 +50,39 @@ Patterns, gotchas, and context discovered during implementation.
   - Patterns: Widget builder pattern: `WidgetName::new(state, theme).block(block)` — theme is always the last constructor parameter
   - Patterns: Tests use `test_theme() -> ThemeColors { theme::dark_theme() }` helper to avoid repeating theme construction
 ---
+
+## [2026-02-28 10:20] - Phase 3 Task 1: Help overlay
+
+- **Implemented:** HelpOverlay widget with 5 categories, scroll support, themed rendering
+- **Commit:** a764e89
+- **Learnings:**
+  - Patterns: Static const arrays of structs for keybinding data — compiled at build time, zero allocation at runtime
+  - Patterns: `total_lines()` method returns deterministic count for scroll bounds without building content
+
+## [2026-02-28 10:30] - Phase 3 Task 2: Mouse support
+
+- **Implemented:** click-to-select, scroll wheel, panel focus switching, dir expand/collapse on double-click
+- **Commit:** 8925743
+- **Learnings:**
+  - Patterns: Store `tree_area` / `preview_area` Rect on App from render → handler uses them for coordinate mapping
+  - Patterns: Mouse events only processed in Normal mode — prevents accidental clicks during dialogs
+  - Gotchas: Must account for border offset (y+1) when mapping click row to flat_items index
+  - Patterns: Panic hook should also disable mouse capture to avoid terminal corruption
+
+## [2026-02-28 10:40] - Phase 3 Task 3: Nerd Font icon toggle
+
+- **Implemented:** Extension-based Nerd Font icons with ASCII fallback mode
+- **Commit:** 8ae38f0
+- **Learnings:**
+  - Patterns: `file_icon_by_ext()` uses `rsplit('.')` for extension extraction — handles dotfiles correctly
+  - Patterns: ASCII fallback uses `[D]`, `[F]`, `[L]` prefixes for directories, files, symlinks
+
+## [2026-02-28 10:50] - Phase 3 Task 4: Sort options
+
+- **Implemented:** SortBy enum (Name, Size, Modified), cycle with 's', toggle dirs_first with 'S'
+- **Commit:** 10b6c37
+- **Learnings:**
+  - Patterns: Sort moved OUT of `load_children` into `TreeState::sort_children_of` — separation of concerns
+  - Patterns: `sort_all_children_recursive` applies sort to entire loaded tree (necessary for cycle_sort)
+  - Gotchas: Sort fields (sort_by, dirs_first) must be cloned before calling `find_node_mut` to avoid borrow checker conflict
+  - Patterns: `SortBy::next()` enables clean cycling without index arithmetic

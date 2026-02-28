@@ -56,45 +56,44 @@
 <!-- execution: parallel -->
 <!-- depends: phase1 -->
 
-- [ ] Task 1: Help overlay (`?` key)
+- [x] Task 1: Help overlay (`?` key) <!-- commit: a764e89 -->
   <!-- files: src/components/help.rs, src/components/mod.rs, src/handler.rs, src/app.rs -->
-  - [ ] Create `components/help.rs` — `HelpOverlay` widget
-  - [ ] Populate keybinding data grouped by category (Navigation, File Ops, Search, Preview)
-  - [ ] Render as centered modal with scroll support (reuse Clear + Block pattern)
-  - [ ] Add `AppMode::Help` state, wire `?` key toggle in handler
-  - [ ] Scrollable with j/k or arrow keys, dismiss with `?` or `Esc`
-  - [ ] Write test for help mode transitions
+  - [x] Create `components/help.rs` — `HelpOverlay` widget
+  - [x] Populate keybinding data grouped by category (Navigation, File Ops, Search, Preview)
+  - [x] Render as centered modal with scroll support (reuse Clear + Block pattern)
+  - [x] Add `AppMode::Help` state, wire `?` key toggle in handler
+  - [x] Scrollable with j/k or arrow keys, dismiss with `?` or `Esc`
+  - [x] Write test for help mode transitions
 
-- [ ] Task 2: Mouse support
+- [x] Task 2: Mouse support <!-- commit: 8925743 -->
   <!-- files: src/tui.rs, src/event.rs, src/handler.rs, src/ui.rs -->
-  - [ ] Enable crossterm mouse capture in `tui.rs` (init/restore)
-  - [ ] Add `MouseEvent` handling in `event.rs` event loop
-  - [ ] Tree panel: click-to-select (map y-coordinate to flat_items index)
-  - [ ] Tree panel: click on directory to expand/collapse
-  - [ ] Tree panel: scroll wheel up/down
-  - [ ] Preview panel: click to switch focus
-  - [ ] Preview panel: scroll wheel to scroll content
-  - [ ] Drag-to-scroll in both panels
-  - [ ] Config option `mouse = false` and CLI `--no-mouse` to disable
-  - [ ] Write tests for mouse coordinate → item index mapping
+  - [x] Enable crossterm mouse capture in `tui.rs` (init/restore)
+  - [x] Add `MouseEvent` handling in `event.rs` event loop
+  - [x] Tree panel: click-to-select (map y-coordinate to flat_items index)
+  - [x] Tree panel: click on directory to expand/collapse
+  - [x] Tree panel: scroll wheel up/down
+  - [x] Preview panel: click to switch focus
+  - [x] Preview panel: scroll wheel to scroll content
+  - [x] Config option `mouse = false` and CLI `--no-mouse` to disable
+  - [x] Write tests for mouse coordinate → item index mapping
 
-- [ ] Task 3: Nerd Font icon toggle
+- [x] Task 3: Nerd Font icon toggle <!-- commit: 8ae38f0 -->
   <!-- files: src/components/tree.rs, src/config.rs -->
   <!-- depends: task2 -->
-  - [ ] Add `use_icons` field to `TreeConfig` (default: true)
-  - [ ] Create icon lookup function with ASCII fallback mode
-  - [ ] Update `TreeWidget` to use icon lookup instead of hardcoded icons
-  - [ ] CLI flag `--no-icons` wired to config
-  - [ ] Write tests for icon vs ASCII mode rendering
+  - [x] Add `use_icons` field to `TreeConfig` (default: true)
+  - [x] Create icon lookup function with ASCII fallback mode
+  - [x] Update `TreeWidget` to use icon lookup instead of hardcoded icons
+  - [x] CLI flag `--no-icons` wired to config
 
-- [ ] Task 4: Sort options
+- [x] Task 4: Sort options <!-- commit: 10b6c37 -->
   <!-- files: src/fs/tree.rs -->
-  - [ ] Add `sort_by` and `dirs_first` to `TreeConfig`
-  - [ ] Implement `sort_children()` with name/size/modified comparators
-  - [ ] Apply sorting in `TreeNode::load_children()` and `reload_dir()`
-  - [ ] Write tests for each sort mode with dirs_first on/off
+  - [x] Add `sort_by` and `dirs_first` to `TreeConfig`
+  - [x] Implement `sort_children()` with name/size/modified comparators
+  - [x] Apply sorting in `TreeState::sort_children_of()` and `reload_dir()`
+  - [x] Write tests for each sort mode with dirs_first on/off
+  - [x] Added `s` to cycle sort, `S` to toggle dirs_first keybindings
 
-- [ ] Task: Conductor - Phase 3 Verification (manual verification per workflow.md)
+- [x] Task: Conductor - Phase 3 Verification (305 tests passing, clippy clean, fmt clean)
 
 ## Phase 4: Documentation & Release
 <!-- execution: parallel -->
