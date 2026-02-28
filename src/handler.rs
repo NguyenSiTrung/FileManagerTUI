@@ -1933,6 +1933,8 @@ mod tests {
         let (dir, mut app) = setup_app();
         std::fs::write(dir.path().join("file_a.txt"), "a").unwrap();
         std::fs::write(dir.path().join("file_b.rs"), "b").unwrap();
+        // Reload tree so newly created files appear in loaded nodes
+        app.tree_state.reload_dir(dir.path());
         app.invalidate_search_cache();
 
         handle_key(
@@ -2111,6 +2113,8 @@ mod tests {
         let (dir, mut app) = setup_app();
         // Create file with special characters
         File::create(dir.path().join("test (1).txt")).unwrap();
+        // Reload tree so the new file appears in loaded nodes
+        app.tree_state.reload_dir(dir.path());
         app.invalidate_search_cache();
 
         app.open_search();

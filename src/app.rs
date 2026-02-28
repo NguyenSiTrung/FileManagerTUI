@@ -1480,15 +1480,83 @@ impl App {
         self.search_state.selected_index = 0;
     }
 
-    /// Build a flat list of all file paths by walking the tree recursively.
-    /// Uses iterative stack-based walk with 10K entry cap.
+    /// Build a flat list of file paths using a hybrid approach:
+    /// 1. Walk loaded tree nodes in-memory (instant, no I/O)
+    /// 2. For un-expanded directories, do a bounded filesystem walk
+    ///
+    /// Capped by `search_max_entries` config.
     fn build_path_index(&self) -> Vec<PathBuf> {
-        const MAX_ENTRIES: usize = 10_000;
+        let max_entries = self.config.search_max_entries();
+        let mut paths = Vec::new();
+        let mut unloaded_dirs = Vec::new();
+        Self::collect_loaded_paths(&self.tree_state.root, &mut paths, &mut unloaded_dirs);
+
+        // Phase 2: walk unloaded directories on the filesystem
+        if paths.len() < max_entries {
+            let mut stack = unloaded_dirs;
+            while let Some(dir) = stack.pop() {
+                if paths.len() >= max_entries {
+                    break;
+                }
+                let entries = match std::fs::read_dir(&dir) {
+                    Ok(e) => e,
+                    Err(_) => continue,
+                };
+                for entry in entries {
+                    if paths.len() >= max_entries {
+                        break;
+                    }
+                    let entry = match entry {
+                        Ok(e) => e,
+                        Err(_) => continue,
+                    };
+                    let path = entry.path();
+                    if path.is_dir() {
+                        stack.push(path);
+                    } else {
+                        paths.push(path);
+                    }
+                }
+            }
+        }
+
+        paths
+    }
+
+    /// Collect paths from loaded tree nodes, and record unloaded directories.
+    fn collect_loaded_paths(
+        node: &crate::fs::tree::TreeNode,
+        paths: &mut Vec<PathBuf>,
+        unloaded_dirs: &mut Vec<PathBuf>,
+    ) {
+        if let Some(children) = &node.children {
+            for child in children {
+                paths.push(child.path.clone());
+                if child.node_type == crate::fs::tree::NodeType::Directory {
+                    if child.children.is_some() {
+                        // Recursively collect from loaded children
+                        Self::collect_loaded_paths(child, paths, unloaded_dirs);
+                    } else {
+                        // Not yet loaded — schedule for filesystem walk
+                        unloaded_dirs.push(child.path.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    /// Build a flat list of all file paths by walking the filesystem.
+    ///
+    /// Uses iterative stack-based walk with configurable entry cap.
+    /// Used for "Search deeper..." functionality.
+    #[allow(dead_code)]
+    fn build_deep_path_index(&self) -> Vec<PathBuf> {
+        let max_entries = self.config.search_max_entries();
         let mut paths = Vec::new();
         let mut stack: Vec<PathBuf> = vec![self.tree_state.root.path.clone()];
 
         while let Some(dir) = stack.pop() {
-            if paths.len() >= MAX_ENTRIES {
+            if paths.len() >= max_entries {
                 break;
             }
             let entries = match std::fs::read_dir(&dir) {
@@ -1496,7 +1564,7 @@ impl App {
                 Err(_) => continue,
             };
             for entry in entries {
-                if paths.len() >= MAX_ENTRIES {
+                if paths.len() >= max_entries {
                     break;
                 }
                 let entry = match entry {

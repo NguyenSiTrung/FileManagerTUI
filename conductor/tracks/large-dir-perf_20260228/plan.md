@@ -43,31 +43,31 @@
 ## Phase 2: Tree UI — Count Badge & Load More
 <!-- execution: parallel -->
 
-- [ ] Task 1: Render immediate children count badge
+- [x] Task 1: Render immediate children count badge
   <!-- files: src/components/tree.rs -->
-  - [ ] In `components/tree.rs`, for collapsed directory nodes, append ` (N items)` to the display name
-  - [ ] Use `total_child_count` from TreeNode if available; otherwise compute lazily via `read_dir().count()`
-  - [ ] Cache the count on the TreeNode to avoid re-scanning on every render
-  - [ ] Style the badge with dimmed/gray color from theme
-  - [ ] Add visual tests / manual verification
+  - [x] In `components/tree.rs`, for collapsed directory nodes, append ` (N items)` to the display name
+  - [x] Use `total_child_count` from TreeNode if available; otherwise compute lazily via `read_dir().count()`
+  - [x] Cache the count on the TreeNode to avoid re-scanning on every render
+  - [x] Style the badge with dimmed/gray color from theme
+  - [x] Add visual tests / manual verification
 
-- [ ] Task 2: Render "Load more..." virtual node
+- [x] Task 2: Render "Load more..." virtual node
   <!-- files: src/components/tree.rs -->
-  - [ ] In `components/tree.rs`, detect `NodeType::LoadMore` items in `flat_items`
-  - [ ] Render as `[▼ Load more... (remaining: ~N)]` with a distinct style (e.g., italic, dimmed cyan)
-  - [ ] The node should appear at the correct tree depth with proper indentation/box-drawing
-  - [ ] Add visual tests
+  - [x] In `components/tree.rs`, detect `NodeType::LoadMore` items in `flat_items`
+  - [x] Render as `[▼ Load more... (remaining: ~N)]` with a distinct style (e.g., italic, dimmed cyan)
+  - [x] The node should appear at the correct tree depth with proper indentation/box-drawing
+  - [x] Add visual tests
 
-- [ ] Task 3: Handle "Load more..." activation in handler
+- [x] Task 3: Handle "Load more..." activation in handler
   <!-- files: src/handler.rs -->
-  - [ ] In `handler.rs`, when Enter or Right arrow is pressed on a `LoadMore` flat item:
+  - [x] In `handler.rs`, when Enter or Right arrow is pressed on a `LoadMore` flat item:
     - Extract the parent directory path from the LoadMore item
     - Call `tree_state.load_next_page(parent_path, page_size)`
     - Re-flatten and maintain selection position
-  - [ ] Prevent other operations on LoadMore nodes (delete, rename, copy, etc.)
-  - [ ] Add handler tests
+  - [x] Prevent other operations on LoadMore nodes (delete, rename, copy, etc.)
+  - [x] Add handler tests
 
-- [ ] Task: Conductor - User Manual Verification 'Tree UI — Count Badge & Load More' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Tree UI — Count Badge & Load More' (Protocol in workflow.md)
 
 ## Phase 3: Hybrid Fuzzy Search
 <!-- execution: sequential -->
