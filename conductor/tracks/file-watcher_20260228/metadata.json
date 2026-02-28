@@ -1,0 +1,31 @@
+{
+    "track_id": "file-watcher_20260228",
+    "type": "feature",
+    "status": "new",
+    "priority": "high",
+    "depends_on": [],
+    "estimated_hours": null,
+    "created_at": "2026-02-28T08:42:26+07:00",
+    "updated_at": "2026-02-28T08:42:26+07:00",
+    "description": "File Watcher + Auto-Refresh: Tree updates automatically when files change externally using notify crate with debouncing, ignore patterns, and flood protection.",
+    "beads_epic": "FileManagerTUI-48e",
+    "beads_tasks": {
+        "phase1": "FileManagerTUI-48e.1",
+        "phase1_task1": "FileManagerTUI-48e.1.1",
+        "phase1_task2": "FileManagerTUI-48e.1.2",
+        "phase1_task3": "FileManagerTUI-48e.1.3",
+        "phase2": "FileManagerTUI-48e.2",
+        "phase2_task1": "FileManagerTUI-48e.2.1",
+        "phase2_task2": "FileManagerTUI-48e.2.2",
+        "phase2_task3": "FileManagerTUI-48e.2.3",
+        "phase3": "FileManagerTUI-48e.3",
+        "phase3_task1": "FileManagerTUI-48e.3.1",
+        "phase3_task2": "FileManagerTUI-48e.3.2",
+        "phase3_task3": "FileManagerTUI-48e.3.3",
+        "phase3_task4": "FileManagerTUI-48e.3.4",
+        "phase4": "FileManagerTUI-48e.4",
+        "phase4_task1": "FileManagerTUI-48e.4.1",
+        "phase4_task2": "FileManagerTUI-48e.4.2",
+        "phase4_task3": "FileManagerTUI-48e.4.3"
+    }
+}

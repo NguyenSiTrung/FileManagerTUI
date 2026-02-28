@@ -9,3 +9,6 @@
 <!-- Archived: fuzzy-search_20260228 (2026-02-28) → conductor/archive/ -->
 
 ---
+
+## [ ] Track: File Watcher + Auto-Refresh
+*Link: [./conductor/tracks/file-watcher_20260228/](./conductor/tracks/file-watcher_20260228/)*
