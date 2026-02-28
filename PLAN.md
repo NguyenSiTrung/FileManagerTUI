@@ -113,7 +113,9 @@ file-manager-tui/
 │   │   ├── status_bar.rs       # Bottom bar widget
 │   │   ├── dialog.rs           # Modal dialog widget (input, confirm, progress)
 │   │   ├── search.rs           # Fuzzy search overlay widget
+│   │   ├── editor.rs           # Editor widget (line numbers, syntax, cursor)
 │   │   └── terminal.rs         # Terminal panel widget
+│   ├── editor.rs               # Editor state: buffer, undo/redo, find/replace
 │   ├── fs/
 │   │   ├── mod.rs              # Re-exports
 │   │   ├── tree.rs             # TreeNode data structure + operations
@@ -196,6 +198,7 @@ pub enum AppMode {
     Normal,                     // Default tree navigation
     Search,                     // Fuzzy finder overlay active
     Dialog(DialogKind),         // Modal dialog open
+    Edit,                       // Editing file in preview panel
     Command,                    // Command palette (future)
 }
 
@@ -635,6 +638,27 @@ For files exceeding `max_full_preview_bytes`:
 | `+`          | Increase head/tail line count by 10           |
 | `-`          | Decrease head/tail line count by 10           |
 | `Ctrl+W`     | Toggle line wrap                              |
+| `e`          | Enter edit mode (text files only)              |
+
+### 8.5. Editor Mode (when editing in preview)
+
+| Key                     | Action                                        |
+| ----------------------- | --------------------------------------------- |
+| `Esc`                   | Exit edit mode (prompt if unsaved)             |
+| `Ctrl+S`                | Save file                                     |
+| Arrow keys              | Move cursor                                   |
+| `Home` / `End`          | Start / end of line                            |
+| `Ctrl+Home` / `Ctrl+End`| Top / bottom of file                           |
+| `PgUp` / `PgDn`         | Page up / page down                            |
+| `Tab` / `Shift+Tab`     | Indent / dedent                                |
+| `Ctrl+Z`                | Undo                                           |
+| `Ctrl+Y`                | Redo                                           |
+| `Ctrl+C`                | Copy line                                      |
+| `Ctrl+X`                | Cut line                                       |
+| `Ctrl+V`                | Paste                                          |
+| `Ctrl+F`                | Find                                           |
+| `Ctrl+H`                | Find & Replace                                 |
+| `Ctrl+A` (in replace)   | Replace all                                    |
 
 ---
 
@@ -980,6 +1004,31 @@ automatically in the tree.
 - [x] Help overlay: terminal keybindings documented
 
 **Deliverable**: Press `Ctrl+T` to toggle terminal panel with full interactive shell.
+
+---
+
+### Milestone 9: Preview Panel Edit Mode ✅
+**Goal**: Full-featured text editing within the preview panel.
+
+- [x] `editor.rs`: `EditorState` struct with buffer management, cursor navigation, undo/redo stack
+- [x] `editor.rs`: Find/replace with match highlighting, replace current/all
+- [x] `editor.rs`: Editor clipboard (copy/cut/paste line), separate from file clipboard
+- [x] `editor.rs`: Auto-indent on Enter, Tab/Shift+Tab indent/dedent, indent detection
+- [x] `editor.rs`: Undo action grouping (consecutive characters grouped by timeout)
+- [x] `app.rs`: `AppMode::Edit` variant, `enter_edit_mode()` / `exit_edit_mode()` methods
+- [x] `app.rs`: `SaveConfirm` dialog for unsaved changes on exit (Y/N/C)
+- [x] `handler.rs`: Full editor key handler (character input, navigation, Ctrl+S/Z/Y/C/X/V/F/H)
+- [x] `handler.rs`: Find bar key handler with Tab field switching, Ctrl+A replace all
+- [x] `components/editor.rs`: `EditorWidget` with line number gutter, syntax highlighting, cursor
+- [x] `components/editor.rs`: Find/replace bar rendering at bottom of editor area
+- [x] `components/dialog.rs`: `SaveConfirm` dialog rendering
+- [x] `theme.rs`: 8 editor-specific theme colors (line numbers, cursor, current line, find match, gutter, find bar)
+- [x] `ui.rs`: Conditional editor vs preview rendering, dirty indicator (●) in title
+- [x] Guards: binary files blocked, large file warning, file watcher paused during editing
+- [x] `components/help.rs`: Editor Mode keybindings documented in help overlay
+
+**Deliverable**: Press `e` in preview to edit files with syntax highlighting, undo/redo,
+find & replace, auto-indent, and save confirmation.
 
 ---
 

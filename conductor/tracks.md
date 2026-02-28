@@ -22,5 +22,6 @@
 
 ---
 
-## [x] Track: Preview Panel Edit Mode
-*Link: [./conductor/tracks/preview-edit_20260228/](./conductor/tracks/preview-edit_20260228/)*
+<!-- Archived: preview-edit_20260228 (2026-02-28) → conductor/archive/ -->
+
+---

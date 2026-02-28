@@ -22,6 +22,7 @@ A fast, keyboard-driven terminal file manager built with Rust and [Ratatui](http
 - **Jupyter notebook preview** — renders `.ipynb` cells with syntax highlighting
 - **Large file handling** — head/tail preview mode for files over configurable threshold
 - **Embedded terminal** — integrated PTY shell panel with VT100 emulation, dynamic resize, and scrollback
+- **Inline text editor** — press `e` in preview to edit files with syntax highlighting, undo/redo, find & replace, and auto-indent
 
 ## Installation
 
@@ -135,6 +136,27 @@ fm --theme light
 | `Ctrl+W` | Toggle line wrap |
 | `Ctrl+T` | Cycle view mode (head/tail/full for large files) |
 | `+` / `-` | Adjust head/tail lines |
+| `e` | Enter edit mode |
+
+### Editor Mode (Preview)
+
+| Key | Action |
+|-----|--------|
+| `Esc` | Exit edit mode (prompt if unsaved) |
+| `Ctrl+S` | Save file |
+| `Arrow keys` | Move cursor |
+| `Home` / `End` | Start / end of line |
+| `Ctrl+Home` / `Ctrl+End` | Top / bottom of file |
+| `PgUp` / `PgDn` | Page up / page down |
+| `Tab` / `Shift+Tab` | Indent / dedent |
+| `Ctrl+Z` | Undo |
+| `Ctrl+Y` | Redo |
+| `Ctrl+C` | Copy line |
+| `Ctrl+X` | Cut line |
+| `Ctrl+V` | Paste |
+| `Ctrl+F` | Find |
+| `Ctrl+H` | Find & Replace |
+| `Ctrl+A` (in replace) | Replace all |
 
 ### Terminal Panel
 
@@ -248,9 +270,11 @@ src/
 ├── theme.rs           # Theme colors and palettes
 ├── error.rs           # Error types
 ├── preview_content.rs # Syntax highlighting, notebook rendering
+├── editor.rs          # Editor state, undo/redo, find/replace
 ├── components/
 │   ├── tree.rs        # File tree widget with icons
 │   ├── preview.rs     # Preview pane widget
+│   ├── editor.rs      # Editor widget (line numbers, cursor, find bar)
 │   ├── status_bar.rs  # Status bar widget
 │   ├── dialog.rs      # Modal dialog widget
 │   ├── search.rs      # Fuzzy finder overlay
