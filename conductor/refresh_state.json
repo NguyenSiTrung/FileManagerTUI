@@ -1,24 +1,22 @@
 {
-    "last_refresh": "2026-02-28T09:27:00+07:00",
+    "last_refresh": "2026-02-28T11:02:30+07:00",
     "scope": "all",
     "changes_applied": [
-        "tech-stack.md: Added thiserror + serde_json to core deps, moved unicode-width/serde/toml/dirs to planned M7 section",
-        "PLAN.md §3: Updated project structure to reflect actual layout (preview_content.rs, tui.rs, error.rs, inline tests)",
-        "Beads sync: Closed 24 tasks across 4 archived tracks (core-loop-tree, file-ops-dialogs, preview-panel, fuzzy-search)"
+        "tech-stack.md: Moved serde/toml/dirs from Planned M7 to Core Dependencies; removed unicode-width (unused); added theme.rs + full module listing to Architecture",
+        "PLAN.md §4: Added notify-debouncer-mini, thiserror, serde_json to deps table; fixed package name to file_manager_tui; added dev-dependencies section",
+        "PLAN.md §12: Marked all Milestone 7 items as complete (config, CLI, themes, help, mouse, icons, sort, README, CI/CD); Milestone 7 header now shows ✅"
     ],
     "drift_detected": {
         "tech_stack": [
-            "thiserror undocumented",
-            "serde_json undocumented",
-            "M7 deps listed but not yet in Cargo.toml"
+            "serde/toml/dirs were listed as Planned M7 — moved to Core (now implemented)",
+            "unicode-width listed but never added to Cargo.toml — removed",
+            "theme.rs module existed but was not documented"
         ],
-        "project_structure": [
-            "preview_content.rs exists but not in plan",
-            "tui.rs exists but not in plan",
-            "tests/ dir in plan but tests are inline"
-        ],
-        "beads": [
-            "24 tasks from 4 archived tracks were open, now closed"
+        "plan_md": [
+            "8 Milestone 7 items were unchecked but fully implemented in codebase",
+            "Dependencies table was missing notify-debouncer-mini, thiserror, serde_json",
+            "Package name was file-manager-tui but actual is file_manager_tui",
+            "syntect features in sample Cargo.toml differed from actual"
         ],
         "no_drift": [
             "product.md",

@@ -128,15 +128,17 @@ file-manager-tui/
 
 | Crate            | Version  | Purpose                                             |
 | ---------------- | -------- | --------------------------------------------------- |
-| `ratatui`        | `0.29`   | TUI rendering framework                             |
+| `ratatui`        | `0.29`   | TUI rendering framework (crossterm feature)          |
 | `crossterm`      | `0.28`   | Terminal backend (works in Jupyter/KubeFlow terms)   |
 | `tokio`          | `1`      | Async runtime for fs watcher + event loop            |
 | `notify`         | `7`      | Cross-platform filesystem event watcher              |
+| `notify-debouncer-mini` | `0.5` | Debounced filesystem events                     |
 | `clap`           | `4`      | CLI argument parsing with derive macros              |
 | `syntect`        | `5`      | Syntax highlighting for file preview                 |
 | `fuzzy-matcher`  | `0.3`    | Fuzzy string matching for file search                |
-| `unicode-width`  | `0.2`    | Correct character width (CJK, emoji)                 |
-| `serde`          | `1`      | Config file deserialization                          |
+| `thiserror`      | `1`      | Ergonomic error type derivation                      |
+| `serde_json`     | `1`      | JSON parsing (Jupyter notebook .ipynb files)          |
+| `serde`          | `1`      | Config file deserialization (derive feature)          |
 | `toml`           | `0.8`    | TOML config file parsing                             |
 | `dirs`           | `5`      | Platform-specific config directory resolution        |
 
@@ -144,10 +146,10 @@ file-manager-tui/
 
 ```toml
 [package]
-name = "file-manager-tui"
+name = "file_manager_tui"
 version = "0.1.0"
 edition = "2021"
-description = "A terminal file manager TUI for KubeFlow and Jupyter environments"
+description = "A terminal-based file manager TUI built with Rust and Ratatui"
 
 [dependencies]
 ratatui = { version = "0.29", features = ["crossterm"] }
@@ -156,12 +158,16 @@ tokio = { version = "1", features = ["full"] }
 notify = "7"
 notify-debouncer-mini = "0.5"
 clap = { version = "4", features = ["derive"] }
-syntect = { version = "5", default-features = false, features = ["default-fancy"] }
+syntect = "5"
 fuzzy-matcher = "0.3"
-unicode-width = "0.2"
+thiserror = "1"
+serde_json = "1"
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
 dirs = "5"
+
+[dev-dependencies]
+tempfile = "3"
 
 [profile.release]
 opt-level = "z"     # Optimize for binary size
@@ -931,19 +937,19 @@ automatically in the tree.
 
 ---
 
-### Milestone 7: Configuration + Polish
+### Milestone 7: Configuration + Polish ✅
 **Goal**: Production-ready with customization.
 
-- [ ] `config.rs`: Load from TOML file + CLI args + defaults
-- [x] CLI argument parsing with `clap` (basic path arg only; full options pending)
-- [ ] Theme support: dark / light / custom colors
-- [ ] Help overlay (`?` key): show all keybindings
-- [ ] Mouse support (optional): click to select, scroll wheel
-- [ ] Nerd Font icon toggle (fallback to ASCII)
-- [ ] Sort options: by name, size, modified date
+- [x] `config.rs`: Load from TOML file + CLI args + defaults
+- [x] CLI argument parsing with `clap` (full: `--config`, `--no-preview`, `--no-watcher`, `--no-icons`, `--no-mouse`, `--head-lines`, `--tail-lines`, `--max-preview`, `--theme`)
+- [x] Theme support: dark / light / custom colors (`theme.rs` + `ThemeColors` + config integration)
+- [x] Help overlay (`?` key): show all keybindings (`components/help.rs`)
+- [x] Mouse support (optional): click to select, scroll wheel, focus switching
+- [x] Nerd Font icon toggle (fallback to ASCII via `--no-icons`)
+- [x] Sort options: by name, size, modified date (`SortBy` enum + `dirs_first`)
 - [x] Error recovery: graceful handling of permission denied, broken symlinks
-- [ ] README.md with install instructions and screenshots
-- [ ] Release binary via GitHub Actions
+- [x] README.md with install instructions and screenshots
+- [x] Release binary via GitHub Actions (CI + release workflows)
 
 **Deliverable**: Configurable, polished, ready for daily use in KubeFlow.
 
