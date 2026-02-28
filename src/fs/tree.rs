@@ -574,9 +574,13 @@ impl TreeState {
     ///
     /// The root node is always included regardless of hidden status.
     /// Multi-selection is cleared since indices change.
+    /// Item count is capped at 100K to prevent OOM on pathological trees.
     pub fn flatten(&mut self) {
+        let prev_len = self.flat_items.len();
         self.flat_items.clear();
         self.multi_selected.clear();
+        // Pre-allocate based on previous size for performance
+        self.flat_items.reserve(prev_len.min(10_000));
         Self::flatten_node(
             &self.root,
             &mut self.flat_items,
@@ -597,6 +601,12 @@ impl TreeState {
         is_last: bool,
         is_root: bool,
     ) {
+        // Safety cap: prevent OOM on pathological trees
+        const MAX_FLAT_ITEMS: usize = 100_000;
+        if items.len() >= MAX_FLAT_ITEMS {
+            return;
+        }
+
         if !is_root && !show_hidden && node.meta.is_hidden {
             return;
         }
