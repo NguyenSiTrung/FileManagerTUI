@@ -650,6 +650,147 @@ impl App {
         });
     }
 
+    /// Spawn an async directory snapshot collection.
+    ///
+    /// For large directories (> page_size entries), this collects a `DirSnapshot`
+    /// on a blocking thread and sends `DirScanComplete` when done. The UI remains
+    /// responsive while the snapshot is being built.
+    ///
+    /// The node is marked as expanded immediately with a "Scanning..." placeholder.
+    #[allow(dead_code)]
+    pub fn spawn_async_snapshot(
+        &mut self,
+        dir_path: &Path,
+        event_tx: &mpsc::UnboundedSender<crate::event::Event>,
+    ) {
+        let path = dir_path.to_path_buf();
+        let tx = event_tx.clone();
+
+        self.set_status_message(format!(
+            "📂 Scanning {}...",
+            path.file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| path.to_string_lossy().to_string())
+        ));
+
+        tokio::spawn(async move {
+            // Use spawn_blocking since read_dir is a synchronous I/O operation
+            let result = tokio::task::spawn_blocking(move || {
+                crate::fs::tree::DirSnapshot::collect(&path).map(|snapshot| (path, snapshot))
+            })
+            .await;
+
+            match result {
+                Ok(Ok((path, snapshot))) => {
+                    let _ = tx.send(crate::event::Event::DirScanComplete { path, snapshot });
+                }
+                Ok(Err(_)) | Err(_) => {
+                    // Snapshot collection failed — silently ignore
+                    // The directory will just not expand
+                }
+            }
+        });
+    }
+
+    /// Spawn an async child count for a directory.
+    ///
+    /// Performs `read_dir().count()` on a blocking thread and sends
+    /// `DirCountComplete` when done. Used for non-blocking badge updates.
+    #[allow(dead_code)]
+    pub fn spawn_async_child_count(
+        &mut self,
+        dir_path: &Path,
+        event_tx: &mpsc::UnboundedSender<crate::event::Event>,
+    ) {
+        let path = dir_path.to_path_buf();
+        let tx = event_tx.clone();
+
+        tokio::spawn(async move {
+            let result = tokio::task::spawn_blocking(move || {
+                std::fs::read_dir(&path).map(|rd| (path, rd.count()))
+            })
+            .await;
+
+            if let Ok(Ok((path, count))) = result {
+                let _ = tx.send(crate::event::Event::DirCountComplete { path, count });
+            }
+        });
+    }
+
+    /// Spawn an async directory summary scan.
+    ///
+    /// Walks the directory tree recursively, sending periodic `DirSummaryUpdate`
+    /// events with running totals. Useful for directory preview.
+    #[allow(dead_code)]
+    pub fn spawn_async_dir_summary(
+        &mut self,
+        dir_path: &Path,
+        event_tx: &mpsc::UnboundedSender<crate::event::Event>,
+    ) {
+        let path = dir_path.to_path_buf();
+        let tx = event_tx.clone();
+
+        tokio::spawn(async move {
+            let result = tokio::task::spawn_blocking(move || {
+                let mut files: u64 = 0;
+                let mut dirs: u64 = 0;
+                let mut size: u64 = 0;
+                let mut stack = vec![path.clone()];
+                let mut items_since_update: u64 = 0;
+
+                while let Some(dir) = stack.pop() {
+                    let entries = match std::fs::read_dir(&dir) {
+                        Ok(e) => e,
+                        Err(_) => continue,
+                    };
+                    for entry in entries {
+                        let entry = match entry {
+                            Ok(e) => e,
+                            Err(_) => continue,
+                        };
+                        let meta = match entry.metadata() {
+                            Ok(m) => m,
+                            Err(_) => continue,
+                        };
+                        if meta.is_dir() {
+                            dirs += 1;
+                            stack.push(entry.path());
+                        } else {
+                            files += 1;
+                            size += meta.len();
+                        }
+                        items_since_update += 1;
+
+                        // Send progress every 1000 items
+                        if items_since_update >= 1000 {
+                            let _ = tx.send(crate::event::Event::DirSummaryUpdate {
+                                path: path.clone(),
+                                files,
+                                dirs,
+                                size,
+                                done: false,
+                            });
+                            items_since_update = 0;
+                        }
+                    }
+                }
+
+                // Send final update
+                let _ = tx.send(crate::event::Event::DirSummaryUpdate {
+                    path,
+                    files,
+                    dirs,
+                    size,
+                    done: true,
+                });
+            })
+            .await;
+
+            // Ignore join errors
+            let _ = result;
+        });
+    }
+
     /// Handle an async operation completion.
     pub fn handle_operation_complete(&mut self, result: crate::event::OperationResult) {
         self.close_dialog();
