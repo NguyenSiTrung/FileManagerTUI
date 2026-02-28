@@ -10,6 +10,7 @@ use syntect::highlighting::Theme;
 use syntect::parsing::SyntaxSet;
 use tokio::sync::mpsc;
 
+use crate::components::help::HelpState;
 use crate::config::AppConfig;
 use crate::error::Result;
 use crate::fs::clipboard::{ClipboardOp, ClipboardState};
@@ -119,6 +120,7 @@ pub enum AppMode {
     Dialog(DialogKind),
     Search,
     Filter,
+    Help,
 }
 
 /// State for a dialog's text input.
@@ -173,6 +175,8 @@ pub struct App {
     pub fuzzy_matcher: SkimMatcherV2,
     /// Whether the filesystem watcher is currently active.
     pub watcher_active: bool,
+    /// State for the help overlay.
+    pub help_state: HelpState,
 }
 
 impl App {
@@ -205,6 +209,7 @@ impl App {
             search_state: SearchState::default(),
             fuzzy_matcher: SkimMatcherV2::default(),
             watcher_active: true,
+            help_state: HelpState::default(),
         })
     }
 

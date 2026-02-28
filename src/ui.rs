@@ -7,6 +7,7 @@ use ratatui::{
 
 use crate::app::{App, AppMode, FocusedPanel};
 use crate::components::dialog::DialogWidget;
+use crate::components::help::HelpOverlay;
 use crate::components::preview::PreviewWidget;
 use crate::components::search::SearchWidget;
 use crate::components::status_bar::StatusBarWidget;
@@ -163,5 +164,11 @@ pub fn render(app: &mut App, frame: &mut Frame) {
     if app.mode == AppMode::Search {
         let search_widget = SearchWidget::new(&app.search_state, &theme);
         frame.render_widget(search_widget, area);
+    }
+
+    // Render help overlay on top if in help mode
+    if app.mode == AppMode::Help {
+        let help_widget = HelpOverlay::new(&theme, app.help_state.scroll_offset);
+        frame.render_widget(help_widget, area);
     }
 }

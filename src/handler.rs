@@ -2,6 +2,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use tokio::sync::mpsc;
 
 use crate::app::{App, AppMode, DialogKind, FocusedPanel};
+use crate::components::help::HelpOverlay;
 use crate::event::Event;
 use crate::fs::operations;
 
@@ -12,6 +13,7 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent, event_tx: &mpsc::Unbounded
         AppMode::Dialog(_) => handle_dialog_mode(app, key),
         AppMode::Search => handle_search_mode(app, key),
         AppMode::Filter => handle_filter_mode(app, key),
+        AppMode::Help => handle_help_mode(app, key),
     }
 }
 
@@ -48,6 +50,11 @@ fn handle_normal_mode(app: &mut App, key: KeyEvent, event_tx: &mpsc::UnboundedSe
         }
         KeyCode::F(5) => {
             app.full_refresh();
+            return;
+        }
+        KeyCode::Char('?') => {
+            app.help_state.scroll_offset = 0;
+            app.mode = AppMode::Help;
             return;
         }
         _ => {}
@@ -168,6 +175,30 @@ fn handle_filter_mode(app: &mut App, key: KeyEvent) {
         KeyCode::Enter => app.accept_filter(),
         KeyCode::Backspace => app.filter_delete_char(),
         KeyCode::Char(c) => app.filter_input_char(c),
+        _ => {}
+    }
+}
+
+fn handle_help_mode(app: &mut App, key: KeyEvent) {
+    let total = HelpOverlay::total_lines();
+    match key.code {
+        KeyCode::Char('?') | KeyCode::Esc => {
+            app.mode = AppMode::Normal;
+        }
+        KeyCode::Char('j') | KeyCode::Down => {
+            if app.help_state.scroll_offset < total.saturating_sub(1) {
+                app.help_state.scroll_offset += 1;
+            }
+        }
+        KeyCode::Char('k') | KeyCode::Up => {
+            app.help_state.scroll_offset = app.help_state.scroll_offset.saturating_sub(1);
+        }
+        KeyCode::Char('g') | KeyCode::Home => {
+            app.help_state.scroll_offset = 0;
+        }
+        KeyCode::Char('G') | KeyCode::End => {
+            app.help_state.scroll_offset = total.saturating_sub(1);
+        }
         _ => {}
     }
 }
@@ -1366,5 +1397,60 @@ mod tests {
             .map(|i| i.name.as_str())
             .collect();
         assert!(names.contains(&"f5_preview.txt"));
+    }
+
+    // === Help mode tests ===
+
+    #[test]
+    fn question_mark_opens_help() {
+        let (_dir, mut app) = setup_app();
+        handle_key(
+            &mut app,
+            make_key_with_modifiers(KeyCode::Char('?'), KeyModifiers::SHIFT),
+        );
+        assert_eq!(app.mode, AppMode::Help);
+    }
+
+    #[test]
+    fn question_mark_toggles_help() {
+        let (_dir, mut app) = setup_app();
+        handle_key(
+            &mut app,
+            make_key_with_modifiers(KeyCode::Char('?'), KeyModifiers::SHIFT),
+        );
+        assert_eq!(app.mode, AppMode::Help);
+        handle_key(
+            &mut app,
+            make_key_with_modifiers(KeyCode::Char('?'), KeyModifiers::SHIFT),
+        );
+        assert_eq!(app.mode, AppMode::Normal);
+    }
+
+    #[test]
+    fn esc_closes_help() {
+        let (_dir, mut app) = setup_app();
+        app.mode = AppMode::Help;
+        handle_key(&mut app, make_key(KeyCode::Esc));
+        assert_eq!(app.mode, AppMode::Normal);
+    }
+
+    #[test]
+    fn help_scroll_down_and_up() {
+        let (_dir, mut app) = setup_app();
+        app.mode = AppMode::Help;
+        handle_key(&mut app, make_key(KeyCode::Char('j')));
+        assert_eq!(app.help_state.scroll_offset, 1);
+        handle_key(&mut app, make_key(KeyCode::Char('k')));
+        assert_eq!(app.help_state.scroll_offset, 0);
+    }
+
+    #[test]
+    fn help_keys_do_not_navigate_tree() {
+        let (_dir, mut app) = setup_app();
+        app.mode = AppMode::Help;
+        let idx = app.tree_state.selected_index;
+        handle_key(&mut app, make_key(KeyCode::Char('j')));
+        handle_key(&mut app, make_key(KeyCode::Char('k')));
+        assert_eq!(app.tree_state.selected_index, idx);
     }
 }
