@@ -1325,7 +1325,18 @@ impl App {
     pub fn search_action_copy_path(&mut self) {
         if let Some(state) = self.search_action_state.take() {
             let path_str = state.path.to_string_lossy().to_string();
-            self.set_status_message(format!("📋 Path copied: {}", path_str));
+            match cli_clipboard::set_contents(path_str.clone()) {
+                Ok(()) => {
+                    self.set_status_message(format!("📋 Path copied: {}", path_str));
+                }
+                Err(_) => {
+                    // Fallback: show in status bar even if clipboard unavailable
+                    self.set_status_message(format!(
+                        "📋 Path (clipboard unavailable): {}",
+                        path_str
+                    ));
+                }
+            }
             self.mode = AppMode::Normal;
             self.invalidate_search_cache();
             self.last_previewed_index = None;

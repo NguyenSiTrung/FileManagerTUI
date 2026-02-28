@@ -20,6 +20,7 @@ toml = "0.8"
 dirs = "5"
 portable-pty = "0.8"
 vte = "0.13"
+cli-clipboard = "0.4"
 
 [dev-dependencies]
 tempfile = "3"

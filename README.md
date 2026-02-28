@@ -132,7 +132,7 @@ After selecting a file in the fuzzy finder, an action menu appears:
 | `Enter` | Navigate (Go to file in tree) |
 | `p` | Preview (navigate + focus preview) |
 | `e` | Edit (open inline editor) |
-| `y` | Copy path to status bar |
+| `y` | Copy absolute path to system clipboard |
 | `r` | Rename file |
 | `d` | Delete file |
 | `c` | Copy to clipboard |
