@@ -1,18 +1,41 @@
-# Track Learnings: terminal-panel_20260228
+# Learnings: Embedded Terminal Panel
 
-Patterns, gotchas, and context discovered during implementation.
+## Inherited Patterns
+- Widget builder: `WidgetName::new(state, theme).block(block)`
+- Handler: 3-level dispatch (global → panel → dialog)
+- crossterm event polling is blocking; run in spawned tokio task
+- Store layout `Rect` on App for mouse coordinate mapping
 
-## Codebase Patterns (Inherited)
+## New Learnings
 
-- Widget builder pattern: `WidgetName::new(state, theme).block(block)` — theme is always the last constructor parameter
-- Clone ThemeColors at render start to avoid borrow checker conflicts with `app` mutation during rendering
-- Handler uses 3-level dispatch: global keys → panel-specific keys (handle_tree_keys/handle_preview_keys) → dialog keys
-- Store layout `Rect` on App from render → handler uses them for mouse coordinate mapping
-- Mouse events only processed in Normal mode — prevents accidental clicks during dialogs
-- crossterm event polling is blocking — must run in spawned tokio task with mpsc channel
-- Use `Arc<AtomicBool>` for cancel tokens — no need for `tokio_util::CancellationToken`
-- Graceful degradation for optional subsystems: wrap initialization in match, set state flag to false, show status message on error
+### PTY Integration
+- `portable-pty` handles cross-platform PTY creation cleanly; the `MasterPty` trait allows resize and writer/reader cloning
+- PTY reader must use `spawn_blocking` (not `spawn`) because `Read` is blocking I/O
+- Bridge pattern: PTY reader → `mpsc::unbounded_channel` → tokio task → `Event::TerminalOutput` in main event loop
+- Shell process persists when terminal panel is hidden — no need to restart
 
----
+### VTE Parser Architecture
+- `vte::Parser::advance()` requires `&mut self` on both parser and performer — solved by separating `Performer` struct from `TerminalEmulator` to avoid borrow checker issues
+- The `Performer` borrows fields from `TerminalEmulator` via mutable references, allowing the parser to drive the emulator without self-referential borrows
+- VTE params come as `vte::Params` (nested slices) — flatten with `params.iter().flat_map(|sub| sub.iter().copied())`
 
-<!-- Learnings from implementation will be appended below -->
+### Input Routing Architecture
+- Terminal input must be routed BEFORE general global keys (e.g., `q` should type 'q' in terminal, not quit the app)
+- Reserved keys (Ctrl+T, Ctrl+↑/↓, Esc, Tab) are intercepted before PTY forwarding
+- `key_event_to_bytes()` converts crossterm KeyEvents to VT100 byte sequences for the PTY
+
+### Keybinding Conflicts
+- Ctrl+T was previously used for "cycle view mode" in preview panel — reassigned to terminal toggle
+- When adding global keybindings, must check for conflicts with all panel-specific bindings
+- Terminal panel input routing happens at the `handle_normal_mode` level, before panel dispatch
+
+### Layout Integration
+- Terminal panel uses conditional 3-row vertical layout: `[main, terminal, status]`
+- Dynamic resize via `height_percent` (clamped 10-80%) with Ctrl+↑/↓
+- Emulator grid auto-resizes to match the terminal panel's inner area on each render
+- PTY resize notification (`SIGWINCH`) sent alongside emulator resize
+
+### Configuration
+- Added `[terminal]` TOML section with `enabled`, `default_shell`, `scrollback_lines`
+- `--no-terminal` CLI flag for disabling without config file changes
+- Shell defaults to `$SHELL` env var, then `/bin/sh` fallback

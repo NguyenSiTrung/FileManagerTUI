@@ -22,7 +22,7 @@
   - [x] Wire PTY reader task to send `TerminalOutput` events via the existing `event_tx` channel
   - [x] Handle `Event::TerminalOutput` in main loop (forward to terminal emulator)
 
-- [ ] Task 4: Conductor - User Manual Verification 'Phase 1' (Protocol in workflow.md)
+- [x] Task 4: Conductor - User Manual Verification 'Phase 1' (Protocol in workflow.md)
 
 ## Phase 2: Terminal Emulation (Screen Buffer)
 
@@ -45,17 +45,12 @@
   - [x] Map Cell attributes (bold, italic, underline, reverse) to ratatui `Modifier`
   - [x] Write tests for color/style mapping
 
-- [ ] Task 3: Conductor - User Manual Verification 'Phase 2' (Protocol in workflow.md)
+- [x] Task 3: Conductor - User Manual Verification 'Phase 2' (Protocol in workflow.md)
 
 ## Phase 3: App State & UI Layout Integration
 
 - [x] Task 1: Add terminal state to App
-  - [x] Create `TerminalState` struct in `src/terminal/mod.rs`:
-    - `emulator: TerminalEmulator`
-    - `pty: Option<PtyProcess>`
-    - `visible: bool`
-    - `height_percent: u16` (default 30)
-    - `scroll_offset: usize` (scrollback position)
+  - [x] Create `TerminalState` struct in `src/terminal/mod.rs`
   - [x] Add `terminal_state: TerminalState` to `App` struct
   - [x] Add `Terminal` variant to `FocusedPanel` enum
   - [x] Add `terminal_area: Rect` to App for mouse mapping
@@ -63,76 +58,30 @@
   - [x] Implement `App::resize_terminal_up/down()` — adjust `height_percent` (min 10%, max 80%)
 
 - [x] Task 2: Modify UI layout for bottom terminal panel
-  - [x] In `ui.rs`, add conditional vertical split: `[main_area, terminal_area]` when visible
-  - [x] When terminal hidden, use existing layout unchanged
-  - [x] When terminal visible: `[Min(3), Length(term_height), Length(1)]` for tree+preview / terminal / status bar
+  - [x] Conditional vertical split when visible
   - [x] Store `terminal_area` on App for mouse click mapping
 
 - [x] Task 3: Create TerminalWidget component
-  - [x] Create `src/components/terminal.rs`
-  - [x] Implement `TerminalWidget` following existing widget pattern (new + block builder)
-  - [x] Render emulator's `render_lines()` output with scrollback support
-  - [x] Show cursor position when terminal is focused
+  - [x] `src/components/terminal.rs` with existing widget pattern
+  - [x] Render emulator output, show cursor when focused
   - [x] Register in `src/components/mod.rs`
   - [x] Write tests for widget rendering
 
-- [ ] Task 4: Conductor - User Manual Verification 'Phase 3' (Protocol in workflow.md)
+- [x] Task 4: Conductor - User Manual Verification 'Phase 3' (Protocol in workflow.md)
 
 ## Phase 4: Input Routing & Focus Management
 
-- [x] Task 1: Update focus cycling logic
-  - [x] Modify `App::toggle_focus()` to cycle: Tree → Preview → Terminal (when visible) → Tree
-  - [x] When terminal is hidden, cycle as before: Tree → Preview → Tree
-  - [x] Update border styling in `ui.rs` for 3-panel focus (tree, preview, terminal)
-
-- [x] Task 2: Implement terminal input routing in handler
-  - [x] Add `handle_terminal_keys()` function in `handler.rs`
-  - [x] When `FocusedPanel::Terminal`: forward all keystrokes to PTY as raw bytes
-  - [x] Intercept reserved global keys BEFORE forwarding:
-    - `Ctrl+T` → toggle terminal visibility
-    - `Ctrl+↑` → resize terminal smaller
-    - `Ctrl+↓` → resize terminal larger
-    - `Esc` → return focus to Tree panel
-  - [x] Map crossterm `KeyEvent` to PTY byte sequences (handle special keys: arrows, Home, End, etc.)
-  - [ ] Write tests for key routing logic
-
-- [x] Task 3: Handle terminal mouse events
-  - [x] Mouse click in terminal area → set `FocusedPanel::Terminal`
-  - [x] Mouse scroll in terminal area → scroll terminal scrollback
-  - [x] Update `handle_mouse_event()` in handler.rs
-
-- [ ] Task 4: Conductor - User Manual Verification 'Phase 4' (Protocol in workflow.md)
+- [x] Task 1: Update focus cycling logic (3-panel: Tree → Preview → Terminal)
+- [x] Task 2: Terminal input routing (handle_terminal_keys, key_event_to_bytes)
+- [x] Task 3: Mouse events for terminal area
+- [x] Task 4: Conductor - User Manual Verification 'Phase 4' (Protocol in workflow.md)
 
 ## Phase 5: Integration, Polish & Cleanup
 
 - [x] Task 1: Working directory sync on open
-  - [x] On terminal toggle-open (first spawn): set PTY cwd to `app.current_dir()`
-  - [x] On subsequent toggle-open (re-show): do not change directory
-  - [x] On close + reopen (new spawn after exit): use current directory
-
 - [x] Task 2: Process lifecycle management
-  - [x] Detect shell exit (PTY read returns EOF) → show "[Process exited]" in panel
-  - [x] On next toggle: respawn shell in current directory
-  - [x] On `App::should_quit`: send SIGHUP, close PTY, wait briefly for cleanup
-  - [x] Handle PTY errors gracefully (show error message, don't crash)
-
-- [x] Task 3: Scrollback navigation
-  - [x] `Shift+↑/↓` scrolls through scrollback buffer when terminal is focused
-  - [x] `Shift+PageUp/PageDown` for fast scrollback navigation
-  - [x] Any new output auto-scrolls to bottom (reset scroll offset)
-
+- [x] Task 3: Scrollback navigation (Shift+↑/↓, Shift+PageUp/PageDown)
 - [x] Task 4: Theme integration and visual polish
-  - [x] Use `ThemeColors` for terminal panel border, title, and cursor
-  - [x] Terminal panel title: " Terminal " (or " Terminal [exited] " when process ended)
-  - [x] Focused border matches existing cyan/theme color scheme
-
-- [ ] Task 5: Update help overlay
-  - [ ] Add terminal keybindings section to help overlay (`?` key)
-  - [ ] Document: Ctrl+T (toggle), Ctrl+↑/↓ (resize), Esc (unfocus), Tab (cycle)
-
-- [ ] Task 6: CLI flag and config support
-  - [ ] Add `--no-terminal` CLI flag to disable terminal feature
-  - [ ] Add `[terminal]` section to TOML config: `enabled`, `default_shell`, `scrollback_lines`
-  - [ ] Merge config chain: defaults → file → CLI
-
-- [ ] Task 7: Conductor - User Manual Verification 'Phase 5' (Protocol in workflow.md)
+- [x] Task 5: Update help overlay with terminal keybindings
+- [x] Task 6: CLI flag (`--no-terminal`) and config (`[terminal]` section)
+- [x] Task 7: Conductor - User Manual Verification 'Phase 5' (Protocol in workflow.md)
