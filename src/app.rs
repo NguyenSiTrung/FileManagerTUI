@@ -215,7 +215,8 @@ pub struct App {
 impl App {
     /// Create a new App rooted at the given path, using the provided config.
     pub fn new(path: &Path, config: AppConfig) -> Result<Self> {
-        let mut tree_state = TreeState::new(path)?;
+        let page_size = config.max_entries_per_page();
+        let mut tree_state = TreeState::with_page_size(path, page_size)?;
         // Apply config: show_hidden
         tree_state.show_hidden = config.show_hidden();
         // Apply config: sort settings
@@ -1536,12 +1537,13 @@ impl App {
         // Clone sort fields before mutable borrow
         let sort_by = self.tree_state.sort_by.clone();
         let dirs_first = self.tree_state.dirs_first;
+        let page_size = self.tree_state.page_size;
 
         // Expand each ancestor and apply sorting
         for ancestor in &ancestors {
             if let Some(node) = TreeState::find_node_mut_pub(&mut self.tree_state.root, ancestor) {
                 if !node.is_expanded {
-                    let _ = node.load_children();
+                    let _ = node.load_children_paged(page_size);
                     TreeState::sort_children_of_pub(node, &sort_by, dirs_first);
                     node.is_expanded = true;
                 }
@@ -1648,6 +1650,7 @@ impl App {
         // Clone sort fields before mutable borrow (avoids borrow checker conflict)
         let sort_by = self.tree_state.sort_by.clone();
         let dirs_first = self.tree_state.dirs_first;
+        let page_size = self.tree_state.page_size;
 
         // Reload each affected directory and apply sorting
         for dir in &dirs_to_reload {
@@ -1655,7 +1658,7 @@ impl App {
                 crate::fs::tree::TreeState::find_node_mut_pub(&mut self.tree_state.root, dir)
             {
                 if node.node_type == crate::fs::tree::NodeType::Directory {
-                    let _ = node.load_children();
+                    let _ = node.load_children_paged(page_size);
                     TreeState::sort_children_of_pub(node, &sort_by, dirs_first);
                 }
             }

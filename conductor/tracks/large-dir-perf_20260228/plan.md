@@ -10,12 +10,12 @@
   - [x] Add validation: clamp page size to 100..50000 range
   - [x] Add tests for config parsing with new fields
 
-- [ ] Task 2: Extend TreeNode with pagination state
+- [x] Task 2: Extend TreeNode with pagination state
   <!-- files: src/fs/tree.rs -->
-  - [ ] Add fields to `TreeNode`: `total_child_count: Option<usize>`, `loaded_child_count: usize`, `has_more_children: bool`
-  - [ ] Add `NodeType::LoadMore` variant for the virtual "Load more" node
-  - [ ] Add `FlatItem` support for `NodeType::LoadMore` (carries parent path + remaining count)
-  - [ ] Add unit tests for new TreeNode fields
+  - [x] Add fields to `TreeNode`: `total_child_count: Option<usize>`, `loaded_child_count: usize`, `has_more_children: bool`
+  - [x] Add `NodeType::LoadMore` variant for the virtual "Load more" node
+  - [x] Add `FlatItem` support for `NodeType::LoadMore` (carries parent path + remaining count)
+  - [x] Add unit tests for new TreeNode fields
 
 - [ ] Task 3: Implement paginated `load_children()`
   <!-- files: src/fs/tree.rs -->

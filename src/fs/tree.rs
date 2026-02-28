@@ -84,12 +84,13 @@ impl TreeNode {
         })
     }
 
-    /// Load children for a directory node.
+    /// Load ALL children for a directory node (no pagination).
     ///
-    /// Reads the directory contents, creates child `TreeNode`s.
+    /// This is the original unpaginated loading. Used internally when the
+    /// directory is small enough that pagination is not needed.
     /// Sorting is applied separately via `TreeState::sort_children_of`.
     /// Permission-denied and broken symlinks are silently skipped.
-    pub fn load_children(&mut self) -> Result<()> {
+    fn load_children_all(&mut self) -> Result<()> {
         if self.node_type != NodeType::Directory {
             return Ok(());
         }
@@ -108,8 +109,102 @@ impl TreeNode {
             }
         }
 
+        let count = children.len();
         self.children = Some(children);
+        self.total_child_count = Some(count);
+        self.loaded_child_count = count;
+        self.has_more_children = false;
         Ok(())
+    }
+
+    /// Load children with pagination support.
+    ///
+    /// 1. Fast-counts immediate children via `read_dir().count()`
+    /// 2. If total ≤ `page_size`, loads all (backward compatible)
+    /// 3. If total > `page_size`, loads only the first `page_size` entries
+    ///    and sets `has_more_children = true`
+    ///
+    /// Sorting is applied separately via `TreeState::sort_children_of`.
+    pub fn load_children_paged(&mut self, page_size: usize) -> Result<()> {
+        if self.node_type != NodeType::Directory {
+            return Ok(());
+        }
+
+        // Fast count of immediate children
+        let total = match fs::read_dir(&self.path) {
+            Ok(rd) => rd.count(),
+            Err(_) => {
+                self.total_child_count = Some(0);
+                self.children = Some(Vec::new());
+                return Ok(());
+            }
+        };
+        self.total_child_count = Some(total);
+
+        // If small enough, load all — backward compatible
+        if total <= page_size {
+            return self.load_children_all();
+        }
+
+        // Paginated load: only first page_size entries
+        let mut children = Vec::with_capacity(page_size);
+        let entries = fs::read_dir(&self.path)?;
+        let mut loaded = 0;
+
+        for entry in entries {
+            if loaded >= page_size {
+                break;
+            }
+            let entry = match entry {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+            match TreeNode::new(&entry.path(), self.depth + 1) {
+                Ok(node) => {
+                    children.push(node);
+                    loaded += 1;
+                }
+                Err(_) => continue,
+            }
+        }
+
+        self.children = Some(children);
+        self.loaded_child_count = loaded;
+        self.has_more_children = loaded < total;
+        Ok(())
+    }
+
+    /// Load children for a directory node (backward-compatible API).
+    ///
+    /// Loads all entries without pagination.
+    /// Sorting is applied separately via `TreeState::sort_children_of`.
+    /// Permission-denied and broken symlinks are silently skipped.
+    #[allow(dead_code)]
+    pub fn load_children(&mut self) -> Result<()> {
+        self.load_children_all()
+    }
+
+    /// Get the count of immediate children (fast, no recursion).
+    ///
+    /// Uses cached `total_child_count` if available, otherwise performs
+    /// a fast `read_dir().count()` and caches the result.
+    /// Returns `None` on permission denied or other errors.
+    #[allow(dead_code)]
+    pub fn get_child_count(&mut self) -> Option<usize> {
+        if let Some(count) = self.total_child_count {
+            return Some(count);
+        }
+        if self.node_type != NodeType::Directory {
+            return None;
+        }
+        match fs::read_dir(&self.path) {
+            Ok(rd) => {
+                let count = rd.count();
+                self.total_child_count = Some(count);
+                Some(count)
+            }
+            Err(_) => None,
+        }
     }
 }
 
@@ -187,14 +282,22 @@ pub struct TreeState {
     pub sort_by: SortBy,
     /// Whether directories are shown before files.
     pub dirs_first: bool,
+    /// Max entries to load per page (pagination threshold).
+    pub page_size: usize,
 }
 
 impl TreeState {
     /// Create a new TreeState from a root path, expanding the root directory.
+    #[allow(dead_code)]
     pub fn new(path: &Path) -> Result<Self> {
+        Self::with_page_size(path, usize::MAX)
+    }
+
+    /// Create a new TreeState with a specific page size for pagination.
+    pub fn with_page_size(path: &Path, page_size: usize) -> Result<Self> {
         let mut root = TreeNode::new(path, 0)?;
         if root.node_type == NodeType::Directory {
-            root.load_children()?;
+            root.load_children_paged(page_size)?;
             root.is_expanded = true;
         }
 
@@ -209,6 +312,7 @@ impl TreeState {
             is_filtering: false,
             sort_by: SortBy::Name,
             dirs_first: true,
+            page_size,
         };
         state.sort_all_children();
         state.flatten();
@@ -266,9 +370,34 @@ impl TreeState {
                     children.iter().filter(|c| !c.meta.is_hidden).collect()
                 };
 
+                // If paginated, the last real child is NOT the last sibling —
+                // the LoadMore node will be the last sibling instead.
+                let has_load_more = node.has_more_children;
+
                 for (i, child) in visible_children.iter().enumerate() {
-                    let is_last_child = i == visible_children.len() - 1;
+                    let is_last_child =
+                        i == visible_children.len() - 1 && !has_load_more;
                     Self::flatten_node(child, items, show_hidden, is_last_child, false);
+                }
+
+                // Emit the "Load more..." virtual node
+                if has_load_more {
+                    let remaining = node
+                        .total_child_count
+                        .unwrap_or(0)
+                        .saturating_sub(node.loaded_child_count);
+                    let label = format!("Load more... (remaining: ~{})", remaining);
+                    items.push(FlatItem {
+                        name: label,
+                        path: node.path.clone(), // path points to the parent dir
+                        node_type: NodeType::LoadMore,
+                        depth: node.depth + 1,
+                        is_expanded: false,
+                        is_last_sibling: true,
+                        is_hidden: false,
+                        load_more_parent: Some(node.path.clone()),
+                        load_more_remaining: Some(remaining),
+                    });
                 }
             }
         }
@@ -286,9 +415,10 @@ impl TreeState {
         let path = selected.path.clone();
         let sort_by = self.sort_by.clone();
         let dirs_first = self.dirs_first;
+        let page_size = self.page_size;
         if let Some(node) = Self::find_node_mut(&mut self.root, &path) {
             if !node.is_expanded {
-                let _ = node.load_children();
+                let _ = node.load_children_paged(page_size);
                 Self::sort_children_of(node, &sort_by, dirs_first);
                 node.is_expanded = true;
                 self.flatten();
@@ -356,9 +486,10 @@ impl TreeState {
     pub fn reload_dir(&mut self, dir_path: &Path) {
         let sort_by = self.sort_by.clone();
         let dirs_first = self.dirs_first;
+        let page_size = self.page_size;
         if let Some(node) = Self::find_node_mut(&mut self.root, dir_path) {
             if node.node_type == NodeType::Directory {
-                let _ = node.load_children();
+                let _ = node.load_children_paged(page_size);
                 Self::sort_children_of(node, &sort_by, dirs_first);
                 self.flatten();
             }
@@ -565,10 +696,11 @@ impl TreeState {
     pub fn restore_expanded(&mut self, expanded: &HashSet<PathBuf>) {
         let sort_by = self.sort_by.clone();
         let dirs_first = self.dirs_first;
+        let page_size = self.page_size;
         for path in Self::expanded_paths_in_restore_order(expanded) {
             if let Some(node) = Self::find_node_mut(&mut self.root, path) {
                 if node.node_type == NodeType::Directory && !node.is_expanded {
-                    let _ = node.load_children();
+                    let _ = node.load_children_paged(page_size);
                     Self::sort_children_of(node, &sort_by, dirs_first);
                     node.is_expanded = true;
                 }
@@ -1055,5 +1187,104 @@ mod tests {
             .expect("nested should exist after restore");
         assert!(nested_after.is_expanded);
         assert!(state.flat_items.iter().any(|i| i.path == nested_file));
+    }
+
+    // === Pagination tests ===
+
+    fn setup_large_dir(count: usize) -> TempDir {
+        let dir = TempDir::new().unwrap();
+        for i in 0..count {
+            File::create(dir.path().join(format!("file_{:05}.txt", i))).unwrap();
+        }
+        dir
+    }
+
+    #[test]
+    fn load_children_paged_small_dir_no_pagination() {
+        let dir = setup_test_dir();
+        let mut node = TreeNode::new(dir.path(), 0).unwrap();
+        // 5 children (alpha, beta, file_a.txt, file_b.rs, .hidden)
+        node.load_children_paged(1000).unwrap();
+        assert_eq!(node.total_child_count, Some(5));
+        assert_eq!(node.loaded_child_count, 5);
+        assert!(!node.has_more_children);
+        assert_eq!(node.children.as_ref().unwrap().len(), 5);
+    }
+
+    #[test]
+    fn load_children_paged_large_dir_with_pagination() {
+        let dir = setup_large_dir(50);
+        let mut node = TreeNode::new(dir.path(), 0).unwrap();
+        node.load_children_paged(10).unwrap();
+        assert_eq!(node.total_child_count, Some(50));
+        assert_eq!(node.loaded_child_count, 10);
+        assert!(node.has_more_children);
+        assert_eq!(node.children.as_ref().unwrap().len(), 10);
+    }
+
+    #[test]
+    fn flatten_emits_load_more_node() {
+        let dir = setup_large_dir(20);
+        let mut state = TreeState::with_page_size(dir.path(), 5).unwrap();
+        state.flatten();
+
+        // Should have: root + 5 children + 1 LoadMore = 7 items
+        let load_more_items: Vec<&FlatItem> = state
+            .flat_items
+            .iter()
+            .filter(|i| i.node_type == NodeType::LoadMore)
+            .collect();
+        assert_eq!(load_more_items.len(), 1);
+        let lm = load_more_items[0];
+        assert!(lm.name.contains("Load more"));
+        assert!(lm.name.contains("15")); // ~15 remaining
+        assert_eq!(lm.load_more_parent, Some(dir.path().to_path_buf()));
+        assert_eq!(lm.load_more_remaining, Some(15));
+        assert!(lm.is_last_sibling);
+    }
+
+    #[test]
+    fn no_load_more_when_all_fit() {
+        let dir = setup_large_dir(5);
+        let state = TreeState::with_page_size(dir.path(), 10).unwrap();
+
+        let load_more_items: Vec<&FlatItem> = state
+            .flat_items
+            .iter()
+            .filter(|i| i.node_type == NodeType::LoadMore)
+            .collect();
+        assert_eq!(load_more_items.len(), 0);
+    }
+
+    #[test]
+    fn get_child_count_caches_result() {
+        let dir = setup_test_dir();
+        let mut node = TreeNode::new(dir.path(), 0).unwrap();
+        assert!(node.total_child_count.is_none());
+
+        let count = node.get_child_count();
+        assert_eq!(count, Some(5));
+        assert_eq!(node.total_child_count, Some(5)); // cached
+
+        // Second call should return cached value
+        let count2 = node.get_child_count();
+        assert_eq!(count2, Some(5));
+    }
+
+    #[test]
+    fn get_child_count_returns_none_for_file() {
+        let dir = setup_test_dir();
+        let mut node = TreeNode::new(&dir.path().join("file_a.txt"), 0).unwrap();
+        assert_eq!(node.get_child_count(), None);
+    }
+
+    #[test]
+    fn backward_compat_load_children() {
+        // load_children() (no page_size) should load all entries
+        let dir = setup_large_dir(50);
+        let mut node = TreeNode::new(dir.path(), 0).unwrap();
+        node.load_children().unwrap();
+        assert_eq!(node.children.as_ref().unwrap().len(), 50);
+        assert!(!node.has_more_children);
     }
 }
