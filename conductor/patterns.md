@@ -74,4 +74,17 @@ This file is the project's institutional knowledge - learnings extracted from co
 - Watcher sync in main loop: compare `app.watcher_active` vs `watcher.is_active()` each iteration to keep them in sync (from: file-watcher_20260228, archived 2026-02-28)
 - Graceful degradation for optional subsystems: wrap initialization in match, set state flag to false, show status message on error (from: file-watcher_20260228, archived 2026-02-28)
 
-Last refreshed: 2026-02-28 (file-watcher_20260228 archived)
+- All config fields use `Option<T>` so partial configs from different sources compose cleanly via `.or()` merge (from: config-polish_20260228, archived 2026-02-28)
+- `#[serde(default)]` on both struct and fields ensures TOML parsing tolerates missing sections (from: config-polish_20260228, archived 2026-02-28)
+- Widget builder pattern: `WidgetName::new(state, theme).block(block)` — theme is always the last constructor parameter (from: config-polish_20260228, archived 2026-02-28)
+- Clone ThemeColors at render start to avoid borrow checker conflicts with `app` mutation during rendering (from: config-polish_20260228, archived 2026-02-28)
+- Static const arrays of structs for keybinding data — compile-time, zero allocation at runtime (from: config-polish_20260228, archived 2026-02-28)
+- Store layout `Rect` on App from render → handler uses them for mouse coordinate mapping (from: config-polish_20260228, archived 2026-02-28)
+- Mouse events only processed in Normal mode — prevents accidental clicks during dialogs (from: config-polish_20260228, archived 2026-02-28)
+- Panic hook should also disable mouse capture to avoid terminal corruption (from: config-polish_20260228, archived 2026-02-28)
+- Separate sorting from `load_children` into `TreeState::sort_children_of` — sort concerns belong to TreeState, not TreeNode (from: config-polish_20260228, archived 2026-02-28)
+- Clone sort fields (sort_by, dirs_first) before `find_node_mut` to avoid borrow checker conflict on `&mut self` (from: config-polish_20260228, archived 2026-02-28)
+- `SortBy::next()` enum cycling — clean pattern without index arithmetic for mode cycling (from: config-polish_20260228, archived 2026-02-28)
+- Must account for border offset (y+1) when mapping mouse click row to flat_items index in bordered widgets (from: config-polish_20260228, archived 2026-02-28)
+
+Last refreshed: 2026-02-28 (config-polish_20260228 archived)
