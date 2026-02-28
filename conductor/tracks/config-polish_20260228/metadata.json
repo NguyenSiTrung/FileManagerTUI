@@ -1,0 +1,30 @@
+{
+    "track_id": "config-polish_20260228",
+    "type": "feature",
+    "status": "new",
+    "priority": "high",
+    "depends_on": [],
+    "estimated_hours": null,
+    "created_at": "2026-02-28T09:20:11+07:00",
+    "updated_at": "2026-02-28T09:20:11+07:00",
+    "description": "Milestone 7: Configuration + Polish — TOML config loading, CLI args, themes, help overlay, mouse support, icon toggle, sort options, README, cross-platform GitHub Actions release",
+    "beads_epic": "FileManagerTUI-xvg",
+    "beads_tasks": {
+        "phase1": "FileManagerTUI-xvg.1",
+        "phase1_task1": "FileManagerTUI-xvg.1.1",
+        "phase1_task2": "FileManagerTUI-xvg.1.2",
+        "phase1_task3": "FileManagerTUI-xvg.1.3",
+        "phase2": "FileManagerTUI-xvg.2",
+        "phase2_task1": "FileManagerTUI-xvg.2.1",
+        "phase2_task2": "FileManagerTUI-xvg.2.2",
+        "phase3": "FileManagerTUI-xvg.3",
+        "phase3_task1": "FileManagerTUI-xvg.3.1",
+        "phase3_task2": "FileManagerTUI-xvg.3.2",
+        "phase3_task3": "FileManagerTUI-xvg.3.3",
+        "phase3_task4": "FileManagerTUI-xvg.3.4",
+        "phase4": "FileManagerTUI-xvg.4",
+        "phase4_task1": "FileManagerTUI-xvg.4.1",
+        "phase4_task2": "FileManagerTUI-xvg.4.2",
+        "phase4_task3": "FileManagerTUI-xvg.4.3"
+    }
+}
