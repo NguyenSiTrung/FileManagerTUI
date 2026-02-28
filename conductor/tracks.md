@@ -30,7 +30,6 @@
 
 <!-- Archived: large-dir-perf_20260228 (2026-03-01) → conductor/archive/ -->
 
----
+<!-- Archived: large-dir-robust_20260301 (2026-03-01) → conductor/archive/ -->
 
-## [~] Track: Large Directory Robustness & Edge Cases
-*Link: [./conductor/tracks/large-dir-robust_20260301/](./conductor/tracks/large-dir-robust_20260301/)*
+---
