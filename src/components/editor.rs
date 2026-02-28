@@ -165,9 +165,7 @@ impl<'a> Widget for EditorWidget<'a> {
                                 .fg(ratatui::style::Color::Black)
                                 .bg(self.theme.editor_find_match_bg)
                         } else if is_sel {
-                            Style::default()
-                                .fg(fg)
-                                .bg(self.theme.editor_selection_bg)
+                            Style::default().fg(fg).bg(self.theme.editor_selection_bg)
                         } else if is_current_line {
                             Style::default()
                                 .fg(fg)

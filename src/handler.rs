@@ -105,7 +105,8 @@ fn handle_editor_mouse(app: &mut App, mouse: MouseEvent) {
     match mouse.kind {
         MouseEventKind::Down(MouseButton::Left) => {
             if let Some(ref mut editor) = app.editor_state {
-                let (target_line, target_col) = mouse_to_editor_pos(editor, app.preview_area, col, row);
+                let (target_line, target_col) =
+                    mouse_to_editor_pos(editor, app.preview_area, col, row);
                 // Place cursor and start a new selection anchor
                 editor.set_cursor_position(target_line, target_col);
                 // Set anchor at the click point so dragging will create a selection
@@ -117,7 +118,8 @@ fn handle_editor_mouse(app: &mut App, mouse: MouseEvent) {
         }
         MouseEventKind::Drag(MouseButton::Left) => {
             if let Some(ref mut editor) = app.editor_state {
-                let (target_line, target_col) = mouse_to_editor_pos(editor, app.preview_area, col, row);
+                let (target_line, target_col) =
+                    mouse_to_editor_pos(editor, app.preview_area, col, row);
                 // Move cursor without clearing selection — anchor stays put
                 editor.set_cursor_position_for_selection(target_line, target_col);
             }
@@ -126,8 +128,7 @@ fn handle_editor_mouse(app: &mut App, mouse: MouseEvent) {
             // If anchor == cursor after click-release (no drag), clear selection
             if let Some(ref mut editor) = app.editor_state {
                 if let Some(ref sel) = editor.selection {
-                    if sel.anchor_line == editor.cursor_line
-                        && sel.anchor_col == editor.cursor_col
+                    if sel.anchor_line == editor.cursor_line && sel.anchor_col == editor.cursor_col
                     {
                         editor.selection = None;
                     }
