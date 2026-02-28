@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2021"
 description = "A terminal-based file manager TUI built with Rust and Ratatui"
 
+[[bin]]
+name = "fm"
+path = "src/main.rs"
+
 [dependencies]
 ratatui = { version = "0.29", features = ["crossterm"] }
 crossterm = "0.28"

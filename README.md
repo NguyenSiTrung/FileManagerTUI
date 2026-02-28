@@ -54,9 +54,36 @@ sudo mv fm-* /usr/local/bin/fm
 ```bash
 git clone https://github.com/NguyenSiTrung/FileManagerTUI.git
 cd FileManagerTUI
-cargo build --release
-# Binary at target/release/file_manager_tui
 ```
+
+**Option A — Use the install script (recommended):**
+
+```bash
+./scripts/install.sh
+```
+
+This handles everything: installs Rust if missing, builds the binary, and installs it as `fm`.
+
+**Option B — Install via Cargo:**
+
+```bash
+cargo install --path .
+```
+
+**Option C — Manual build and install:**
+
+```bash
+cargo build --release
+# Copy binary to your PATH
+cp target/release/fm ~/.cargo/bin/fm
+# Or system-wide:
+sudo cp target/release/fm /usr/local/bin/fm
+```
+
+> Make sure `~/.cargo/bin` is in your PATH. If not, add to your `~/.bashrc` or `~/.zshrc`:
+> ```bash
+> source "$HOME/.cargo/env"
+> ```
 
 ## Usage
 

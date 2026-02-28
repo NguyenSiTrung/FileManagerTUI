@@ -57,13 +57,13 @@ jobs:
       - name: Rename binary (Unix)
         if: runner.os != 'Windows'
         run: |
-          cp target/${{ matrix.target }}/release/file_manager_tui ${{ matrix.binary }}
+          cp target/${{ matrix.target }}/release/fm ${{ matrix.binary }}
           chmod +x ${{ matrix.binary }}
 
       - name: Rename binary (Windows)
         if: runner.os == 'Windows'
         run: |
-          copy target\${{ matrix.target }}\release\file_manager_tui.exe ${{ matrix.binary }}
+          copy target\${{ matrix.target }}\release\fm.exe ${{ matrix.binary }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
