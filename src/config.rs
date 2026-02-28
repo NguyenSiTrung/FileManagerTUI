@@ -71,6 +71,18 @@ pub struct WatcherConfig {
     pub debounce_ms: Option<u64>,
 }
 
+/// Embedded terminal settings.
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
+pub struct TerminalConfig {
+    /// Enable the embedded terminal feature (default: true).
+    pub enabled: Option<bool>,
+    /// Default shell to use (default: $SHELL or /bin/sh).
+    pub default_shell: Option<String>,
+    /// Number of scrollback lines (default: 1000).
+    pub scrollback_lines: Option<usize>,
+}
+
 /// Color settings for a single theme palette.
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default)]
@@ -115,6 +127,7 @@ pub struct AppConfig {
     pub preview: PreviewConfig,
     pub tree: TreeConfig,
     pub watcher: WatcherConfig,
+    pub terminal: TerminalConfig,
     pub theme: ThemeConfig,
 }
 
@@ -223,6 +236,18 @@ impl AppConfig {
             watcher: WatcherConfig {
                 enabled: other.watcher.enabled.or(self.watcher.enabled),
                 debounce_ms: other.watcher.debounce_ms.or(self.watcher.debounce_ms),
+            },
+            terminal: TerminalConfig {
+                enabled: other.terminal.enabled.or(self.terminal.enabled),
+                default_shell: other
+                    .terminal
+                    .default_shell
+                    .clone()
+                    .or(self.terminal.default_shell),
+                scrollback_lines: other
+                    .terminal
+                    .scrollback_lines
+                    .or(self.terminal.scrollback_lines),
             },
             theme: ThemeConfig {
                 scheme: other.theme.scheme.clone().or(self.theme.scheme),
@@ -342,6 +367,24 @@ impl AppConfig {
     /// Theme scheme: "dark", "light", or "custom".
     pub fn theme_scheme(&self) -> &str {
         self.theme.scheme.as_deref().unwrap_or("dark")
+    }
+
+    /// Whether the embedded terminal is enabled.
+    pub fn terminal_enabled(&self) -> bool {
+        self.terminal.enabled.unwrap_or(true)
+    }
+
+    /// Default shell for the embedded terminal.
+    pub fn terminal_shell(&self) -> String {
+        self.terminal
+            .default_shell
+            .clone()
+            .unwrap_or_else(|| std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string()))
+    }
+
+    /// Scrollback lines for the embedded terminal.
+    pub fn terminal_scrollback(&self) -> usize {
+        self.terminal.scrollback_lines.unwrap_or(1000)
     }
 }
 

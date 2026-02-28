@@ -265,10 +265,6 @@ fn handle_preview_keys(app: &mut App, key: KeyEvent) {
         KeyCode::Char('w') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             app.preview_state.line_wrap = !app.preview_state.line_wrap;
         }
-        // Cycle view mode (large files only)
-        KeyCode::Char('t') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            app.cycle_view_mode();
-        }
         // Adjust head/tail line counts
         KeyCode::Char('+') | KeyCode::Char('=') => {
             app.adjust_preview_lines(crate::preview_content::LINE_COUNT_STEP as isize);

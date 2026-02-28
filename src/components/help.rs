@@ -162,12 +162,39 @@ const PREVIEW_KEYS: &[KeyEntry] = &[
         description: "Toggle line wrap",
     },
     KeyEntry {
-        key: "Ctrl+T",
-        description: "Cycle view mode (large files)",
-    },
-    KeyEntry {
         key: "+ / -",
         description: "Adjust head/tail lines",
+    },
+];
+
+const TERMINAL_KEYS: &[KeyEntry] = &[
+    KeyEntry {
+        key: "Ctrl+T",
+        description: "Toggle terminal panel",
+    },
+    KeyEntry {
+        key: "Ctrl+↑",
+        description: "Resize terminal smaller",
+    },
+    KeyEntry {
+        key: "Ctrl+↓",
+        description: "Resize terminal larger",
+    },
+    KeyEntry {
+        key: "Esc",
+        description: "Return focus to tree panel",
+    },
+    KeyEntry {
+        key: "Tab",
+        description: "Cycle focus between panels",
+    },
+    KeyEntry {
+        key: "Shift+↑/↓",
+        description: "Scroll terminal history",
+    },
+    KeyEntry {
+        key: "Shift+PgUp/PgDn",
+        description: "Fast scroll terminal history",
     },
 ];
 
@@ -210,6 +237,10 @@ const CATEGORIES: &[KeyCategory] = &[
     KeyCategory {
         name: "Preview Panel",
         entries: PREVIEW_KEYS,
+    },
+    KeyCategory {
+        name: "Terminal Panel",
+        entries: TERMINAL_KEYS,
     },
     KeyCategory {
         name: "General",

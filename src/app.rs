@@ -365,6 +365,12 @@ impl App {
 
     /// Toggle the terminal panel visibility. Spawns PTY on first open.
     pub fn toggle_terminal(&mut self, event_tx: &mpsc::UnboundedSender<crate::event::Event>) {
+        // Check if terminal is enabled in config
+        if !self.config.terminal_enabled() {
+            self.set_status_message("Terminal disabled (--no-terminal or config)".to_string());
+            return;
+        }
+
         if self.terminal_state.visible {
             // Hide the terminal panel
             self.terminal_state.visible = false;
@@ -388,7 +394,7 @@ impl App {
             if needs_spawn {
                 self.terminal_state.exited = false;
                 let cwd = self.current_dir();
-                let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+                let shell = self.config.terminal_shell();
 
                 // Calculate terminal dimensions from terminal_area
                 let rows = self.terminal_area.height.saturating_sub(2).max(1);
@@ -924,6 +930,7 @@ impl App {
     }
 
     /// Cycle view mode for large file preview (Ctrl+T).
+    #[allow(dead_code)]
     pub fn cycle_view_mode(&mut self) {
         if !self.preview_state.is_large_file {
             return;

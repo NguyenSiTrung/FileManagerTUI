@@ -50,6 +50,10 @@ struct Cli {
     #[arg(long)]
     no_mouse: bool,
 
+    /// Disable embedded terminal
+    #[arg(long)]
+    no_terminal: bool,
+
     /// Lines from top for large file preview
     #[arg(long)]
     head_lines: Option<usize>,
@@ -96,6 +100,11 @@ impl Cli {
             watcher: WatcherConfig {
                 enabled: if self.no_watcher { Some(false) } else { None },
                 debounce_ms: None,
+            },
+            terminal: crate::config::TerminalConfig {
+                enabled: if self.no_terminal { Some(false) } else { None },
+                default_shell: None,
+                scrollback_lines: None,
             },
             theme: crate::config::ThemeConfig {
                 scheme: self.theme.clone(),
