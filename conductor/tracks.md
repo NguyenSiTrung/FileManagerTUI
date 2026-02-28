@@ -26,5 +26,5 @@
 
 ---
 
-## [~] Track: Search Action Menu
+## [x] Track: Search Action Menu
 *Link: [./conductor/tracks/search-action_20260228/](./conductor/tracks/search-action_20260228/)*
