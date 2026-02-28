@@ -692,6 +692,20 @@ impl App {
             None => return,
         };
 
+        // Check if we're reloading the same path (e.g., after FS watcher event).
+        // If so, preserve the current scroll offset.
+        let same_path = self
+            .preview_state
+            .current_path
+            .as_ref()
+            .map(|p| p == &item.path)
+            .unwrap_or(false);
+        let preserved_scroll = if same_path {
+            self.preview_state.scroll_offset
+        } else {
+            0
+        };
+
         // Only preview files, not directories
         if item.node_type == NodeType::Directory {
             let path = item.path.clone();
@@ -699,7 +713,7 @@ impl App {
             self.preview_state = PreviewState {
                 current_path: Some(path),
                 content_lines: lines,
-                scroll_offset: 0,
+                scroll_offset: preserved_scroll,
                 view_mode: ViewMode::default(),
                 line_wrap: false,
                 total_lines: total,
@@ -707,6 +721,7 @@ impl App {
                 head_lines: self.config.head_lines(),
                 tail_lines: self.config.tail_lines(),
             };
+            self.clamp_preview_scroll();
             return;
         }
 
@@ -724,7 +739,7 @@ impl App {
             self.preview_state = PreviewState {
                 current_path: Some(path),
                 content_lines: lines,
-                scroll_offset: 0,
+                scroll_offset: preserved_scroll,
                 view_mode: ViewMode::default(),
                 line_wrap: false,
                 total_lines: total,
@@ -732,6 +747,7 @@ impl App {
                 head_lines: self.config.head_lines(),
                 tail_lines: self.config.tail_lines(),
             };
+            self.clamp_preview_scroll();
             return;
         }
 
@@ -741,7 +757,7 @@ impl App {
             self.preview_state = PreviewState {
                 current_path: Some(path),
                 content_lines: lines,
-                scroll_offset: 0,
+                scroll_offset: preserved_scroll,
                 view_mode: ViewMode::default(),
                 line_wrap: false,
                 total_lines: total,
@@ -749,6 +765,7 @@ impl App {
                 head_lines: self.config.head_lines(),
                 tail_lines: self.config.tail_lines(),
             };
+            self.clamp_preview_scroll();
             return;
         }
 
@@ -772,7 +789,7 @@ impl App {
             self.preview_state = PreviewState {
                 current_path: Some(path),
                 content_lines: lines,
-                scroll_offset: 0,
+                scroll_offset: preserved_scroll,
                 view_mode: ViewMode::HeadAndTail,
                 line_wrap: false,
                 total_lines: total,
@@ -789,7 +806,7 @@ impl App {
             self.preview_state = PreviewState {
                 current_path: Some(path),
                 content_lines: lines,
-                scroll_offset: 0,
+                scroll_offset: preserved_scroll,
                 view_mode: ViewMode::default(),
                 line_wrap: false,
                 total_lines: total,
@@ -798,6 +815,7 @@ impl App {
                 tail_lines: tail,
             };
         }
+        self.clamp_preview_scroll();
     }
 
     /// Cycle view mode for large file preview (Ctrl+T).
@@ -2184,5 +2202,93 @@ mod tests {
             alpha_children[0], "nested_dir",
             "Directory should come first"
         );
+    }
+
+    #[test]
+    fn preview_scroll_with_content_and_area() {
+        let (dir, mut app) = setup_app();
+        // Write a file with many lines
+        let content: String = (0..200).map(|i| format!("line {}\n", i)).collect();
+        std::fs::write(dir.path().join("file_a.txt"), &content).unwrap();
+
+        // Simulate a real terminal preview area (height=30, visible=28)
+        app.preview_area = Rect::new(40, 0, 80, 30);
+
+        // Select file_a.txt
+        app.tree_state.selected_index = 3;
+        app.update_preview();
+
+        let content_lines_len = app.preview_state.content_lines.len();
+        let visible_height = app.preview_area.height.saturating_sub(2) as usize;
+        let expected_max = content_lines_len.saturating_sub(visible_height);
+
+        // Scroll down 50 times, simulating render cycle each time
+        for _ in 0..50 {
+            app.preview_scroll_down();
+            app.update_preview();
+            app.clamp_preview_scroll();
+        }
+
+        assert_eq!(app.preview_state.scroll_offset, 50.min(expected_max),
+            "After scrolling 50 times, offset should be 50 (or max if less)");
+    }
+
+    #[test]
+    fn preview_scroll_preserved_after_fs_change() {
+        let (dir, mut app) = setup_app();
+        // Write a file with many lines
+        let content: String = (0..200).map(|i| format!("line {}\n", i)).collect();
+        std::fs::write(dir.path().join("file_a.txt"), &content).unwrap();
+
+        // Simulate a real terminal preview area
+        app.preview_area = Rect::new(40, 0, 80, 30);
+
+        // Select file_a.txt and update preview
+        app.tree_state.selected_index = 3;
+        app.update_preview();
+
+        // Scroll down to position 25
+        for _ in 0..25 {
+            app.preview_scroll_down();
+        }
+        assert_eq!(app.preview_state.scroll_offset, 25);
+
+        // Simulate a file watcher event (unrelated file change)
+        app.handle_fs_change(vec![dir.path().join("file_b.rs")]);
+
+        // The next render cycle calls update_preview + clamp
+        app.update_preview();
+        app.clamp_preview_scroll();
+
+        // Scroll offset should be preserved since we're still viewing the same file
+        assert_eq!(app.preview_state.scroll_offset, 25,
+            "Scroll offset should be preserved after FS change event for same file");
+    }
+
+    #[test]
+    fn preview_scroll_resets_on_different_file() {
+        let (dir, mut app) = setup_app();
+        let content: String = (0..200).map(|i| format!("line {}\n", i)).collect();
+        std::fs::write(dir.path().join("file_a.txt"), &content).unwrap();
+        std::fs::write(dir.path().join("file_b.rs"), "fn main() {}\n").unwrap();
+
+        app.preview_area = Rect::new(40, 0, 80, 30);
+        app.tree_state.selected_index = 3; // file_a.txt
+        app.update_preview();
+
+        // Scroll down
+        for _ in 0..25 {
+            app.preview_scroll_down();
+        }
+        assert_eq!(app.preview_state.scroll_offset, 25);
+
+        // Switch to a different file
+        app.tree_state.selected_index = 4; // file_b.rs
+        app.last_previewed_index = None;
+        app.update_preview();
+
+        // Scroll should reset to 0 for different file
+        assert_eq!(app.preview_state.scroll_offset, 0,
+            "Scroll should reset when switching to a different file");
     }
 }
