@@ -251,61 +251,86 @@ impl TreeNode {
         Ok(())
     }
 
-    /// Load children with pagination support.
+    /// Load children with pagination support using snapshot-based approach.
     ///
-    /// 1. Fast-counts immediate children via `read_dir().count()`
-    /// 2. If total ≤ `page_size`, loads all (backward compatible)
-    /// 3. If total > `page_size`, loads only the first `page_size` entries
-    ///    and sets `has_more_children = true`
+    /// 1. Collects a DirSnapshot in a single `read_dir()` pass
+    /// 2. If total ≤ `page_size`, loads all (backward compatible, no snapshot overhead)
+    /// 3. If total > `page_size`, sorts the snapshot and loads only the first page
+    ///    of `TreeNode`s from snapshot indices. `total_child_count` comes from
+    ///    `snapshot.len()` — no separate count pass needed.
     ///
     /// Sorting is applied separately via `TreeState::sort_children_of`.
     pub fn load_children_paged(&mut self, page_size: usize) -> Result<()> {
+        self.load_children_paged_with_sort(page_size, &SortBy::Name, true)
+    }
+
+    /// Load children with pagination support, using provided sort settings for snapshot.
+    pub fn load_children_paged_with_sort(
+        &mut self,
+        page_size: usize,
+        sort_by: &SortBy,
+        dirs_first: bool,
+    ) -> Result<()> {
         if self.node_type != NodeType::Directory {
             return Ok(());
         }
 
-        // Fast count of immediate children
-        let total = match fs::read_dir(&self.path) {
-            Ok(rd) => rd.count(),
+        // Collect snapshot in a single read_dir() pass
+        let mut snapshot = match DirSnapshot::collect(&self.path) {
+            Ok(s) => s,
             Err(_) => {
                 self.total_child_count = Some(0);
                 self.children = Some(Vec::new());
+                self.snapshot = None;
+                self.loaded_offset = 0;
                 return Ok(());
             }
         };
+
+        let total = snapshot.len();
         self.total_child_count = Some(total);
 
-        // If small enough, load all — backward compatible
+        // If small enough, load all — backward compatible, no snapshot overhead
         if total <= page_size {
+            self.snapshot = None;
+            self.loaded_offset = 0;
             return self.load_children_all();
         }
 
-        // Paginated load: only first page_size entries
-        let mut children = Vec::with_capacity(page_size);
-        let entries = fs::read_dir(&self.path)?;
-        let mut loaded = 0;
+        // Sort the snapshot for consistent pagination order
+        snapshot.sort(sort_by, dirs_first);
 
-        for entry in entries {
-            if loaded >= page_size {
-                break;
-            }
-            let entry = match entry {
-                Ok(e) => e,
-                Err(_) => continue,
-            };
-            match TreeNode::new(&entry.path(), self.depth + 1) {
-                Ok(node) => {
-                    children.push(node);
-                    loaded += 1;
-                }
-                Err(_) => continue,
-            }
-        }
+        // Load first page of TreeNodes from snapshot
+        let page_entries = snapshot.page(0, page_size);
+        let children = Self::load_nodes_from_snapshot(page_entries, &self.path, self.depth + 1);
+        let loaded = children.len();
 
         self.children = Some(children);
         self.loaded_child_count = loaded;
+        self.loaded_offset = loaded;
         self.has_more_children = loaded < total;
+        self.snapshot = Some(snapshot);
+
         Ok(())
+    }
+
+    /// Create TreeNodes from snapshot entries by stat-ing each one.
+    ///
+    /// Entries that fail to stat (permission denied, broken symlink) are skipped.
+    fn load_nodes_from_snapshot(
+        entries: &[SnapshotEntry],
+        parent_path: &Path,
+        child_depth: usize,
+    ) -> Vec<TreeNode> {
+        let mut nodes = Vec::with_capacity(entries.len());
+        for entry in entries {
+            let child_path = parent_path.join(&entry.name);
+            match TreeNode::new(&child_path, child_depth) {
+                Ok(node) => nodes.push(node),
+                Err(_) => continue,
+            }
+        }
+        nodes
     }
 
     /// Load children for a directory node (backward-compatible API).
@@ -606,7 +631,7 @@ impl TreeState {
         let page_size = self.page_size;
         if let Some(node) = Self::find_node_mut(&mut self.root, &path) {
             if !node.is_expanded {
-                let _ = node.load_children_paged(page_size);
+                let _ = node.load_children_paged_with_sort(page_size, &sort_by, dirs_first);
                 Self::sort_children_of(node, &sort_by, dirs_first);
                 node.is_expanded = true;
                 self.flatten();
@@ -703,7 +728,7 @@ impl TreeState {
         let page_size = self.page_size;
         if let Some(node) = Self::find_node_mut(&mut self.root, dir_path) {
             if node.node_type == NodeType::Directory {
-                let _ = node.load_children_paged(page_size);
+                let _ = node.load_children_paged_with_sort(page_size, &sort_by, dirs_first);
                 Self::sort_children_of(node, &sort_by, dirs_first);
                 self.flatten();
             }
@@ -921,7 +946,7 @@ impl TreeState {
         for path in Self::expanded_paths_in_restore_order(expanded) {
             if let Some(node) = Self::find_node_mut(&mut self.root, path) {
                 if node.node_type == NodeType::Directory && !node.is_expanded {
-                    let _ = node.load_children_paged(page_size);
+                    let _ = node.load_children_paged_with_sort(page_size, &sort_by, dirs_first);
                     Self::sort_children_of(node, &sort_by, dirs_first);
                     node.is_expanded = true;
                 }

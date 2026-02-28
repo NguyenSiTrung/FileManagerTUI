@@ -1611,7 +1611,7 @@ impl App {
         for ancestor in &ancestors {
             if let Some(node) = TreeState::find_node_mut_pub(&mut self.tree_state.root, ancestor) {
                 if !node.is_expanded {
-                    let _ = node.load_children_paged(page_size);
+                    let _ = node.load_children_paged_with_sort(page_size, &sort_by, dirs_first);
                     TreeState::sort_children_of_pub(node, &sort_by, dirs_first);
                     node.is_expanded = true;
                 }
@@ -1726,7 +1726,7 @@ impl App {
                 crate::fs::tree::TreeState::find_node_mut_pub(&mut self.tree_state.root, dir)
             {
                 if node.node_type == crate::fs::tree::NodeType::Directory {
-                    let _ = node.load_children_paged(page_size);
+                    let _ = node.load_children_paged_with_sort(page_size, &sort_by, dirs_first);
                     TreeState::sort_children_of_pub(node, &sort_by, dirs_first);
                 }
             }
