@@ -1045,11 +1045,16 @@ impl App {
         }
         ancestors.reverse();
 
-        // Expand each ancestor
+        // Clone sort fields before mutable borrow
+        let sort_by = self.tree_state.sort_by.clone();
+        let dirs_first = self.tree_state.dirs_first;
+
+        // Expand each ancestor and apply sorting
         for ancestor in &ancestors {
             if let Some(node) = TreeState::find_node_mut_pub(&mut self.tree_state.root, ancestor) {
                 if !node.is_expanded {
                     let _ = node.load_children();
+                    TreeState::sort_children_of_pub(node, &sort_by, dirs_first);
                     node.is_expanded = true;
                 }
             }
@@ -1137,13 +1142,18 @@ impl App {
             }
         }
 
-        // Reload each affected directory
+        // Clone sort fields before mutable borrow (avoids borrow checker conflict)
+        let sort_by = self.tree_state.sort_by.clone();
+        let dirs_first = self.tree_state.dirs_first;
+
+        // Reload each affected directory and apply sorting
         for dir in &dirs_to_reload {
             if let Some(node) =
                 crate::fs::tree::TreeState::find_node_mut_pub(&mut self.tree_state.root, dir)
             {
                 if node.node_type == crate::fs::tree::NodeType::Directory {
                     let _ = node.load_children();
+                    TreeState::sort_children_of_pub(node, &sort_by, dirs_first);
                 }
             }
         }

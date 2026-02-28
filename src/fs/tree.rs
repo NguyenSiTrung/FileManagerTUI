@@ -410,6 +410,11 @@ impl TreeState {
         Self::find_node_mut(node, target)
     }
 
+    /// Public accessor to sort a node's children (used by handle_fs_change, navigate_to_path).
+    pub fn sort_children_of_pub(node: &mut TreeNode, sort_by: &SortBy, dirs_first: bool) {
+        Self::sort_children_of(node, sort_by, dirs_first);
+    }
+
     /// Apply inline filter: rebuild flat_items showing only matches + ancestor dirs.
     /// Case-insensitive substring match on filename.
     pub fn apply_filter(&mut self) {
@@ -533,11 +538,16 @@ impl TreeState {
     }
 
     /// Re-expand directories from a saved set of expanded paths.
+    ///
+    /// After loading children, sorting is applied using current sort settings.
     pub fn restore_expanded(&mut self, expanded: &HashSet<PathBuf>) {
+        let sort_by = self.sort_by.clone();
+        let dirs_first = self.dirs_first;
         for path in expanded {
             if let Some(node) = Self::find_node_mut(&mut self.root, path) {
                 if node.node_type == NodeType::Directory && !node.is_expanded {
                     let _ = node.load_children();
+                    Self::sort_children_of(node, &sort_by, dirs_first);
                     node.is_expanded = true;
                 }
             }
