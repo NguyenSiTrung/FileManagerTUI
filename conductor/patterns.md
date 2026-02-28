@@ -62,4 +62,9 @@ This file is the project's institutional knowledge - learnings extracted from co
 
 ---
 
-Last refreshed: 2026-02-27 (clipboard-multiselect_20260227 completed)
+- Use `SkimMatcherV2` from `fuzzy-matcher` for fuzzy search — returns `(score, Vec<usize>)` indices for highlighting (from: fuzzy-search_20260228, 2026-02-28)
+- `invalidate_search_cache()` must be called after ALL tree mutations (create, rename, delete, expand, toggle_hidden, paste) (from: fuzzy-search_20260228, 2026-02-28)
+- `flatten_node_filtered` recurses children first to decide parent inclusion — parent appears only if it or a descendant matches (from: fuzzy-search_20260228, 2026-02-28)
+- `fuzzy_matcher::FuzzyMatcher` trait must be imported for `fuzzy_indices` method (from: fuzzy-search_20260228, 2026-02-28)
+
+Last refreshed: 2026-02-28 (fuzzy-search_20260228 completed)

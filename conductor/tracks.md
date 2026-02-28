@@ -8,5 +8,5 @@
 
 ---
 
-## [~] Track: Fuzzy Finder + Search (Milestone 5)
+## [x] Track: Fuzzy Finder + Search (Milestone 5)
 *Link: [./conductor/tracks/fuzzy-search_20260228/](./conductor/tracks/fuzzy-search_20260228/)*
