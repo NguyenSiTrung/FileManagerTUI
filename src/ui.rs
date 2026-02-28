@@ -133,6 +133,14 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         status_widget = status_widget.clipboard_info(&clipboard_info_str);
     }
 
+    // Show watcher status indicator
+    let watcher_indicator = if app.watcher_active {
+        "👁".to_string()
+    } else {
+        "⏸".to_string()
+    };
+    status_widget = status_widget.watcher_status(&watcher_indicator);
+
     // Show filter query in status bar when filtering
     let filter_display;
     if app.mode == AppMode::Filter || app.tree_state.is_filtering {

@@ -42,6 +42,14 @@ fn handle_normal_mode(app: &mut App, key: KeyEvent, event_tx: &mpsc::UnboundedSe
             app.start_filter();
             return;
         }
+        KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.toggle_watcher();
+            return;
+        }
+        KeyCode::F(5) => {
+            app.full_refresh();
+            return;
+        }
         _ => {}
     }
 
@@ -1302,5 +1310,61 @@ mod tests {
             app.tree_state.selected_index,
             app.tree_state.flat_items.len() - 1
         );
+    }
+
+    // === Watcher keybinding tests ===
+
+    #[test]
+    fn ctrl_r_toggles_watcher() {
+        let (_dir, mut app) = setup_app();
+        assert!(app.watcher_active);
+        handle_key(
+            &mut app,
+            make_key_with_modifiers(KeyCode::Char('r'), KeyModifiers::CONTROL),
+        );
+        assert!(!app.watcher_active);
+        handle_key(
+            &mut app,
+            make_key_with_modifiers(KeyCode::Char('r'), KeyModifiers::CONTROL),
+        );
+        assert!(app.watcher_active);
+    }
+
+    #[test]
+    fn f5_triggers_full_refresh() {
+        let (dir, mut app) = setup_app();
+        let before = app.tree_state.flat_items.len();
+        // Create a file that won't show until refresh
+        File::create(dir.path().join("f5_test.txt")).unwrap();
+        handle_key(&mut app, make_key(KeyCode::F(5)));
+        assert!(app.tree_state.flat_items.len() > before);
+        assert!(app.status_message.is_some());
+    }
+
+    #[test]
+    fn ctrl_r_works_from_preview_panel() {
+        let (_dir, mut app) = setup_app();
+        app.focused_panel = FocusedPanel::Preview;
+        assert!(app.watcher_active);
+        handle_key(
+            &mut app,
+            make_key_with_modifiers(KeyCode::Char('r'), KeyModifiers::CONTROL),
+        );
+        assert!(!app.watcher_active);
+    }
+
+    #[test]
+    fn f5_works_from_preview_panel() {
+        let (dir, mut app) = setup_app();
+        app.focused_panel = FocusedPanel::Preview;
+        File::create(dir.path().join("f5_preview.txt")).unwrap();
+        handle_key(&mut app, make_key(KeyCode::F(5)));
+        let names: Vec<&str> = app
+            .tree_state
+            .flat_items
+            .iter()
+            .map(|i| i.name.as_str())
+            .collect();
+        assert!(names.contains(&"f5_preview.txt"));
     }
 }

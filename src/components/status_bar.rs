@@ -13,6 +13,7 @@ pub struct StatusBarWidget<'a> {
     status_message: Option<&'a str>,
     is_error: bool,
     clipboard_info: Option<&'a str>,
+    watcher_status: Option<&'a str>,
 }
 
 impl<'a> StatusBarWidget<'a> {
@@ -23,6 +24,7 @@ impl<'a> StatusBarWidget<'a> {
             status_message: None,
             is_error: false,
             clipboard_info: None,
+            watcher_status: None,
         }
     }
 
@@ -34,6 +36,11 @@ impl<'a> StatusBarWidget<'a> {
 
     pub fn clipboard_info(mut self, info: &'a str) -> Self {
         self.clipboard_info = Some(info);
+        self
+    }
+
+    pub fn watcher_status(mut self, status: &'a str) -> Self {
+        self.watcher_status = Some(status);
         self
     }
 }
@@ -126,6 +133,15 @@ impl<'a> Widget for StatusBarWidget<'a> {
                 .add_modifier(Modifier::BOLD);
             spans.push(Span::raw(" "));
             spans.push(Span::styled(clipboard_display.to_string(), clipboard_style));
+        }
+
+        // Add watcher status indicator if present
+        if let Some(watcher_str) = self.watcher_status {
+            let watcher_style = Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD);
+            spans.push(Span::raw(" "));
+            spans.push(Span::styled(watcher_str.to_string(), watcher_style));
         }
 
         // Pad to fill remaining width if needed, then add hints

@@ -15,6 +15,7 @@ use clap::Parser;
 
 use crate::app::App;
 use crate::event::{Event, EventHandler};
+use crate::fs::watcher::FsWatcher;
 use crate::tui::{install_panic_hook, Tui};
 
 /// A terminal-based file manager TUI.
@@ -24,6 +25,10 @@ struct Cli {
     /// Root path to display (defaults to current directory)
     #[arg(default_value = ".")]
     path: PathBuf,
+
+    /// Disable filesystem watcher (auto-refresh)
+    #[arg(long)]
+    no_watcher: bool,
 }
 
 #[tokio::main]
@@ -41,6 +46,32 @@ async fn main() -> error::Result<()> {
     let mut events = EventHandler::new(Duration::from_millis(16));
     let event_tx = events.sender();
 
+    // Initialize filesystem watcher (unless --no-watcher)
+    let _watcher = if cli.no_watcher {
+        app.watcher_active = false;
+        None
+    } else {
+        let ignore_patterns: Vec<String> = fs::watcher::DEFAULT_IGNORE_PATTERNS
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+
+        match FsWatcher::new(
+            &path,
+            Duration::from_millis(fs::watcher::DEFAULT_DEBOUNCE_MS),
+            ignore_patterns,
+            fs::watcher::DEFAULT_FLOOD_THRESHOLD,
+            event_tx.clone(),
+        ) {
+            Ok(watcher) => Some(watcher),
+            Err(e) => {
+                app.watcher_active = false;
+                app.set_status_message(format!("⚠ Watcher unavailable: {}", e));
+                None
+            }
+        }
+    };
+
     loop {
         tui.terminal_mut().draw(|frame| {
             ui::render(&mut app, frame);
@@ -52,7 +83,16 @@ async fn main() -> error::Result<()> {
             Event::Resize(_, _) => {}
             Event::Progress(update) => app.handle_progress(update),
             Event::OperationComplete(result) => app.handle_operation_complete(result),
-            Event::FsChange(_paths) => { /* Handled in Phase 2 */ }
+            Event::FsChange(paths) => app.handle_fs_change(paths),
+        }
+
+        // Sync watcher pause/resume state
+        if let Some(ref watcher) = _watcher {
+            if app.watcher_active && !watcher.is_active() {
+                watcher.resume();
+            } else if !app.watcher_active && watcher.is_active() {
+                watcher.pause();
+            }
         }
 
         if app.should_quit {

@@ -420,6 +420,52 @@ impl TreeState {
     pub fn clear_multi_select(&mut self) {
         self.multi_selected.clear();
     }
+
+    /// Find the flat_items index of a node by its path.
+    pub fn find_index_by_path(&self, path: &Path) -> Option<usize> {
+        self.flat_items.iter().position(|item| item.path == path)
+    }
+
+    /// Collect all currently expanded directory paths.
+    pub fn collect_expanded_paths(&self) -> HashSet<PathBuf> {
+        self.flat_items
+            .iter()
+            .filter(|item| item.node_type == NodeType::Directory && item.is_expanded)
+            .map(|item| item.path.clone())
+            .collect()
+    }
+
+    /// Re-expand directories from a saved set of expanded paths.
+    pub fn restore_expanded(&mut self, expanded: &HashSet<PathBuf>) {
+        for path in expanded {
+            if let Some(node) = Self::find_node_mut(&mut self.root, path) {
+                if node.node_type == NodeType::Directory && !node.is_expanded {
+                    let _ = node.load_children();
+                    node.is_expanded = true;
+                }
+            }
+        }
+    }
+
+    /// Find the nearest surviving sibling or parent for a deleted path.
+    ///
+    /// Search order: next sibling → previous sibling → parent.
+    pub fn find_nearest_surviving(&self, deleted_path: &Path) -> Option<usize> {
+        if let Some(parent) = deleted_path.parent() {
+            // Try to find siblings by looking at parent's children in flat list
+            let parent_idx = self.find_index_by_path(parent);
+            if let Some(pidx) = parent_idx {
+                // Return parent index as fallback
+                return Some(pidx);
+            }
+            // Try grandparent
+            if let Some(grandparent) = parent.parent() {
+                return self.find_index_by_path(grandparent);
+            }
+        }
+        // Ultimate fallback: root
+        Some(0)
+    }
 }
 
 #[cfg(test)]
@@ -680,5 +726,83 @@ mod tests {
         let node = TreeState::find_node_mut_pub(&mut state.root, &alpha_path);
         assert!(node.is_some());
         assert_eq!(node.unwrap().name, "alpha");
+    }
+
+    // === Watcher helper tests ===
+
+    #[test]
+    fn find_index_by_path_existing() {
+        let dir = setup_test_dir();
+        let state = TreeState::new(dir.path()).unwrap();
+        let alpha_path = dir.path().join("alpha");
+        let idx = state.find_index_by_path(&alpha_path);
+        assert!(idx.is_some());
+        assert_eq!(state.flat_items[idx.unwrap()].name, "alpha");
+    }
+
+    #[test]
+    fn find_index_by_path_nonexistent() {
+        let dir = setup_test_dir();
+        let state = TreeState::new(dir.path()).unwrap();
+        let bogus_path = dir.path().join("nonexistent.txt");
+        assert!(state.find_index_by_path(&bogus_path).is_none());
+    }
+
+    #[test]
+    fn collect_expanded_paths_includes_root() {
+        let dir = setup_test_dir();
+        let state = TreeState::new(dir.path()).unwrap();
+        let expanded = state.collect_expanded_paths();
+        // Root is expanded by default
+        assert!(expanded.contains(&dir.path().to_path_buf()));
+    }
+
+    #[test]
+    fn collect_expanded_paths_includes_manually_expanded() {
+        let dir = setup_test_dir();
+        let mut state = TreeState::new(dir.path()).unwrap();
+        // Expand alpha
+        state.selected_index = 1; // alpha
+        state.expand_selected();
+        let expanded = state.collect_expanded_paths();
+        assert!(expanded.contains(&dir.path().join("alpha")));
+    }
+
+    #[test]
+    fn find_nearest_surviving_returns_parent() {
+        let dir = setup_test_dir();
+        let state = TreeState::new(dir.path()).unwrap();
+        // file_a.txt is in root — if deleted, should fall back to root
+        let deleted_path = dir.path().join("file_a.txt");
+        let idx = state.find_nearest_surviving(&deleted_path);
+        assert!(idx.is_some());
+        assert_eq!(
+            state.flat_items[idx.unwrap()].path,
+            dir.path().to_path_buf()
+        );
+    }
+
+    #[test]
+    fn restore_expanded_re_expands_dir() {
+        let dir = setup_test_dir();
+        let mut state = TreeState::new(dir.path()).unwrap();
+        // Expand alpha
+        state.selected_index = 1;
+        state.expand_selected();
+        let expanded = state.collect_expanded_paths();
+
+        // Collapse everything
+        state.selected_index = 1;
+        state.collapse_selected();
+        assert!(!state
+            .flat_items
+            .iter()
+            .any(|i| i.name == "alpha" && i.is_expanded));
+
+        // Restore
+        state.restore_expanded(&expanded);
+        state.flatten();
+        let alpha = state.flat_items.iter().find(|i| i.name == "alpha").unwrap();
+        assert!(alpha.is_expanded);
     }
 }

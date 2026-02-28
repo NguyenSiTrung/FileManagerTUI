@@ -165,6 +165,8 @@ pub struct App {
     pub search_state: SearchState,
     /// Fuzzy matcher instance (reused across searches).
     pub fuzzy_matcher: SkimMatcherV2,
+    /// Whether the filesystem watcher is currently active.
+    pub watcher_active: bool,
 }
 
 impl App {
@@ -189,6 +191,7 @@ impl App {
             last_undo: None,
             search_state: SearchState::default(),
             fuzzy_matcher: SkimMatcherV2::default(),
+            watcher_active: true,
         })
     }
 
@@ -1072,6 +1075,95 @@ impl App {
             self.tree_state.apply_filter();
         }
     }
+
+    // === Filesystem watcher methods ===
+
+    /// Handle filesystem change events by refreshing affected subtrees.
+    ///
+    /// Preserves: selected path, scroll offset, expanded directories.
+    /// Clears: multi-select, search cache.
+    pub fn handle_fs_change(&mut self, paths: Vec<PathBuf>) {
+        // Capture current state
+        let selected_path = self
+            .tree_state
+            .flat_items
+            .get(self.tree_state.selected_index)
+            .map(|item| item.path.clone());
+        let scroll_offset = self.tree_state.scroll_offset;
+        let expanded = self.tree_state.collect_expanded_paths();
+
+        // Deduplicate parent directories to reload
+        let mut dirs_to_reload = std::collections::HashSet::new();
+        for path in &paths {
+            // If the changed path IS the root, do a full reload
+            if path == &self.tree_state.root.path {
+                dirs_to_reload.clear();
+                dirs_to_reload.insert(self.tree_state.root.path.clone());
+                break;
+            }
+            // Otherwise reload the parent directory of the changed file
+            if let Some(parent) = path.parent() {
+                dirs_to_reload.insert(parent.to_path_buf());
+            }
+        }
+
+        // Reload each affected directory
+        for dir in &dirs_to_reload {
+            if let Some(node) =
+                crate::fs::tree::TreeState::find_node_mut_pub(&mut self.tree_state.root, dir)
+            {
+                if node.node_type == crate::fs::tree::NodeType::Directory {
+                    let _ = node.load_children();
+                }
+            }
+        }
+
+        // Restore expanded directories then re-flatten
+        self.tree_state.restore_expanded(&expanded);
+        self.tree_state.flatten();
+
+        // Restore selection
+        if let Some(ref prev_path) = selected_path {
+            if let Some(new_idx) = self.tree_state.find_index_by_path(prev_path) {
+                self.tree_state.selected_index = new_idx;
+            } else {
+                // Selected path was deleted — find nearest surviving
+                if let Some(fallback) = self.tree_state.find_nearest_surviving(prev_path) {
+                    self.tree_state.selected_index = fallback;
+                }
+            }
+        }
+
+        // Restore scroll offset (clamped)
+        let max_scroll = self.tree_state.flat_items.len().saturating_sub(1);
+        self.tree_state.scroll_offset = scroll_offset.min(max_scroll);
+
+        // Invalidate caches
+        self.invalidate_search_cache();
+        // Force preview refresh
+        self.last_previewed_index = None;
+    }
+
+    /// Force a full tree refresh from root, preserving state.
+    ///
+    /// Used by F5 keybinding; works regardless of watcher state.
+    pub fn full_refresh(&mut self) {
+        self.handle_fs_change(vec![self.tree_state.root.path.clone()]);
+        self.set_status_message("🔄 Tree refreshed".to_string());
+    }
+
+    /// Toggle the filesystem watcher active state.
+    ///
+    /// Returns the new state (true = active, false = paused).
+    pub fn toggle_watcher(&mut self) -> bool {
+        self.watcher_active = !self.watcher_active;
+        if self.watcher_active {
+            self.set_status_message("👁 Watcher resumed".to_string());
+        } else {
+            self.set_status_message("⏸ Watcher paused".to_string());
+        }
+        self.watcher_active
+    }
 }
 
 #[cfg(test)]
@@ -1770,5 +1862,143 @@ mod tests {
 
         let selected = &app.tree_state.flat_items[app.tree_state.selected_index];
         assert_eq!(selected.name, "target.txt");
+    }
+
+    // === Filesystem watcher tests ===
+
+    #[test]
+    fn handle_fs_change_detects_new_file() {
+        let (dir, mut app) = setup_app();
+        let original_count = app.tree_state.flat_items.len();
+        // Create a new file externally
+        File::create(dir.path().join("new_file.txt")).unwrap();
+        // Simulate watcher event
+        app.handle_fs_change(vec![dir.path().join("new_file.txt")]);
+        assert!(app.tree_state.flat_items.len() > original_count);
+        let names: Vec<&str> = app
+            .tree_state
+            .flat_items
+            .iter()
+            .map(|i| i.name.as_str())
+            .collect();
+        assert!(names.contains(&"new_file.txt"));
+    }
+
+    #[test]
+    fn handle_fs_change_preserves_selection() {
+        let (dir, mut app) = setup_app();
+        // Select "file_a.txt"
+        let file_a_idx = app
+            .tree_state
+            .flat_items
+            .iter()
+            .position(|i| i.name == "file_a.txt")
+            .unwrap();
+        app.tree_state.selected_index = file_a_idx;
+
+        // Create a new file externally, trigger refresh
+        File::create(dir.path().join("zzz_newfile.txt")).unwrap();
+        app.handle_fs_change(vec![dir.path().join("zzz_newfile.txt")]);
+
+        // Selection should still point to file_a.txt
+        let selected = &app.tree_state.flat_items[app.tree_state.selected_index];
+        assert_eq!(selected.name, "file_a.txt");
+    }
+
+    #[test]
+    fn handle_fs_change_selection_fallback_on_delete() {
+        let (dir, mut app) = setup_app();
+        // Select "file_a.txt"
+        let file_a_idx = app
+            .tree_state
+            .flat_items
+            .iter()
+            .position(|i| i.name == "file_a.txt")
+            .unwrap();
+        app.tree_state.selected_index = file_a_idx;
+
+        // Delete file_a.txt externally
+        fs::remove_file(dir.path().join("file_a.txt")).unwrap();
+        app.handle_fs_change(vec![dir.path().join("file_a.txt")]);
+
+        // Selection should have moved to a valid index
+        assert!(app.tree_state.selected_index < app.tree_state.flat_items.len());
+    }
+
+    #[test]
+    fn handle_fs_change_preserves_expanded_dirs() {
+        let (dir, mut app) = setup_app();
+        // Expand "alpha" directory
+        let alpha_idx = app
+            .tree_state
+            .flat_items
+            .iter()
+            .position(|i| i.name == "alpha")
+            .unwrap();
+        app.tree_state.selected_index = alpha_idx;
+        app.expand_selected();
+        let count_after_expand = app.tree_state.flat_items.len();
+
+        // Create a file in root, trigger refresh
+        File::create(dir.path().join("extra.txt")).unwrap();
+        app.handle_fs_change(vec![dir.path().join("extra.txt")]);
+
+        // alpha should still be expanded (count increased by 1 for new file)
+        assert!(app.tree_state.flat_items.len() > count_after_expand);
+        let alpha_item = app
+            .tree_state
+            .flat_items
+            .iter()
+            .find(|i| i.name == "alpha")
+            .unwrap();
+        assert!(alpha_item.is_expanded);
+    }
+
+    #[test]
+    fn handle_fs_change_invalidates_search_cache() {
+        let (dir, mut app) = setup_app();
+        // Build search cache
+        app.open_search();
+        app.close_search();
+        assert!(app.search_state.cached_paths.is_some());
+
+        // Trigger fs change
+        File::create(dir.path().join("cache_buster.txt")).unwrap();
+        app.handle_fs_change(vec![dir.path().join("cache_buster.txt")]);
+        assert!(app.search_state.cached_paths.is_none());
+    }
+
+    #[test]
+    fn full_refresh_reloads_tree() {
+        let (dir, mut app) = setup_app();
+        let original_count = app.tree_state.flat_items.len();
+        // Create a file externally
+        File::create(dir.path().join("f5_file.txt")).unwrap();
+        app.full_refresh();
+        assert!(app.tree_state.flat_items.len() > original_count);
+        assert!(app.status_message.is_some());
+    }
+
+    #[test]
+    fn toggle_watcher_flips_state() {
+        let (_dir, mut app) = setup_app();
+        assert!(app.watcher_active); // default on
+        let result = app.toggle_watcher();
+        assert!(!result);
+        assert!(!app.watcher_active);
+        let result2 = app.toggle_watcher();
+        assert!(result2);
+        assert!(app.watcher_active);
+    }
+
+    #[test]
+    fn toggle_watcher_sets_status_message() {
+        let (_dir, mut app) = setup_app();
+        app.toggle_watcher();
+        let (msg, _) = app.status_message.as_ref().unwrap();
+        assert!(msg.contains("paused") || msg.contains("⏸"));
+        app.toggle_watcher();
+        let (msg, _) = app.status_message.as_ref().unwrap();
+        assert!(msg.contains("resumed") || msg.contains("👁"));
     }
 }

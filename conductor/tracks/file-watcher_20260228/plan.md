@@ -2,27 +2,27 @@
 
 ## Phase 1: Watcher Core Module
 
-- [ ] Task 1: Create `fs/watcher.rs` — `FsWatcher` struct with `notify` integration
-  - [ ] Add `notify` and `notify-debouncer-mini` to `Cargo.toml` (already listed in tech-stack)
-  - [ ] Create `FsWatcher` struct wrapping `notify::RecommendedWatcher` with debouncer
-  - [ ] Accept root path, debounce duration, ignore patterns, and `mpsc::UnboundedSender<Event>`
-  - [ ] Implement `new()` that creates recursive watcher and starts watching root
-  - [ ] Implement `stop()` to drop the watcher
-  - [ ] Filter events from ignored directories before forwarding
-  - [ ] Export module in `fs/mod.rs`
-  - [ ] Write unit tests for ignore pattern filtering logic
+- [x] Task 1: Create `fs/watcher.rs` — `FsWatcher` struct with `notify` integration (3840b76)
+  - [x] Add `notify` and `notify-debouncer-mini` to `Cargo.toml` (already listed in tech-stack)
+  - [x] Create `FsWatcher` struct wrapping `notify::RecommendedWatcher` with debouncer
+  - [x] Accept root path, debounce duration, ignore patterns, and `mpsc::UnboundedSender<Event>`
+  - [x] Implement `new()` that creates recursive watcher and starts watching root
+  - [x] Implement `stop()` to drop the watcher
+  - [x] Filter events from ignored directories before forwarding
+  - [x] Export module in `fs/mod.rs`
+  - [x] Write unit tests for ignore pattern filtering logic
 
-- [ ] Task 2: Add `FsEvent` variant to `Event` enum and wire into main loop
-  - [ ] Add `FsChange(Vec<PathBuf>)` variant to `Event` enum in `event.rs`
-  - [ ] In watcher callback, collect debounced event paths and send as `FsChange`
-  - [ ] Add `Event::FsChange` match arm in `main.rs` event loop (stub handler for now)
-  - [ ] Write test verifying `FsChange` events are constructable and sendable
+- [x] Task 2: Add `FsEvent` variant to `Event` enum and wire into main loop (3840b76)
+  - [x] Add `FsChange(Vec<PathBuf>)` variant to `Event` enum in `event.rs`
+  - [x] In watcher callback, collect debounced event paths and send as `FsChange`
+  - [x] Add `Event::FsChange` match arm in `main.rs` event loop (stub handler for now)
+  - [x] Write test verifying `FsChange` events are constructable and sendable
 
-- [ ] Task 3: Implement flood protection in `FsWatcher`
-  - [ ] Track event count within debounce window
-  - [ ] If count exceeds `flood_threshold` (default: 100), emit a single `FsChange` with root path (full refresh) instead of individual paths
-  - [ ] Reset counter after each debounce flush
-  - [ ] Write tests for threshold logic (below threshold → individual paths, above → root path)
+- [x] Task 3: Implement flood protection in `FsWatcher` (3840b76)
+  - [x] Track event count within debounce window
+  - [x] If count exceeds `flood_threshold` (default: 100), emit a single `FsChange` with root path (full refresh) instead of individual paths
+  - [x] Reset counter after each debounce flush
+  - [x] Write tests for threshold logic (below threshold → individual paths, above → root path)
 
 ## Phase 2: Smart Tree Refresh with State Preservation
 
