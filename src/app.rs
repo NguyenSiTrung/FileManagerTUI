@@ -15,6 +15,7 @@ use crate::error::Result;
 use crate::fs::clipboard::{ClipboardOp, ClipboardState};
 use crate::fs::tree::{NodeType, TreeState};
 use crate::preview_content;
+use crate::theme::{self, ThemeColors};
 
 /// The kind of dialog being displayed.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -143,6 +144,8 @@ pub enum UndoAction {
 pub struct App {
     /// Merged configuration (CLI + file + defaults).
     pub config: AppConfig,
+    /// Resolved theme colors for the UI.
+    pub theme_colors: ThemeColors,
     pub tree_state: TreeState,
     pub should_quit: bool,
     #[allow(dead_code)]
@@ -182,8 +185,10 @@ impl App {
 
         let syntax_set = SyntaxSet::load_defaults_newlines();
         let syntax_theme = preview_content::load_theme(Some(config.syntax_theme_name()));
+        let theme_colors = theme::resolve_theme(&config.theme);
         Ok(Self {
             config,
+            theme_colors,
             tree_state,
             should_quit: false,
             mode: AppMode::Normal,

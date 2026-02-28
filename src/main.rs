@@ -6,6 +6,7 @@ mod event;
 mod fs;
 mod handler;
 mod preview_content;
+mod theme;
 mod tui;
 mod ui;
 

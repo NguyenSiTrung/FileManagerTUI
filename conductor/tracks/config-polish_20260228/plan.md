@@ -19,15 +19,15 @@
   - [x] Wire CLI overrides as highest-priority source in `AppConfig::load()`
   - [x] Write tests for CLI flag → config override mapping
 
-- [ ] Task 3: Integrate `AppConfig` into `App` and runtime
+- [x] Task 3: Integrate `AppConfig` into `App` and runtime *(fabcecb)*
   <!-- files: src/app.rs, src/main.rs -->
   <!-- depends: task2 -->
-  - [ ] Replace hardcoded values in `App` with `AppConfig` fields (preview limits, show_hidden, watcher settings)
-  - [ ] Pass config to `App::new()`, propagate to subsystems (preview, watcher, tree)
-  - [ ] Update `main.rs` to call `AppConfig::load()` before `App::new()`
-  - [ ] Verify existing functionality unchanged with default config (regression test: `cargo test`)
+  - [x] Replace hardcoded values in `App` with `AppConfig` fields (preview limits, show_hidden, watcher settings)
+  - [x] Pass config to `App::new()`, propagate to subsystems (preview, watcher, tree)
+  - [x] Update `main.rs` to call `AppConfig::load()` before `App::new()`
+  - [x] Verify existing functionality unchanged with default config (regression test: `cargo test`)
 
-- [ ] Task: Conductor - Phase 1 Verification (manual verification per workflow.md)
+- [x] Task: Conductor - Phase 1 Verification (279 tests passing, clippy clean, fmt clean)
 
 ## Phase 2: Theme System
 <!-- execution: sequential -->
