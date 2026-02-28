@@ -108,17 +108,54 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent, event_tx: &mpsc::Unbounded
 }
 
 fn handle_normal_mode(app: &mut App, key: KeyEvent, event_tx: &mpsc::UnboundedSender<Event>) {
-    // Terminal-specific reserved global keys (must check BEFORE general globals)
+    // Reserved global keys (must check BEFORE terminal forwarding)
+    // These keys are intercepted regardless of which panel is focused.
     match key.code {
         KeyCode::Char('t') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             app.toggle_terminal(event_tx);
             return;
         }
-        KeyCode::Up if key.modifiers.contains(KeyModifiers::CONTROL) => {
+        // Directional focus navigation: Ctrl+Arrow
+        KeyCode::Left
+            if key.modifiers.contains(KeyModifiers::CONTROL)
+                && !key.modifiers.contains(KeyModifiers::SHIFT) =>
+        {
+            app.focus_left();
+            return;
+        }
+        KeyCode::Right
+            if key.modifiers.contains(KeyModifiers::CONTROL)
+                && !key.modifiers.contains(KeyModifiers::SHIFT) =>
+        {
+            app.focus_right();
+            return;
+        }
+        KeyCode::Up
+            if key.modifiers.contains(KeyModifiers::CONTROL)
+                && !key.modifiers.contains(KeyModifiers::SHIFT) =>
+        {
+            app.focus_up();
+            return;
+        }
+        KeyCode::Down
+            if key.modifiers.contains(KeyModifiers::CONTROL)
+                && !key.modifiers.contains(KeyModifiers::SHIFT) =>
+        {
+            app.focus_down();
+            return;
+        }
+        // Terminal resize: Ctrl+Shift+Arrow
+        KeyCode::Up
+            if key.modifiers.contains(KeyModifiers::CONTROL)
+                && key.modifiers.contains(KeyModifiers::SHIFT) =>
+        {
             app.resize_terminal_up();
             return;
         }
-        KeyCode::Down if key.modifiers.contains(KeyModifiers::CONTROL) => {
+        KeyCode::Down
+            if key.modifiers.contains(KeyModifiers::CONTROL)
+                && key.modifiers.contains(KeyModifiers::SHIFT) =>
+        {
             app.resize_terminal_down();
             return;
         }
@@ -1800,5 +1837,98 @@ mod tests {
         let tx = make_event_tx();
         handle_mouse_event(&mut app, make_mouse_click(10, 2), &tx);
         assert_eq!(app.tree_state.selected_index, idx);
+    }
+
+    // === Directional focus keybinding tests ===
+
+    #[test]
+    fn ctrl_left_moves_focus_left() {
+        let (_dir, mut app) = setup_app();
+        app.focused_panel = FocusedPanel::Preview;
+        handle_key(
+            &mut app,
+            make_key_with_modifiers(KeyCode::Left, KeyModifiers::CONTROL),
+        );
+        assert_eq!(app.focused_panel, FocusedPanel::Tree);
+    }
+
+    #[test]
+    fn ctrl_right_moves_focus_right() {
+        let (_dir, mut app) = setup_app();
+        app.focused_panel = FocusedPanel::Tree;
+        handle_key(
+            &mut app,
+            make_key_with_modifiers(KeyCode::Right, KeyModifiers::CONTROL),
+        );
+        assert_eq!(app.focused_panel, FocusedPanel::Preview);
+    }
+
+    #[test]
+    fn ctrl_up_moves_focus_up_from_terminal() {
+        let (_dir, mut app) = setup_app();
+        app.terminal_state.visible = true;
+        app.focused_panel = FocusedPanel::Terminal;
+        handle_key(
+            &mut app,
+            make_key_with_modifiers(KeyCode::Up, KeyModifiers::CONTROL),
+        );
+        assert_eq!(app.focused_panel, FocusedPanel::Tree);
+    }
+
+    #[test]
+    fn ctrl_down_moves_focus_down_to_terminal() {
+        let (_dir, mut app) = setup_app();
+        app.terminal_state.visible = true;
+        app.focused_panel = FocusedPanel::Tree;
+        handle_key(
+            &mut app,
+            make_key_with_modifiers(KeyCode::Down, KeyModifiers::CONTROL),
+        );
+        assert_eq!(app.focused_panel, FocusedPanel::Terminal);
+    }
+
+    #[test]
+    fn ctrl_shift_up_resizes_terminal_smaller() {
+        let (_dir, mut app) = setup_app();
+        app.terminal_state.visible = true;
+        app.terminal_state.height_percent = 30;
+        handle_key(
+            &mut app,
+            make_key_with_modifiers(KeyCode::Up, KeyModifiers::CONTROL | KeyModifiers::SHIFT),
+        );
+        assert_eq!(app.terminal_state.height_percent, 25);
+    }
+
+    #[test]
+    fn ctrl_shift_down_resizes_terminal_larger() {
+        let (_dir, mut app) = setup_app();
+        app.terminal_state.visible = true;
+        app.terminal_state.height_percent = 30;
+        handle_key(
+            &mut app,
+            make_key_with_modifiers(KeyCode::Down, KeyModifiers::CONTROL | KeyModifiers::SHIFT),
+        );
+        assert_eq!(app.terminal_state.height_percent, 35);
+    }
+
+    #[test]
+    fn ctrl_arrow_intercepted_when_terminal_focused() {
+        let (_dir, mut app) = setup_app();
+        app.terminal_state.visible = true;
+        app.focused_panel = FocusedPanel::Terminal;
+        // Ctrl+Right should switch focus to Preview even when terminal is focused
+        handle_key(
+            &mut app,
+            make_key_with_modifiers(KeyCode::Right, KeyModifiers::CONTROL),
+        );
+        assert_eq!(app.focused_panel, FocusedPanel::Preview);
+    }
+
+    #[test]
+    fn tab_still_cycles_focus() {
+        let (_dir, mut app) = setup_app();
+        assert_eq!(app.focused_panel, FocusedPanel::Tree);
+        handle_key(&mut app, make_key(KeyCode::Tab));
+        assert_eq!(app.focused_panel, FocusedPanel::Preview);
     }
 }

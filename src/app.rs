@@ -363,6 +363,40 @@ impl App {
         };
     }
 
+    /// Move focus left: Preview→Tree, Terminal→Tree. No-op from Tree.
+    pub fn focus_left(&mut self) {
+        match self.focused_panel {
+            FocusedPanel::Preview | FocusedPanel::Terminal => {
+                self.focused_panel = FocusedPanel::Tree;
+            }
+            FocusedPanel::Tree => {} // no-op
+        }
+    }
+
+    /// Move focus right: Tree→Preview, Terminal→Preview. No-op from Preview.
+    pub fn focus_right(&mut self) {
+        match self.focused_panel {
+            FocusedPanel::Tree | FocusedPanel::Terminal => {
+                self.focused_panel = FocusedPanel::Preview;
+            }
+            FocusedPanel::Preview => {} // no-op
+        }
+    }
+
+    /// Move focus up: Terminal→Tree. No-op from Tree/Preview.
+    pub fn focus_up(&mut self) {
+        if self.focused_panel == FocusedPanel::Terminal {
+            self.focused_panel = FocusedPanel::Tree;
+        }
+    }
+
+    /// Move focus down to Terminal (if visible). No-op if already on Terminal or Terminal hidden.
+    pub fn focus_down(&mut self) {
+        if self.terminal_state.visible && self.focused_panel != FocusedPanel::Terminal {
+            self.focused_panel = FocusedPanel::Terminal;
+        }
+    }
+
     /// Toggle the terminal panel visibility. Spawns PTY on first open.
     pub fn toggle_terminal(&mut self, event_tx: &mpsc::UnboundedSender<crate::event::Event>) {
         // Check if terminal is enabled in config
@@ -2483,5 +2517,115 @@ mod tests {
             app.preview_state.scroll_offset, 0,
             "Scroll should reset when switching to a different file"
         );
+    }
+
+    // === Directional focus navigation tests ===
+
+    #[test]
+    fn focus_left_from_preview_goes_to_tree() {
+        let (_dir, mut app) = setup_app();
+        app.focused_panel = FocusedPanel::Preview;
+        app.focus_left();
+        assert_eq!(app.focused_panel, FocusedPanel::Tree);
+    }
+
+    #[test]
+    fn focus_left_from_terminal_goes_to_tree() {
+        let (_dir, mut app) = setup_app();
+        app.focused_panel = FocusedPanel::Terminal;
+        app.focus_left();
+        assert_eq!(app.focused_panel, FocusedPanel::Tree);
+    }
+
+    #[test]
+    fn focus_left_from_tree_is_noop() {
+        let (_dir, mut app) = setup_app();
+        app.focused_panel = FocusedPanel::Tree;
+        app.focus_left();
+        assert_eq!(app.focused_panel, FocusedPanel::Tree);
+    }
+
+    #[test]
+    fn focus_right_from_tree_goes_to_preview() {
+        let (_dir, mut app) = setup_app();
+        app.focused_panel = FocusedPanel::Tree;
+        app.focus_right();
+        assert_eq!(app.focused_panel, FocusedPanel::Preview);
+    }
+
+    #[test]
+    fn focus_right_from_terminal_goes_to_preview() {
+        let (_dir, mut app) = setup_app();
+        app.focused_panel = FocusedPanel::Terminal;
+        app.focus_right();
+        assert_eq!(app.focused_panel, FocusedPanel::Preview);
+    }
+
+    #[test]
+    fn focus_right_from_preview_is_noop() {
+        let (_dir, mut app) = setup_app();
+        app.focused_panel = FocusedPanel::Preview;
+        app.focus_right();
+        assert_eq!(app.focused_panel, FocusedPanel::Preview);
+    }
+
+    #[test]
+    fn focus_up_from_terminal_goes_to_tree() {
+        let (_dir, mut app) = setup_app();
+        app.focused_panel = FocusedPanel::Terminal;
+        app.focus_up();
+        assert_eq!(app.focused_panel, FocusedPanel::Tree);
+    }
+
+    #[test]
+    fn focus_up_from_tree_is_noop() {
+        let (_dir, mut app) = setup_app();
+        app.focused_panel = FocusedPanel::Tree;
+        app.focus_up();
+        assert_eq!(app.focused_panel, FocusedPanel::Tree);
+    }
+
+    #[test]
+    fn focus_up_from_preview_is_noop() {
+        let (_dir, mut app) = setup_app();
+        app.focused_panel = FocusedPanel::Preview;
+        app.focus_up();
+        assert_eq!(app.focused_panel, FocusedPanel::Preview);
+    }
+
+    #[test]
+    fn focus_down_from_tree_goes_to_terminal_when_visible() {
+        let (_dir, mut app) = setup_app();
+        app.terminal_state.visible = true;
+        app.focused_panel = FocusedPanel::Tree;
+        app.focus_down();
+        assert_eq!(app.focused_panel, FocusedPanel::Terminal);
+    }
+
+    #[test]
+    fn focus_down_from_preview_goes_to_terminal_when_visible() {
+        let (_dir, mut app) = setup_app();
+        app.terminal_state.visible = true;
+        app.focused_panel = FocusedPanel::Preview;
+        app.focus_down();
+        assert_eq!(app.focused_panel, FocusedPanel::Terminal);
+    }
+
+    #[test]
+    fn focus_down_is_noop_when_terminal_hidden() {
+        let (_dir, mut app) = setup_app();
+        app.terminal_state.visible = false;
+        app.focused_panel = FocusedPanel::Tree;
+        app.focus_down();
+        assert_eq!(app.focused_panel, FocusedPanel::Tree);
+    }
+
+    #[test]
+    fn focus_down_is_noop_when_already_on_terminal() {
+        let (_dir, mut app) = setup_app();
+        app.terminal_state.visible = true;
+        app.focused_panel = FocusedPanel::Terminal;
+        app.focus_down();
+        assert_eq!(app.focused_panel, FocusedPanel::Terminal);
     }
 }

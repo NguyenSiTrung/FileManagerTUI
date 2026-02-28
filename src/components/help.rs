@@ -54,7 +54,15 @@ const NAVIGATION_KEYS: &[KeyEntry] = &[
     },
     KeyEntry {
         key: "Tab",
-        description: "Switch panel focus",
+        description: "Cycle panel focus (forward)",
+    },
+    KeyEntry {
+        key: "Ctrl+←/→",
+        description: "Focus left/right panel",
+    },
+    KeyEntry {
+        key: "Ctrl+↑/↓",
+        description: "Focus up/down (terminal)",
     },
     KeyEntry {
         key: ".",
@@ -173,11 +181,11 @@ const TERMINAL_KEYS: &[KeyEntry] = &[
         description: "Toggle terminal panel",
     },
     KeyEntry {
-        key: "Ctrl+↑",
+        key: "Ctrl+Shift+↑",
         description: "Resize terminal smaller",
     },
     KeyEntry {
-        key: "Ctrl+↓",
+        key: "Ctrl+Shift+↓",
         description: "Resize terminal larger",
     },
     KeyEntry {
