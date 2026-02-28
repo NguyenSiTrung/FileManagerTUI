@@ -1623,20 +1623,21 @@ impl App {
 
     /// Build a flat list of file paths using a hybrid approach:
     /// 1. Walk loaded tree nodes in-memory (instant, no I/O)
-    /// 2. For un-expanded directories, do a bounded filesystem walk
+    /// 2. For un-expanded directories, do a time-bounded filesystem walk
     ///
-    /// Capped by `search_max_entries` config.
+    /// Capped by `search_max_entries` config and a 500ms time limit.
     fn build_path_index(&self) -> Vec<PathBuf> {
         let max_entries = self.config.search_max_entries();
         let mut paths = Vec::new();
         let mut unloaded_dirs = Vec::new();
         Self::collect_loaded_paths(&self.tree_state.root, &mut paths, &mut unloaded_dirs);
 
-        // Phase 2: walk unloaded directories on the filesystem
+        // Phase 2: walk unloaded directories with entry cap + time limit
         if paths.len() < max_entries {
+            let deadline = Instant::now() + std::time::Duration::from_millis(500);
             let mut stack = unloaded_dirs;
             while let Some(dir) = stack.pop() {
-                if paths.len() >= max_entries {
+                if paths.len() >= max_entries || Instant::now() >= deadline {
                     break;
                 }
                 let entries = match std::fs::read_dir(&dir) {
@@ -1644,7 +1645,7 @@ impl App {
                     Err(_) => continue,
                 };
                 for entry in entries {
-                    if paths.len() >= max_entries {
+                    if paths.len() >= max_entries || Instant::now() >= deadline {
                         break;
                     }
                     let entry = match entry {
