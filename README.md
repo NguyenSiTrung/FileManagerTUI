@@ -91,7 +91,9 @@ fm --theme light
 | `G` / `End` | Jump to last item |
 | `Enter` / `l` / `→` | Expand directory |
 | `Backspace` / `h` / `←` | Collapse directory / go to parent |
-| `Tab` | Switch panel focus |
+| `Tab` | Cycle panel focus (forward) |
+| `Ctrl+←/→` | Focus left/right panel |
+| `Ctrl+↑/↓` | Focus up/down (terminal) |
 | `.` | Toggle hidden files |
 | `Space` | Toggle multi-select |
 | `Esc` | Clear multi-selection |
@@ -139,10 +141,11 @@ fm --theme light
 | Key | Action |
 |-----|--------|
 | `Ctrl+T` | Toggle terminal panel |
-| `Ctrl+↑` | Decrease terminal height |
-| `Ctrl+↓` | Increase terminal height |
+| `Ctrl+Shift+↑` | Decrease terminal height |
+| `Ctrl+Shift+↓` | Increase terminal height |
 | `Esc` | Unfocus terminal (return to tree) |
-| `Tab` | Cycle focus (tree → preview → terminal) |
+| `Shift+↑/↓` | Scroll terminal history |
+| `Shift+PgUp/PgDn` | Fast scroll terminal history |
 
 > When the terminal is focused, all other keys are forwarded to the shell.
 

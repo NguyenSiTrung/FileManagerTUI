@@ -97,4 +97,8 @@ This file is the project's institutional knowledge - learnings extracted from co
 - Conditional vertical layout: `[main, terminal, status]` when terminal visible, `[main, status]` when hidden — use `Constraint::Length` for terminal rows from height_percent (from: terminal-panel_20260228, archived 2026-02-28)
 - PTY resize notification must be sent alongside emulator `resize()` on every layout change to keep grid and PTY in sync (from: terminal-panel_20260228, archived 2026-02-28)
 
-Last refreshed: 2026-02-28 (terminal-panel_20260228 archived)
+- Modifier checks require `contains()` with explicit `!contains(SHIFT)` to distinguish Ctrl+Arrow from Ctrl+Shift+Arrow — crossterm CONTROL|SHIFT is a combined bitflag (from: focus-nav-remap_20260228, archived 2026-02-28)
+- All Ctrl+Arrow and Ctrl+Shift+Arrow must be intercepted BEFORE the terminal key forwarding check in `handle_normal_mode`, otherwise they get forwarded as PTY input (from: focus-nav-remap_20260228, archived 2026-02-28)
+- Reserved-keys block at the top of `handle_normal_mode` is the correct place for global intercepts — runs before the terminal focus check (from: focus-nav-remap_20260228, archived 2026-02-28)
+
+Last refreshed: 2026-02-28 (focus-nav-remap_20260228 archived)

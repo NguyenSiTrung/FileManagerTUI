@@ -596,7 +596,9 @@ For files exceeding `max_full_preview_bytes`:
 | `Ctrl+D` / `PageDown`     | Scroll down half page                    |
 | `Ctrl+U` / `PageUp`       | Scroll up half page                      |
 | `.`                        | Toggle hidden files visibility           |
-| `Tab`                      | Switch focus: tree ↔ preview             |
+| `Tab`                      | Cycle panel focus (forward)              |
+| `Ctrl+←/→`                | Focus left/right panel                   |
+| `Ctrl+↑/↓`                | Focus up/down (terminal)                 |
 | `q` / `Ctrl+C`            | Quit application                         |
 | `?`                        | Show help overlay                        |
 
@@ -633,7 +635,6 @@ For files exceeding `max_full_preview_bytes`:
 | `+`          | Increase head/tail line count by 10           |
 | `-`          | Decrease head/tail line count by 10           |
 | `Ctrl+W`     | Toggle line wrap                              |
-| `Tab`        | Switch focus back to tree                     |
 
 ---
 
