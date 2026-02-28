@@ -33,24 +33,24 @@
 <!-- execution: sequential -->
 <!-- depends: phase1 -->
 
-- [ ] Task 1: Define theme data model and built-in palettes
+- [x] Task 1: Define theme data model and built-in palettes *(417c1a5)*
   <!-- files: src/config.rs, src/theme.rs -->
-  - [ ] Create `ThemeColors` struct with all color fields from PLAN.md Section 9.2
-  - [ ] Implement `dark_theme()` — Catppuccin Mocha palette
-  - [ ] Implement `light_theme()` — complementary light palette
-  - [ ] Add `resolve_theme(config: &ThemeConfig) -> ThemeColors` — select dark/light/custom
-  - [ ] Hex color string → `ratatui::style::Color` parsing with validation and fallback
-  - [ ] Write tests for theme resolution, color parsing, invalid hex fallback
+  - [x] Create `ThemeColors` struct with all color fields from PLAN.md Section 9.2
+  - [x] Implement `dark_theme()` — Catppuccin Mocha palette
+  - [x] Implement `light_theme()` — complementary light palette
+  - [x] Add `resolve_theme(config: &ThemeConfig) -> ThemeColors` — select dark/light/custom
+  - [x] Hex color string → `ratatui::style::Color` parsing with validation and fallback
+  - [x] Write tests for theme resolution, color parsing, invalid hex fallback
 
-- [ ] Task 2: Apply theme colors throughout UI
+- [x] Task 2: Apply theme colors throughout UI *(65a9969)*
   <!-- files: src/components/tree.rs, src/components/preview.rs, src/components/status_bar.rs, src/components/dialog.rs, src/components/search.rs, src/ui.rs -->
   <!-- depends: task1 -->
-  - [ ] Pass `ThemeColors` to all widget renderers (TreeWidget, PreviewWidget, StatusBar, Dialog, Search)
-  - [ ] Replace all hardcoded `Color::*` values with theme color references
-  - [ ] Update `ui.rs` border/layout colors to use theme
-  - [ ] Verify both dark and light themes render correctly (manual check)
+  - [x] Pass `ThemeColors` to all widget renderers (TreeWidget, PreviewWidget, StatusBar, Dialog, Search)
+  - [x] Replace all hardcoded `Color::*` values with theme color references
+  - [x] Update `ui.rs` border/layout colors to use theme
+  - [x] Verify both dark and light themes render correctly (manual check)
 
-- [ ] Task: Conductor - Phase 2 Verification (manual verification per workflow.md)
+- [x] Task: Conductor - Phase 2 Verification (289 tests passing, clippy clean, fmt clean)
 
 ## Phase 3: UX Polish
 <!-- execution: parallel -->
