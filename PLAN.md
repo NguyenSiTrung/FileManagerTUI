@@ -901,16 +901,16 @@ show head+tail.
 
 ---
 
-### Milestone 5: Fuzzy Finder + Search
+### Milestone 5: Fuzzy Finder + Search ✅
 **Goal**: Quickly find files by name.
 
-- [ ] `components/search.rs`: Full-screen fuzzy finder overlay
-- [ ] File path indexing: walk tree, cache all paths
-- [ ] `fuzzy-matcher` integration: score + rank results
-- [ ] Highlight matched characters in results
-- [ ] `Enter` to navigate tree to selected result
-- [ ] `/` key for inline tree filtering (filter-as-you-type)
-- [ ] `handler.rs`: `Ctrl+P` to open, `Esc` to close
+- [x] `components/search.rs`: Fuzzy finder overlay widget (centered modal)
+- [x] File path indexing: walk tree, cache paths, invalidate cache on mutations
+- [x] `fuzzy-matcher` integration: score + rank results
+- [x] Highlight matched characters in results
+- [x] `Enter` to navigate tree to selected result
+- [x] `/` key for inline tree filtering (filter-as-you-type)
+- [x] `handler.rs`: `Ctrl+P` to open, `Esc` to close
 
 **Deliverable**: Press `Ctrl+P`, type partial filename, navigate to match.
 
@@ -940,7 +940,7 @@ automatically in the tree.
 - [ ] Mouse support (optional): click to select, scroll wheel
 - [ ] Nerd Font icon toggle (fallback to ASCII)
 - [ ] Sort options: by name, size, modified date
-- [ ] Error recovery: graceful handling of permission denied, broken symlinks
+- [x] Error recovery: graceful handling of permission denied, broken symlinks
 - [ ] README.md with install instructions and screenshots
 - [ ] Release binary via GitHub Actions
 
