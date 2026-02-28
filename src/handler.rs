@@ -1023,4 +1023,142 @@ mod tests {
         let (msg, _) = app.status_message.as_ref().unwrap();
         assert!(msg.contains("Nothing to undo"));
     }
+
+    // === Search (Ctrl+P) handler tests ===
+
+    #[test]
+    fn ctrl_p_opens_search() {
+        let (_dir, mut app) = setup_app();
+        handle_key(
+            &mut app,
+            make_key_with_modifiers(KeyCode::Char('p'), KeyModifiers::CONTROL),
+        );
+        assert_eq!(app.mode, AppMode::Search);
+    }
+
+    #[test]
+    fn search_esc_closes() {
+        let (_dir, mut app) = setup_app();
+        handle_key(
+            &mut app,
+            make_key_with_modifiers(KeyCode::Char('p'), KeyModifiers::CONTROL),
+        );
+        handle_key(&mut app, make_key(KeyCode::Esc));
+        assert_eq!(app.mode, AppMode::Normal);
+    }
+
+    #[test]
+    fn search_typing_updates_query() {
+        let (_dir, mut app) = setup_app();
+        handle_key(
+            &mut app,
+            make_key_with_modifiers(KeyCode::Char('p'), KeyModifiers::CONTROL),
+        );
+        handle_key(&mut app, make_key(KeyCode::Char('f')));
+        handle_key(&mut app, make_key(KeyCode::Char('i')));
+        assert_eq!(app.search_state.query, "fi");
+    }
+
+    #[test]
+    fn search_enter_navigates() {
+        let (dir, mut app) = setup_app();
+        // Create a file for search
+        std::fs::write(dir.path().join("file_a.txt"), "hello").unwrap();
+        handle_key(
+            &mut app,
+            make_key_with_modifiers(KeyCode::Char('p'), KeyModifiers::CONTROL),
+        );
+        handle_key(&mut app, make_key(KeyCode::Char('f')));
+        handle_key(&mut app, make_key(KeyCode::Char('i')));
+        handle_key(&mut app, make_key(KeyCode::Char('l')));
+        handle_key(&mut app, make_key(KeyCode::Char('e')));
+        assert!(!app.search_state.results.is_empty());
+        handle_key(&mut app, make_key(KeyCode::Enter));
+        assert_eq!(app.mode, AppMode::Normal);
+    }
+
+    #[test]
+    fn search_arrow_navigates_results() {
+        let (dir, mut app) = setup_app();
+        std::fs::write(dir.path().join("file_a.txt"), "a").unwrap();
+        std::fs::write(dir.path().join("file_b.rs"), "b").unwrap();
+        app.invalidate_search_cache();
+
+        handle_key(
+            &mut app,
+            make_key_with_modifiers(KeyCode::Char('p'), KeyModifiers::CONTROL),
+        );
+        for c in "file".chars() {
+            handle_key(&mut app, make_key(KeyCode::Char(c)));
+        }
+        assert!(app.search_state.results.len() >= 2);
+        handle_key(&mut app, make_key(KeyCode::Down));
+        assert_eq!(app.search_state.selected_index, 1);
+        handle_key(&mut app, make_key(KeyCode::Up));
+        assert_eq!(app.search_state.selected_index, 0);
+    }
+
+    #[test]
+    fn search_backspace_removes_char() {
+        let (_dir, mut app) = setup_app();
+        handle_key(
+            &mut app,
+            make_key_with_modifiers(KeyCode::Char('p'), KeyModifiers::CONTROL),
+        );
+        handle_key(&mut app, make_key(KeyCode::Char('a')));
+        handle_key(&mut app, make_key(KeyCode::Char('b')));
+        handle_key(&mut app, make_key(KeyCode::Backspace));
+        assert_eq!(app.search_state.query, "a");
+    }
+
+    // === Filter (/) handler tests ===
+
+    #[test]
+    fn slash_opens_filter() {
+        let (_dir, mut app) = setup_app();
+        handle_key(&mut app, make_key(KeyCode::Char('/')));
+        assert_eq!(app.mode, AppMode::Filter);
+    }
+
+    #[test]
+    fn filter_esc_clears() {
+        let (_dir, mut app) = setup_app();
+        handle_key(&mut app, make_key(KeyCode::Char('/')));
+        handle_key(&mut app, make_key(KeyCode::Char('f')));
+        handle_key(&mut app, make_key(KeyCode::Esc));
+        assert_eq!(app.mode, AppMode::Normal);
+        assert!(!app.tree_state.is_filtering);
+    }
+
+    #[test]
+    fn filter_enter_accepts() {
+        let (_dir, mut app) = setup_app();
+        handle_key(&mut app, make_key(KeyCode::Char('/')));
+        handle_key(&mut app, make_key(KeyCode::Char('f')));
+        handle_key(&mut app, make_key(KeyCode::Enter));
+        assert_eq!(app.mode, AppMode::Normal);
+        // Filter view should persist
+        assert!(app.tree_state.is_filtering);
+    }
+
+    #[test]
+    fn filter_typing_filters_tree() {
+        let (_dir, mut app) = setup_app();
+        let total = app.tree_state.flat_items.len();
+        handle_key(&mut app, make_key(KeyCode::Char('/')));
+        handle_key(&mut app, make_key(KeyCode::Char('a')));
+        handle_key(&mut app, make_key(KeyCode::Char('l')));
+        handle_key(&mut app, make_key(KeyCode::Char('p')));
+        assert!(app.tree_state.flat_items.len() <= total);
+    }
+
+    #[test]
+    fn filter_backspace_updates() {
+        let (_dir, mut app) = setup_app();
+        handle_key(&mut app, make_key(KeyCode::Char('/')));
+        handle_key(&mut app, make_key(KeyCode::Char('z')));
+        handle_key(&mut app, make_key(KeyCode::Backspace));
+        // Filter cleared, back to full tree
+        assert!(!app.tree_state.is_filtering);
+    }
 }

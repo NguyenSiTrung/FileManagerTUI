@@ -8,6 +8,7 @@ use ratatui::{
 use crate::app::{App, AppMode, FocusedPanel};
 use crate::components::dialog::DialogWidget;
 use crate::components::preview::PreviewWidget;
+use crate::components::search::SearchWidget;
 use crate::components::status_bar::StatusBarWidget;
 use crate::components::tree::TreeWidget;
 use crate::fs::tree::NodeType;
@@ -132,7 +133,12 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         status_widget = status_widget.clipboard_info(&clipboard_info_str);
     }
 
-    if let Some((ref msg, _)) = app.status_message {
+    // Show filter query in status bar when filtering
+    let filter_display;
+    if app.mode == AppMode::Filter || app.tree_state.is_filtering {
+        filter_display = format!("Filter: {}_", app.tree_state.filter_query);
+        status_widget = status_widget.status_message(&filter_display, false);
+    } else if let Some((ref msg, _)) = app.status_message {
         let is_error = msg.starts_with("Error");
         status_widget = status_widget.status_message(msg, is_error);
     }
@@ -142,5 +148,11 @@ pub fn render(app: &mut App, frame: &mut Frame) {
     if matches!(app.mode, AppMode::Dialog(_)) {
         let dialog_widget = DialogWidget::new(&app.mode, &app.dialog_state);
         frame.render_widget(dialog_widget, area);
+    }
+
+    // Render search overlay on top if in search mode
+    if app.mode == AppMode::Search {
+        let search_widget = SearchWidget::new(&app.search_state);
+        frame.render_widget(search_widget, area);
     }
 }
