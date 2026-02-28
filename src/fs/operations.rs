@@ -35,6 +35,111 @@ pub fn delete(path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Progress callback for recursive delete operations.
+pub type DeleteProgressFn = Box<dyn Fn(&str, usize) + Send>;
+
+/// Recursively delete a file or directory with progress reporting and cancellation.
+///
+/// For files: simply deletes the file.
+/// For directories: walks the tree, collecting all files first, then deletes
+/// bottom-up (files, then empty dirs).
+///
+/// - `progress_fn`: called with `(current_file_name, items_deleted_so_far)`
+/// - `cancel`: checked between each file deletion; if set, stops early
+///
+/// Returns `(deleted_count, errors)`.
+#[allow(dead_code)]
+pub fn delete_recursive_with_progress(
+    path: &Path,
+    progress_fn: &DeleteProgressFn,
+    cancel: &std::sync::atomic::AtomicBool,
+) -> (usize, Vec<String>) {
+    use std::sync::atomic::Ordering;
+
+    let mut deleted = 0;
+    let mut errors = Vec::new();
+
+    if !path.is_dir() {
+        // Simple file delete
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+        progress_fn(&name, 0);
+        match fs::remove_file(path) {
+            Ok(()) => deleted += 1,
+            Err(e) => errors.push(format!("{}: {}", path.display(), e)),
+        }
+        return (deleted, errors);
+    }
+
+    // Collect all entries bottom-up (files first, then dirs)
+    let mut files = Vec::new();
+    let mut dirs = Vec::new();
+    let mut stack = vec![path.to_path_buf()];
+
+    while let Some(dir) = stack.pop() {
+        dirs.push(dir.clone());
+        let entries = match fs::read_dir(&dir) {
+            Ok(e) => e,
+            Err(e) => {
+                errors.push(format!("{}: {}", dir.display(), e));
+                continue;
+            }
+        };
+        for entry in entries {
+            let entry = match entry {
+                Ok(e) => e,
+                Err(e) => {
+                    errors.push(format!("read_dir entry: {}", e));
+                    continue;
+                }
+            };
+            let entry_path = entry.path();
+            if entry_path.is_dir() {
+                stack.push(entry_path);
+            } else {
+                files.push(entry_path);
+            }
+        }
+    }
+
+    // Delete files first
+    for file in &files {
+        if cancel.load(Ordering::Relaxed) {
+            return (deleted, errors);
+        }
+        let name = file
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+        progress_fn(&name, deleted);
+        match fs::remove_file(file) {
+            Ok(()) => deleted += 1,
+            Err(e) => errors.push(format!("{}: {}", file.display(), e)),
+        }
+    }
+
+    // Delete directories bottom-up (deepest first)
+    dirs.reverse();
+    for dir in &dirs {
+        if cancel.load(Ordering::Relaxed) {
+            return (deleted, errors);
+        }
+        let name = dir
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+        progress_fn(&name, deleted);
+        match fs::remove_dir(dir) {
+            Ok(()) => deleted += 1,
+            Err(e) => errors.push(format!("{}: {}", dir.display(), e)),
+        }
+    }
+
+    (deleted, errors)
+}
+
 /// Resolve a name collision by appending `_copy`, `_copy2`, etc.
 ///
 /// Returns a path that does not exist yet in the destination directory.
@@ -352,5 +457,75 @@ mod tests {
         fs::write(&path, "").unwrap();
         let resolved = resolve_collision(&path);
         assert_eq!(resolved, tmp.path().join("Makefile_copy"));
+    }
+
+    // === delete_recursive_with_progress tests ===
+
+    #[test]
+    fn test_delete_recursive_file() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("test.txt");
+        fs::write(&path, "data").unwrap();
+
+        let cancel = std::sync::atomic::AtomicBool::new(false);
+        let progress: DeleteProgressFn = Box::new(|_, _| {});
+        let (deleted, errors) = delete_recursive_with_progress(&path, &progress, &cancel);
+
+        assert_eq!(deleted, 1);
+        assert!(errors.is_empty());
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn test_delete_recursive_directory() {
+        let tmp = TempDir::new().unwrap();
+        let dir = tmp.path().join("parent");
+        fs::create_dir_all(dir.join("child")).unwrap();
+        fs::write(dir.join("a.txt"), "a").unwrap();
+        fs::write(dir.join("child").join("b.txt"), "b").unwrap();
+
+        let cancel = std::sync::atomic::AtomicBool::new(false);
+        let names = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let names_clone = names.clone();
+        let progress: DeleteProgressFn = Box::new(move |name, _count| {
+            names_clone.lock().unwrap().push(name.to_string());
+        });
+
+        let (deleted, errors) = delete_recursive_with_progress(&dir, &progress, &cancel);
+
+        assert!(errors.is_empty());
+        // 2 files + 2 dirs (child + parent) = 4
+        assert_eq!(deleted, 4);
+        assert!(!dir.exists());
+        // Progress was reported for each item
+        assert_eq!(names.lock().unwrap().len(), 4);
+    }
+
+    #[test]
+    fn test_delete_recursive_cancelled() {
+        let tmp = TempDir::new().unwrap();
+        let dir = tmp.path().join("cancel_test");
+        fs::create_dir(&dir).unwrap();
+        for i in 0..10 {
+            fs::write(dir.join(format!("file_{}.txt", i)), "data").unwrap();
+        }
+
+        let cancel = std::sync::atomic::AtomicBool::new(false);
+        // Cancel after first file
+        let progress: DeleteProgressFn = Box::new(|_name, count| {
+            if count >= 1 {
+                // We can't directly set cancel from here, but the test
+                // verifies the cancel mechanism works
+            }
+        });
+
+        // Set cancel immediately
+        cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+        let (deleted, _errors) = delete_recursive_with_progress(&dir, &progress, &cancel);
+
+        // Cancelled before deleting any files
+        assert_eq!(deleted, 0);
+        // Directory and files still exist
+        assert!(dir.exists());
     }
 }
