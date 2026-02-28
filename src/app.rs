@@ -738,6 +738,9 @@ impl App {
                 let mut stack = vec![path.clone()];
                 let mut items_since_update: u64 = 0;
 
+                let mut visited = crate::fs::tree::VisitedDirs::new();
+                visited.visit(&path);
+
                 while let Some(dir) = stack.pop() {
                     let entries = match std::fs::read_dir(&dir) {
                         Ok(e) => e,
@@ -753,8 +756,12 @@ impl App {
                             Err(_) => continue,
                         };
                         if meta.is_dir() {
-                            dirs += 1;
-                            stack.push(entry.path());
+                            let entry_path = entry.path();
+                            // Skip symlink loops
+                            if visited.visit(&entry_path) {
+                                dirs += 1;
+                                stack.push(entry_path);
+                            }
                         } else {
                             files += 1;
                             size += meta.len();

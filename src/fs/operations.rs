@@ -78,6 +78,9 @@ pub fn delete_recursive_with_progress(
     let mut dirs = Vec::new();
     let mut stack = vec![path.to_path_buf()];
 
+    let mut visited = crate::fs::tree::VisitedDirs::new();
+    visited.visit(path);
+
     while let Some(dir) = stack.pop() {
         dirs.push(dir.clone());
         let entries = match fs::read_dir(&dir) {
@@ -97,7 +100,10 @@ pub fn delete_recursive_with_progress(
             };
             let entry_path = entry.path();
             if entry_path.is_dir() {
-                stack.push(entry_path);
+                // Skip symlink loops
+                if visited.visit(&entry_path) {
+                    stack.push(entry_path);
+                }
             } else {
                 files.push(entry_path);
             }

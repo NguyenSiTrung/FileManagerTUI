@@ -6,6 +6,69 @@ use std::time::SystemTime;
 
 use crate::error::Result;
 
+/// Tracks visited directories by (device, inode) to detect symlink loops.
+///
+/// On macOS/Linux, identifies unique directories by their device+inode pair.
+/// This prevents infinite recursion when following circular symbolic links.
+#[derive(Debug, Clone, Default)]
+pub struct VisitedDirs {
+    #[cfg(unix)]
+    seen: HashSet<(u64, u64)>,
+    #[cfg(not(unix))]
+    seen: HashSet<PathBuf>,
+}
+
+#[allow(dead_code)]
+impl VisitedDirs {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Try to mark a directory as visited. Returns `true` if it was new,
+    /// `false` if already visited (symlink loop detected).
+    pub fn visit(&mut self, path: &Path) -> bool {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            if let Ok(meta) = fs::metadata(path) {
+                self.seen.insert((meta.dev(), meta.ino()))
+            } else {
+                true // Can't stat — treat as new to avoid blocking
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            if let Ok(canonical) = fs::canonicalize(path) {
+                self.seen.insert(canonical)
+            } else {
+                true
+            }
+        }
+    }
+
+    /// Check if a directory has been visited without marking it.
+    #[allow(dead_code)]
+    pub fn is_visited(&self, path: &Path) -> bool {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            if let Ok(meta) = fs::metadata(path) {
+                self.seen.contains(&(meta.dev(), meta.ino()))
+            } else {
+                false
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            if let Ok(canonical) = fs::canonicalize(path) {
+                self.seen.contains(&canonical)
+            } else {
+                false
+            }
+        }
+    }
+}
+
 /// A lightweight entry in a directory snapshot.
 /// Only stores the name and whether it's a directory — no expensive stat() call.
 #[derive(Debug, Clone)]
