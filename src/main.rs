@@ -118,8 +118,8 @@ async fn main() -> error::Result<()> {
 
     install_panic_hook();
 
-    let mut tui = Tui::new()?;
     let mut app = App::new(&path, config)?;
+    let mut tui = Tui::new(app.config.mouse_enabled())?;
     let mut events = EventHandler::new(Duration::from_millis(16));
     let event_tx = events.sender();
 
@@ -156,6 +156,7 @@ async fn main() -> error::Result<()> {
 
         match events.next().await? {
             Event::Key(key) => handler::handle_key_event(&mut app, key, &event_tx),
+            Event::Mouse(mouse) => handler::handle_mouse_event(&mut app, mouse, &event_tx),
             Event::Tick => {}
             Event::Resize(_, _) => {}
             Event::Progress(update) => app.handle_progress(update),

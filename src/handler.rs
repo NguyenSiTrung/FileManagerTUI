@@ -1,10 +1,87 @@
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use tokio::sync::mpsc;
 
 use crate::app::{App, AppMode, DialogKind, FocusedPanel};
 use crate::components::help::HelpOverlay;
 use crate::event::Event;
 use crate::fs::operations;
+use crate::fs::tree::NodeType;
+
+/// Handle a mouse event.
+pub fn handle_mouse_event(
+    app: &mut App,
+    mouse: MouseEvent,
+    _event_tx: &mpsc::UnboundedSender<Event>,
+) {
+    // Only handle mouse in Normal mode
+    if app.mode != AppMode::Normal {
+        return;
+    }
+
+    let col = mouse.column;
+    let row = mouse.row;
+
+    match mouse.kind {
+        MouseEventKind::Down(MouseButton::Left) => {
+            // Determine which panel was clicked
+            if is_in_rect(col, row, app.tree_area) {
+                // Switch focus to tree
+                app.focused_panel = FocusedPanel::Tree;
+
+                // Map click to tree item index
+                // Inner area: subtract border (1 top, 1 left)
+                let inner_y = row.saturating_sub(app.tree_area.y + 1);
+                let clicked_index = app.tree_state.scroll_offset + inner_y as usize;
+
+                if clicked_index < app.tree_state.flat_items.len() {
+                    let already_selected = app.tree_state.selected_index == clicked_index;
+                    app.tree_state.selected_index = clicked_index;
+                    app.last_previewed_index = None; // Force preview update
+
+                    // If clicking already-selected directory, toggle expand/collapse
+                    if already_selected {
+                        if let Some(item) = app.tree_state.flat_items.get(clicked_index) {
+                            if item.node_type == NodeType::Directory {
+                                if item.is_expanded {
+                                    app.collapse_selected();
+                                } else {
+                                    app.expand_selected();
+                                }
+                            }
+                        }
+                    }
+                }
+            } else if is_in_rect(col, row, app.preview_area) {
+                // Switch focus to preview
+                app.focused_panel = FocusedPanel::Preview;
+            }
+        }
+        MouseEventKind::ScrollUp => {
+            if is_in_rect(col, row, app.tree_area) {
+                app.focused_panel = FocusedPanel::Tree;
+                app.select_previous();
+            } else if is_in_rect(col, row, app.preview_area) {
+                app.focused_panel = FocusedPanel::Preview;
+                app.preview_scroll_up();
+            }
+        }
+        MouseEventKind::ScrollDown => {
+            if is_in_rect(col, row, app.tree_area) {
+                app.focused_panel = FocusedPanel::Tree;
+                app.select_next();
+            } else if is_in_rect(col, row, app.preview_area) {
+                app.focused_panel = FocusedPanel::Preview;
+                app.preview_scroll_down();
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Check if a position (col, row) is inside a Rect.
+fn is_in_rect(col: u16, row: u16, rect: ratatui::layout::Rect) -> bool {
+    col >= rect.x && col < rect.x + rect.width && row >= rect.y && row < rect.y + rect.height
+}
 
 /// Handle a key event and dispatch to the appropriate app method.
 pub fn handle_key_event(app: &mut App, key: KeyEvent, event_tx: &mpsc::UnboundedSender<Event>) {
@@ -1451,6 +1528,102 @@ mod tests {
         let idx = app.tree_state.selected_index;
         handle_key(&mut app, make_key(KeyCode::Char('j')));
         handle_key(&mut app, make_key(KeyCode::Char('k')));
+        assert_eq!(app.tree_state.selected_index, idx);
+    }
+
+    // === Mouse handler tests ===
+
+    use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+
+    fn make_mouse_click(col: u16, row: u16) -> MouseEvent {
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: col,
+            row,
+            modifiers: KeyModifiers::NONE,
+        }
+    }
+
+    fn make_mouse_scroll_down(col: u16, row: u16) -> MouseEvent {
+        MouseEvent {
+            kind: MouseEventKind::ScrollDown,
+            column: col,
+            row,
+            modifiers: KeyModifiers::NONE,
+        }
+    }
+
+    fn make_mouse_scroll_up(col: u16, row: u16) -> MouseEvent {
+        MouseEvent {
+            kind: MouseEventKind::ScrollUp,
+            column: col,
+            row,
+            modifiers: KeyModifiers::NONE,
+        }
+    }
+
+    #[test]
+    fn mouse_click_tree_selects_item() {
+        let (_dir, mut app) = setup_app();
+        // Simulate tree area: starts at (0,0) with width 40, height 20
+        app.tree_area = ratatui::layout::Rect::new(0, 0, 40, 20);
+        app.preview_area = ratatui::layout::Rect::new(40, 0, 60, 20);
+        assert_eq!(app.tree_state.selected_index, 0);
+
+        // Click on row 2 (inner row 1 = index 1, accounting for top border)
+        let tx = make_event_tx();
+        handle_mouse_event(&mut app, make_mouse_click(10, 2), &tx);
+        assert_eq!(app.tree_state.selected_index, 1);
+        assert_eq!(app.focused_panel, FocusedPanel::Tree);
+    }
+
+    #[test]
+    fn mouse_click_preview_switches_focus() {
+        let (_dir, mut app) = setup_app();
+        app.tree_area = ratatui::layout::Rect::new(0, 0, 40, 20);
+        app.preview_area = ratatui::layout::Rect::new(40, 0, 60, 20);
+        assert_eq!(app.focused_panel, FocusedPanel::Tree);
+
+        let tx = make_event_tx();
+        handle_mouse_event(&mut app, make_mouse_click(50, 5), &tx);
+        assert_eq!(app.focused_panel, FocusedPanel::Preview);
+    }
+
+    #[test]
+    fn mouse_scroll_tree_navigates() {
+        let (_dir, mut app) = setup_app();
+        app.tree_area = ratatui::layout::Rect::new(0, 0, 40, 20);
+        app.preview_area = ratatui::layout::Rect::new(40, 0, 60, 20);
+
+        let tx = make_event_tx();
+        handle_mouse_event(&mut app, make_mouse_scroll_down(10, 5), &tx);
+        assert_eq!(app.tree_state.selected_index, 1);
+        handle_mouse_event(&mut app, make_mouse_scroll_up(10, 5), &tx);
+        assert_eq!(app.tree_state.selected_index, 0);
+    }
+
+    #[test]
+    fn mouse_scroll_preview_scrolls() {
+        let (_dir, mut app) = setup_app();
+        app.tree_area = ratatui::layout::Rect::new(0, 0, 40, 20);
+        app.preview_area = ratatui::layout::Rect::new(40, 0, 60, 20);
+        app.preview_state.total_lines = 100;
+
+        let tx = make_event_tx();
+        handle_mouse_event(&mut app, make_mouse_scroll_down(50, 5), &tx);
+        assert_eq!(app.preview_state.scroll_offset, 1);
+        assert_eq!(app.focused_panel, FocusedPanel::Preview);
+    }
+
+    #[test]
+    fn mouse_ignored_in_dialog_mode() {
+        let (_dir, mut app) = setup_app();
+        app.tree_area = ratatui::layout::Rect::new(0, 0, 40, 20);
+        app.mode = AppMode::Dialog(DialogKind::CreateFile);
+        let idx = app.tree_state.selected_index;
+
+        let tx = make_event_tx();
+        handle_mouse_event(&mut app, make_mouse_click(10, 2), &tx);
         assert_eq!(app.tree_state.selected_index, idx);
     }
 }

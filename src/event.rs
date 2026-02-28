@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use crossterm::event::{self, Event as CrosstermEvent, KeyEvent};
+use crossterm::event::{self, Event as CrosstermEvent, KeyEvent, MouseEvent};
 use tokio::sync::mpsc;
 
 use crate::error::Result;
@@ -40,6 +40,8 @@ pub struct OperationResult {
 pub enum Event {
     /// A key press event.
     Key(KeyEvent),
+    /// A mouse event.
+    Mouse(MouseEvent),
     /// A periodic tick for rendering.
     Tick,
     /// Terminal resize event.
@@ -71,6 +73,11 @@ impl EventHandler {
                     match event::read() {
                         Ok(CrosstermEvent::Key(key)) => {
                             if event_tx.send(Event::Key(key)).is_err() {
+                                break;
+                            }
+                        }
+                        Ok(CrosstermEvent::Mouse(mouse)) => {
+                            if event_tx.send(Event::Mouse(mouse)).is_err() {
                                 break;
                             }
                         }

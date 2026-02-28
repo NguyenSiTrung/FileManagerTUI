@@ -5,6 +5,7 @@ use std::time::Instant;
 
 use fuzzy_matcher::skim::SkimMatcherV2;
 use fuzzy_matcher::FuzzyMatcher;
+use ratatui::layout::Rect;
 use ratatui::text::Line;
 use syntect::highlighting::Theme;
 use syntect::parsing::SyntaxSet;
@@ -177,6 +178,10 @@ pub struct App {
     pub watcher_active: bool,
     /// State for the help overlay.
     pub help_state: HelpState,
+    /// Last rendered tree panel area (for mouse click mapping).
+    pub tree_area: Rect,
+    /// Last rendered preview panel area (for mouse click mapping).
+    pub preview_area: Rect,
 }
 
 impl App {
@@ -210,6 +215,8 @@ impl App {
             fuzzy_matcher: SkimMatcherV2::default(),
             watcher_active: true,
             help_state: HelpState::default(),
+            tree_area: Rect::default(),
+            preview_area: Rect::default(),
         })
     }
 

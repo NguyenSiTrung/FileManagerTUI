@@ -40,6 +40,10 @@ pub fn render(app: &mut App, frame: &mut Frame) {
     let tree_area = panels[0];
     let preview_area = panels[1];
 
+    // Store areas for mouse click mapping
+    app.tree_area = tree_area;
+    app.preview_area = preview_area;
+
     // Determine border styles based on focus (using theme colors)
     let focused_border = Style::default().fg(theme.border_focused_fg);
     let unfocused_border = Style::default().fg(theme.border_fg);
