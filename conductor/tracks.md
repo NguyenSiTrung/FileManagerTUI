@@ -21,3 +21,6 @@
 <!-- Archived: focus-nav-remap_20260228 (2026-02-28) → conductor/archive/ -->
 
 ---
+
+## [ ] Track: Preview Panel Edit Mode
+*Link: [./conductor/tracks/preview-edit_20260228/](./conductor/tracks/preview-edit_20260228/)*
