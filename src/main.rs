@@ -6,6 +6,7 @@ mod event;
 mod fs;
 mod handler;
 mod preview_content;
+mod terminal;
 mod theme;
 mod tui;
 mod ui;
@@ -162,6 +163,7 @@ async fn main() -> error::Result<()> {
             Event::Progress(update) => app.handle_progress(update),
             Event::OperationComplete(result) => app.handle_operation_complete(result),
             Event::FsChange(paths) => app.handle_fs_change(paths),
+            Event::TerminalOutput(data) => app.terminal_state.emulator.process(&data),
         }
 
         // Sync watcher pause/resume state
@@ -178,6 +180,7 @@ async fn main() -> error::Result<()> {
         }
     }
 
+    app.shutdown_terminal();
     tui.restore()?;
     Ok(())
 }

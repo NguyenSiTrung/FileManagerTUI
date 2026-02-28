@@ -17,6 +17,7 @@ use crate::error::Result;
 use crate::fs::clipboard::{ClipboardOp, ClipboardState};
 use crate::fs::tree::{NodeType, TreeState};
 use crate::preview_content;
+use crate::terminal::TerminalState;
 use crate::theme::{self, ThemeColors};
 
 /// The kind of dialog being displayed.
@@ -48,6 +49,7 @@ pub enum FocusedPanel {
     #[default]
     Tree,
     Preview,
+    Terminal,
 }
 
 /// View mode for large-file head+tail preview.
@@ -182,6 +184,10 @@ pub struct App {
     pub tree_area: Rect,
     /// Last rendered preview panel area (for mouse click mapping).
     pub preview_area: Rect,
+    /// Embedded terminal state (PTY + emulator).
+    pub terminal_state: TerminalState,
+    /// Last rendered terminal panel area (for mouse click mapping).
+    pub terminal_area: Rect,
 }
 
 impl App {
@@ -221,6 +227,8 @@ impl App {
             help_state: HelpState::default(),
             tree_area: Rect::default(),
             preview_area: Rect::default(),
+            terminal_state: TerminalState::default(),
+            terminal_area: Rect::default(),
         })
     }
 
@@ -340,12 +348,109 @@ impl App {
         self.tree_state.root.path.clone()
     }
 
-    /// Toggle focus between tree and preview panels.
+    /// Toggle focus between panels: Tree → Preview → Terminal (if visible) → Tree.
     pub fn toggle_focus(&mut self) {
         self.focused_panel = match self.focused_panel {
             FocusedPanel::Tree => FocusedPanel::Preview,
-            FocusedPanel::Preview => FocusedPanel::Tree,
+            FocusedPanel::Preview => {
+                if self.terminal_state.visible {
+                    FocusedPanel::Terminal
+                } else {
+                    FocusedPanel::Tree
+                }
+            }
+            FocusedPanel::Terminal => FocusedPanel::Tree,
         };
+    }
+
+    /// Toggle the terminal panel visibility. Spawns PTY on first open.
+    pub fn toggle_terminal(&mut self, event_tx: &mpsc::UnboundedSender<crate::event::Event>) {
+        if self.terminal_state.visible {
+            // Hide the terminal panel
+            self.terminal_state.visible = false;
+            // If focus was on terminal, move it to tree
+            if self.focused_panel == FocusedPanel::Terminal {
+                self.focused_panel = FocusedPanel::Tree;
+            }
+        } else {
+            // Show the terminal panel
+            self.terminal_state.visible = true;
+
+            // If no PTY is running (first open or after exit), spawn one
+            let needs_spawn = self.terminal_state.pty.is_none()
+                || !self
+                    .terminal_state
+                    .pty
+                    .as_ref()
+                    .map(|p| p.is_alive())
+                    .unwrap_or(false);
+
+            if needs_spawn {
+                self.terminal_state.exited = false;
+                let cwd = self.current_dir();
+                let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+
+                // Calculate terminal dimensions from terminal_area
+                let rows = self.terminal_area.height.saturating_sub(2).max(1);
+                let cols = self.terminal_area.width.saturating_sub(2).max(1);
+                // Use defaults if area hasn't been set yet
+                let rows = if rows == 0 { 24 } else { rows };
+                let cols = if cols == 0 { 80 } else { cols };
+
+                let (pty_tx, mut pty_rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
+
+                match crate::terminal::pty::PtyProcess::spawn(&shell, &cwd, rows, cols, pty_tx) {
+                    Ok(pty) => {
+                        self.terminal_state.pty = Some(pty);
+                        self.terminal_state.emulator.resize(rows as usize, cols as usize);
+
+                        // Bridge PTY output to the main event loop
+                        let event_tx = event_tx.clone();
+                        tokio::spawn(async move {
+                            while let Some(data) = pty_rx.recv().await {
+                                if event_tx
+                                    .send(crate::event::Event::TerminalOutput(data))
+                                    .is_err()
+                                {
+                                    break;
+                                }
+                            }
+                        });
+                    }
+                    Err(e) => {
+                        self.set_status_message(format!("⚠ Terminal: {}", e));
+                        self.terminal_state.visible = false;
+                        return;
+                    }
+                }
+            }
+
+            self.focused_panel = FocusedPanel::Terminal;
+        }
+    }
+
+    /// Resize the terminal panel upward (smaller terminal, bigger main area).
+    pub fn resize_terminal_up(&mut self) {
+        if self.terminal_state.visible && self.terminal_state.height_percent > 10 {
+            self.terminal_state.height_percent =
+                self.terminal_state.height_percent.saturating_sub(5).max(10);
+        }
+    }
+
+    /// Resize the terminal panel downward (bigger terminal, smaller main area).
+    pub fn resize_terminal_down(&mut self) {
+        if self.terminal_state.visible && self.terminal_state.height_percent < 80 {
+            self.terminal_state.height_percent =
+                (self.terminal_state.height_percent + 5).min(80);
+        }
+    }
+
+    /// Shut down the terminal PTY process (called on app exit).
+    pub fn shutdown_terminal(&mut self) {
+        if let Some(ref pty) = self.terminal_state.pty {
+            pty.shutdown();
+        }
+        self.terminal_state.pty = None;
     }
 
     /// Collect paths for clipboard: multi-selected if any, else focused item.

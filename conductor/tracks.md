@@ -16,5 +16,5 @@
 
 ---
 
-## [ ] Track: Embedded Terminal Panel
+## [~] Track: Embedded Terminal Panel
 *Link: [./conductor/tracks/terminal-panel_20260228/](./conductor/tracks/terminal-panel_20260228/)*

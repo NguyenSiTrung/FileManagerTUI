@@ -56,6 +56,9 @@ pub fn handle_mouse_event(
             } else if is_in_rect(col, row, app.preview_area) {
                 // Switch focus to preview
                 app.focused_panel = FocusedPanel::Preview;
+            } else if app.terminal_state.visible && is_in_rect(col, row, app.terminal_area) {
+                // Switch focus to terminal
+                app.focused_panel = FocusedPanel::Terminal;
             }
         }
         MouseEventKind::ScrollUp => {
@@ -74,6 +77,8 @@ pub fn handle_mouse_event(
             } else if is_in_rect(col, row, app.preview_area) {
                 app.focused_panel = FocusedPanel::Preview;
                 app.preview_scroll_down();
+            } else if app.terminal_state.visible && is_in_rect(col, row, app.terminal_area) {
+                app.terminal_state.scroll_offset = app.terminal_state.scroll_offset.saturating_sub(1);
             }
         }
         _ => {}
@@ -102,7 +107,30 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent, event_tx: &mpsc::Unbounded
 }
 
 fn handle_normal_mode(app: &mut App, key: KeyEvent, event_tx: &mpsc::UnboundedSender<Event>) {
-    // Global keys (work regardless of focus)
+    // Terminal-specific reserved global keys (must check BEFORE general globals)
+    match key.code {
+        KeyCode::Char('t') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.toggle_terminal(event_tx);
+            return;
+        }
+        KeyCode::Up if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.resize_terminal_up();
+            return;
+        }
+        KeyCode::Down if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.resize_terminal_down();
+            return;
+        }
+        _ => {}
+    }
+
+    // If terminal is focused, forward all other keys to the PTY
+    if app.focused_panel == FocusedPanel::Terminal {
+        handle_terminal_keys(app, key);
+        return;
+    }
+
+    // Global keys (work regardless of focus for tree/preview panels)
     match key.code {
         KeyCode::Char('q') => {
             app.quit();
@@ -148,6 +176,7 @@ fn handle_normal_mode(app: &mut App, key: KeyEvent, event_tx: &mpsc::UnboundedSe
     match app.focused_panel {
         FocusedPanel::Tree => handle_tree_keys(app, key, event_tx),
         FocusedPanel::Preview => handle_preview_keys(app, key),
+        FocusedPanel::Terminal => {} // Already handled above
     }
 }
 
@@ -249,6 +278,105 @@ fn handle_preview_keys(app: &mut App, key: KeyEvent) {
         }
 
         _ => {}
+    }
+}
+
+/// Handle keys when terminal panel is focused.
+/// All non-reserved keys are forwarded to the PTY as raw bytes.
+fn handle_terminal_keys(app: &mut App, key: KeyEvent) {
+    match key.code {
+        // Esc returns focus to tree
+        KeyCode::Esc => {
+            app.focused_panel = FocusedPanel::Tree;
+            return;
+        }
+        // Tab cycles focus (same as global)
+        KeyCode::Tab => {
+            app.toggle_focus();
+            return;
+        }
+        // Scrollback navigation (Shift+Up/Down)
+        KeyCode::Up if key.modifiers.contains(KeyModifiers::SHIFT) => {
+            if app.terminal_state.scroll_offset < app.terminal_state.emulator.total_lines().saturating_sub(app.terminal_state.emulator.visible_rows()) {
+                app.terminal_state.scroll_offset += 1;
+            }
+            return;
+        }
+        KeyCode::Down if key.modifiers.contains(KeyModifiers::SHIFT) => {
+            app.terminal_state.scroll_offset = app.terminal_state.scroll_offset.saturating_sub(1);
+            return;
+        }
+        KeyCode::PageUp if key.modifiers.contains(KeyModifiers::SHIFT) => {
+            let jump = app.terminal_state.emulator.visible_rows() / 2;
+            let max = app.terminal_state.emulator.total_lines().saturating_sub(app.terminal_state.emulator.visible_rows());
+            app.terminal_state.scroll_offset = (app.terminal_state.scroll_offset + jump).min(max);
+            return;
+        }
+        KeyCode::PageDown if key.modifiers.contains(KeyModifiers::SHIFT) => {
+            let jump = app.terminal_state.emulator.visible_rows() / 2;
+            app.terminal_state.scroll_offset = app.terminal_state.scroll_offset.saturating_sub(jump);
+            return;
+        }
+        _ => {}
+    }
+
+    // Reset scroll offset on any input (auto-scroll to bottom)
+    app.terminal_state.scroll_offset = 0;
+
+    // Convert KeyEvent to bytes and send to PTY
+    let bytes = key_event_to_bytes(&key);
+    if !bytes.is_empty() {
+        if let Some(ref pty) = app.terminal_state.pty {
+            let _ = pty.write(&bytes);
+        }
+    }
+}
+
+/// Convert a crossterm KeyEvent into the byte sequence expected by a PTY.
+fn key_event_to_bytes(key: &KeyEvent) -> Vec<u8> {
+    match key.code {
+        KeyCode::Char(c) => {
+            if key.modifiers.contains(KeyModifiers::CONTROL) {
+                // Ctrl+A..Z → 0x01..0x1A
+                let ctrl_byte = (c.to_ascii_lowercase() as u8).wrapping_sub(b'a').wrapping_add(1);
+                if ctrl_byte <= 26 {
+                    return vec![ctrl_byte];
+                }
+            }
+            let mut buf = [0u8; 4];
+            let s = c.encode_utf8(&mut buf);
+            s.as_bytes().to_vec()
+        }
+        KeyCode::Enter => vec![b'\r'],
+        KeyCode::Backspace => vec![0x7f],
+        KeyCode::Delete => b"\x1b[3~".to_vec(),
+        KeyCode::Up => b"\x1b[A".to_vec(),
+        KeyCode::Down => b"\x1b[B".to_vec(),
+        KeyCode::Right => b"\x1b[C".to_vec(),
+        KeyCode::Left => b"\x1b[D".to_vec(),
+        KeyCode::Home => b"\x1b[H".to_vec(),
+        KeyCode::End => b"\x1b[F".to_vec(),
+        KeyCode::PageUp => b"\x1b[5~".to_vec(),
+        KeyCode::PageDown => b"\x1b[6~".to_vec(),
+        KeyCode::Insert => b"\x1b[2~".to_vec(),
+        KeyCode::F(n) => match n {
+            1 => b"\x1bOP".to_vec(),
+            2 => b"\x1bOQ".to_vec(),
+            3 => b"\x1bOR".to_vec(),
+            4 => b"\x1bOS".to_vec(),
+            5 => b"\x1b[15~".to_vec(),
+            6 => b"\x1b[17~".to_vec(),
+            7 => b"\x1b[18~".to_vec(),
+            8 => b"\x1b[19~".to_vec(),
+            9 => b"\x1b[20~".to_vec(),
+            10 => b"\x1b[21~".to_vec(),
+            11 => b"\x1b[23~".to_vec(),
+            12 => b"\x1b[24~".to_vec(),
+            _ => vec![],
+        },
+        KeyCode::Tab => vec![b'\t'],
+        KeyCode::Esc => vec![0x1b],
+        _ => vec![],
     }
 }
 

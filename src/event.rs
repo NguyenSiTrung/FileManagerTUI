@@ -53,6 +53,8 @@ pub enum Event {
     OperationComplete(OperationResult),
     /// Filesystem change detected by watcher.
     FsChange(Vec<PathBuf>),
+    /// Raw output from the embedded terminal PTY.
+    TerminalOutput(Vec<u8>),
 }
 
 /// Async event handler that polls crossterm events and forwards them via a channel.

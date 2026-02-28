@@ -11,6 +11,7 @@ use crate::components::help::HelpOverlay;
 use crate::components::preview::PreviewWidget;
 use crate::components::search::SearchWidget;
 use crate::components::status_bar::StatusBarWidget;
+use crate::components::terminal::TerminalWidget;
 use crate::components::tree::TreeWidget;
 use crate::fs::tree::NodeType;
 
@@ -22,14 +23,40 @@ pub fn render(app: &mut App, frame: &mut Frame) {
     let area = frame.area();
     let theme = app.theme_colors.clone();
 
-    // Split into main area + status bar (1 line)
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(3), Constraint::Length(1)])
-        .split(area);
+    // Determine vertical layout:
+    // If terminal is visible: [main_area, terminal_area, status_bar]
+    // If terminal is hidden:  [main_area, status_bar]
+    let terminal_visible = app.terminal_state.visible;
+    let term_height_pct = app.terminal_state.height_percent;
+
+    let chunks = if terminal_visible {
+        // Calculate terminal height in rows from percentage
+        let screen_height = area.height;
+        let term_rows = ((screen_height as u32 * term_height_pct as u32) / 100).max(3) as u16;
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Min(3),       // main (tree + preview)
+                Constraint::Length(term_rows), // terminal panel
+                Constraint::Length(1),    // status bar
+            ])
+            .split(area)
+    } else {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(3), Constraint::Length(1)])
+            .split(area)
+    };
 
     let main_area = chunks[0];
-    let status_area = chunks[1];
+    let (terminal_area_rect, status_area) = if terminal_visible {
+        (chunks[1], chunks[2])
+    } else {
+        (ratatui::layout::Rect::default(), chunks[1])
+    };
+
+    // Store terminal area for mouse mapping and resize
+    app.terminal_area = terminal_area_rect;
 
     // Split main area: tree (40%) + preview (60%)
     let panels = Layout::default()
@@ -49,10 +76,12 @@ pub fn render(app: &mut App, frame: &mut Frame) {
     let focused_border = Style::default().fg(theme.border_focused_fg);
     let unfocused_border = Style::default().fg(theme.border_fg);
 
-    let (tree_border_style, preview_border_style) = match app.focused_panel {
-        FocusedPanel::Tree => (focused_border, unfocused_border),
-        FocusedPanel::Preview => (unfocused_border, focused_border),
-    };
+    let (tree_border_style, preview_border_style, terminal_border_style) =
+        match app.focused_panel {
+            FocusedPanel::Tree => (focused_border, unfocused_border, unfocused_border),
+            FocusedPanel::Preview => (unfocused_border, focused_border, unfocused_border),
+            FocusedPanel::Terminal => (unfocused_border, unfocused_border, focused_border),
+        };
 
     // Update scroll offset to keep selected item visible
     let visible_height = tree_area.height.saturating_sub(2) as usize; // account for border
@@ -102,6 +131,42 @@ pub fn render(app: &mut App, frame: &mut Frame) {
 
     let preview_widget = PreviewWidget::new(&app.preview_state, &theme).block(preview_block);
     frame.render_widget(preview_widget, preview_area);
+
+    // Render terminal panel if visible
+    if terminal_visible {
+        let terminal_title = if app.terminal_state.exited {
+            " Terminal [exited] ".to_string()
+        } else {
+            " Terminal ".to_string()
+        };
+
+        let terminal_block = Block::default()
+            .title(terminal_title)
+            .borders(Borders::ALL)
+            .border_style(terminal_border_style);
+
+        let show_cursor = app.focused_panel == FocusedPanel::Terminal;
+        let terminal_widget =
+            TerminalWidget::new(&app.terminal_state, &theme, show_cursor).block(terminal_block);
+        frame.render_widget(terminal_widget, terminal_area_rect);
+
+        // Resize emulator to match the inner area if needed
+        let inner_rows = terminal_area_rect.height.saturating_sub(2) as usize;
+        let inner_cols = terminal_area_rect.width.saturating_sub(2) as usize;
+        if inner_rows > 0
+            && inner_cols > 0
+            && (app.terminal_state.emulator.visible_rows() != inner_rows
+                || app.terminal_state.emulator.visible_cols() != inner_cols)
+        {
+            app.terminal_state
+                .emulator
+                .resize(inner_rows, inner_cols);
+            // Tell PTY about the new size
+            if let Some(ref pty) = app.terminal_state.pty {
+                let _ = pty.resize(inner_rows as u16, inner_cols as u16);
+            }
+        }
+    }
 
     // Clear expired status messages
     app.clear_expired_status();
