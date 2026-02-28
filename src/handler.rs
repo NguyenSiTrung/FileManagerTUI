@@ -656,9 +656,19 @@ fn handle_tree_keys(app: &mut App, key: KeyEvent, event_tx: &mpsc::UnboundedSend
         // Clear multi-selection
         KeyCode::Esc => app.tree_state.clear_multi_select(),
 
-        // Clipboard operations
-        KeyCode::Char('y') => app.copy_to_clipboard(),
-        KeyCode::Char('x') => app.cut_to_clipboard(),
+        // Clipboard operations (skip LoadMore nodes)
+        KeyCode::Char('y') => {
+            if app.tree_state.flat_items.get(app.tree_state.selected_index)
+                .is_some_and(|i| i.node_type != NodeType::LoadMore) {
+                app.copy_to_clipboard();
+            }
+        }
+        KeyCode::Char('x') => {
+            if app.tree_state.flat_items.get(app.tree_state.selected_index)
+                .is_some_and(|i| i.node_type != NodeType::LoadMore) {
+                app.cut_to_clipboard();
+            }
+        }
         KeyCode::Char('p') => app.paste_clipboard_async(event_tx.clone()),
 
         // File operations — open dialogs
@@ -666,14 +676,17 @@ fn handle_tree_keys(app: &mut App, key: KeyEvent, event_tx: &mpsc::UnboundedSend
         KeyCode::Char('A') => app.open_dialog(DialogKind::CreateDirectory),
         KeyCode::Char('r') => {
             if let Some(item) = app.tree_state.flat_items.get(app.tree_state.selected_index) {
+                if item.node_type == NodeType::LoadMore {
+                    return; // Can't rename a virtual node
+                }
                 let original = item.path.clone();
                 app.open_dialog(DialogKind::Rename { original });
             }
         }
         KeyCode::Char('d') => {
             if let Some(item) = app.tree_state.flat_items.get(app.tree_state.selected_index) {
-                // Don't allow deleting the root
-                if item.depth > 0 {
+                // Don't allow deleting the root or LoadMore nodes
+                if item.depth > 0 && item.node_type != NodeType::LoadMore {
                     let targets = vec![item.path.clone()];
                     app.open_dialog(DialogKind::DeleteConfirm { targets });
                 }

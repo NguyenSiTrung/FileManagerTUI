@@ -28,17 +28,17 @@
   - [x] Add a synthetic "Load more" `TreeNode` child when `has_more_children` is true
   - [x] Add unit tests: small dir (no pagination), large dir (pagination triggers), edge cases
 
-- [ ] Task 4: Implement `load_next_page()`
+- [x] Task 4: Implement `load_next_page()`
   <!-- files: src/fs/tree.rs, src/app.rs -->
   <!-- depends: task3 -->
-  - [ ] Add `TreeState::load_next_page(&mut self, parent_path: &Path, page_size: usize)` method
-  - [ ] Load next N entries from the directory, append to existing children
-  - [ ] Sort the newly loaded entries and merge into existing sorted children
-  - [ ] Update/remove the "Load more" node based on remaining entries
-  - [ ] Re-flatten the tree after loading
-  - [ ] Add unit tests: sequential page loads, final page (no more remaining)
+  - [x] Add `TreeState::load_next_page(&mut self, parent_path: &Path, page_size: usize)` method
+  - [x] Load next N entries from the directory, append to existing children
+  - [x] Sort the newly loaded entries and merge into existing sorted children
+  - [x] Update/remove the "Load more" node based on remaining entries
+  - [x] Re-flatten the tree after loading
+  - [x] Add unit tests: sequential page loads, final page (no more remaining)
 
-- [ ] Task: Conductor - User Manual Verification 'Core Pagination Infrastructure' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Core Pagination Infrastructure' (Protocol in workflow.md)
 
 ## Phase 2: Tree UI — Count Badge & Load More
 <!-- execution: parallel -->

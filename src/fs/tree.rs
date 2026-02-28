@@ -274,6 +274,8 @@ pub struct FlatItem {
     pub load_more_parent: Option<PathBuf>,
     /// For `NodeType::LoadMore`: approximate remaining entries.
     pub load_more_remaining: Option<usize>,
+    /// For directories: total immediate child count (for count badge).
+    pub child_count: Option<usize>,
 }
 
 /// Sort criteria for the tree.
@@ -411,6 +413,7 @@ impl TreeState {
             is_hidden: node.meta.is_hidden,
             load_more_parent: None,
             load_more_remaining: None,
+            child_count: node.total_child_count,
         });
 
         if node.is_expanded {
@@ -448,6 +451,7 @@ impl TreeState {
                         is_hidden: false,
                         load_more_parent: Some(node.path.clone()),
                         load_more_remaining: Some(remaining),
+                        child_count: None,
                     });
                 }
             }
@@ -727,6 +731,7 @@ impl TreeState {
                 is_hidden: node.meta.is_hidden,
                 load_more_parent: None,
                 load_more_remaining: None,
+                child_count: node.total_child_count,
             });
             items.extend(child_items);
             true

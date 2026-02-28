@@ -198,8 +198,23 @@ impl<'a> Widget for TreeWidget<'a> {
 
             let marker = if is_multi_selected { "● " } else { "" };
             let line_content = format!("{}{}{}{}", prefix, marker, indicator, item.name);
-            let span = Span::styled(line_content, style);
-            let line = Line::from(span);
+
+            // Build multi-span line: name + optional count badge for collapsed dirs
+            let name_span = Span::styled(line_content, style);
+            let line = if item.node_type == NodeType::Directory
+                && !item.is_expanded
+                && !is_selected
+            {
+                if let Some(count) = item.child_count {
+                    let badge = format!(" ({} items)", count);
+                    let badge_style = Style::default().fg(self.theme.tree_hidden_fg);
+                    Line::from(vec![name_span, Span::styled(badge, badge_style)])
+                } else {
+                    Line::from(name_span)
+                }
+            } else {
+                Line::from(name_span)
+            };
 
             let line_area = Rect::new(inner_area.x, y, inner_area.width, 1);
             buf.set_line(line_area.x, line_area.y, &line, line_area.width);
