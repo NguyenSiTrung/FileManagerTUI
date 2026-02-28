@@ -620,13 +620,13 @@ impl App {
 
     /// Scroll preview down by one line.
     pub fn preview_scroll_down(&mut self) {
-        if self.preview_state.scroll_offset < self.preview_state.total_lines.saturating_sub(1) {
-            self.preview_state.scroll_offset += 1;
-        }
+        let max = self.preview_max_scroll_offset();
+        self.preview_state.scroll_offset = (self.preview_state.scroll_offset + 1).min(max);
     }
 
     /// Scroll preview up by one line.
     pub fn preview_scroll_up(&mut self) {
+        self.clamp_preview_scroll();
         if self.preview_state.scroll_offset > 0 {
             self.preview_state.scroll_offset -= 1;
         }
@@ -639,20 +639,44 @@ impl App {
 
     /// Jump preview to the last line.
     pub fn preview_jump_bottom(&mut self) {
-        self.preview_state.scroll_offset = self.preview_state.total_lines.saturating_sub(1);
+        self.preview_state.scroll_offset = self.preview_max_scroll_offset();
     }
 
     /// Scroll preview down by half a page.
     pub fn preview_half_page_down(&mut self, visible_height: usize) {
         let half = visible_height / 2;
-        let max = self.preview_state.total_lines.saturating_sub(1);
+        let max = self.preview_max_scroll_offset();
         self.preview_state.scroll_offset = (self.preview_state.scroll_offset + half).min(max);
     }
 
     /// Scroll preview up by half a page.
     pub fn preview_half_page_up(&mut self, visible_height: usize) {
+        self.clamp_preview_scroll();
         let half = visible_height / 2;
         self.preview_state.scroll_offset = self.preview_state.scroll_offset.saturating_sub(half);
+    }
+
+    /// Clamp preview scroll offset to valid bounds for the current viewport.
+    pub fn clamp_preview_scroll(&mut self) {
+        let max = self.preview_max_scroll_offset();
+        self.preview_state.scroll_offset = self.preview_state.scroll_offset.min(max);
+    }
+
+    fn preview_max_scroll_offset(&self) -> usize {
+        self.preview_line_count()
+            .saturating_sub(self.preview_visible_height())
+    }
+
+    fn preview_visible_height(&self) -> usize {
+        self.preview_area.height.saturating_sub(2).max(1) as usize
+    }
+
+    fn preview_line_count(&self) -> usize {
+        if self.preview_state.content_lines.is_empty() {
+            self.preview_state.total_lines.max(1)
+        } else {
+            self.preview_state.content_lines.len()
+        }
     }
 
     /// Update preview content when the selected tree item changes.
@@ -1525,6 +1549,32 @@ mod tests {
         assert_eq!(app.preview_state.scroll_offset, 9);
         app.preview_half_page_up(100);
         assert_eq!(app.preview_state.scroll_offset, 0);
+    }
+
+    #[test]
+    fn preview_jump_bottom_respects_viewport_height() {
+        let (_dir, mut app) = setup_app();
+        app.preview_state.content_lines =
+            (0..100).map(|i| Line::from(format!("line {i}"))).collect();
+        app.preview_state.total_lines = 100;
+        app.preview_area = Rect::new(0, 0, 80, 12); // inner height = 10
+        app.preview_jump_bottom();
+        assert_eq!(app.preview_state.scroll_offset, 90);
+    }
+
+    #[test]
+    fn clamp_preview_scroll_after_resize() {
+        let (_dir, mut app) = setup_app();
+        app.preview_state.content_lines =
+            (0..100).map(|i| Line::from(format!("line {i}"))).collect();
+        app.preview_state.total_lines = 100;
+        app.preview_area = Rect::new(0, 0, 80, 12); // inner height = 10
+        app.preview_jump_bottom();
+        assert_eq!(app.preview_state.scroll_offset, 90);
+
+        app.preview_area = Rect::new(0, 0, 80, 22); // inner height = 20
+        app.clamp_preview_scroll();
+        assert_eq!(app.preview_state.scroll_offset, 80);
     }
 
     // === Integration tests: preview update flow ===

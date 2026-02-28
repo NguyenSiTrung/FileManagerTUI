@@ -59,7 +59,12 @@ impl<'a> Widget for PreviewWidget<'a> {
 
         // Render visible lines starting from scroll_offset
         let visible_height = inner.height as usize;
-        let start = self.preview_state.scroll_offset;
+        let max_start = self
+            .preview_state
+            .content_lines
+            .len()
+            .saturating_sub(visible_height);
+        let start = self.preview_state.scroll_offset.min(max_start);
         let end = (start + visible_height).min(self.preview_state.content_lines.len());
 
         for (i, line) in self.preview_state.content_lines[start..end]
@@ -144,7 +149,7 @@ mod tests {
         state.scroll_offset = 1;
         let tc = test_theme();
         let widget = PreviewWidget::new(&state, &tc);
-        let area = Rect::new(0, 0, 20, 3);
+        let area = Rect::new(0, 0, 20, 2);
         let mut buf = Buffer::empty(area);
         widget.render(area, &mut buf);
         let row0: String = (0..20)
@@ -158,6 +163,36 @@ mod tests {
             })
             .collect();
         assert!(row0.contains("line 2"));
+    }
+
+    #[test]
+    fn test_preview_scroll_offset_clamps_to_bottom_start() {
+        let mut state = PreviewState::default();
+        state.content_lines = vec![
+            Line::from("line 1"),
+            Line::from("line 2"),
+            Line::from("line 3"),
+            Line::from("line 4"),
+            Line::from("line 5"),
+        ];
+        state.total_lines = 5;
+        state.scroll_offset = 99;
+        let tc = test_theme();
+        let widget = PreviewWidget::new(&state, &tc);
+        let area = Rect::new(0, 0, 20, 3);
+        let mut buf = Buffer::empty(area);
+        widget.render(area, &mut buf);
+        let row0: String = (0..20)
+            .map(|x| {
+                buf.cell((x, 0))
+                    .unwrap()
+                    .symbol()
+                    .chars()
+                    .next()
+                    .unwrap_or(' ')
+            })
+            .collect();
+        assert!(row0.contains("line 3"));
     }
 
     #[test]
