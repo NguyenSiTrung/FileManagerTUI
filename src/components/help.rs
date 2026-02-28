@@ -262,7 +262,7 @@ const EDITOR_KEYS: &[KeyEntry] = &[
     },
     KeyEntry {
         key: "Mouse click",
-        description: "Position cursor at click point",
+        description: "Position cursor / click+drag to select",
     },
     KeyEntry {
         key: "Scroll wheel",

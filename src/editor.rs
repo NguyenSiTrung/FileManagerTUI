@@ -208,6 +208,19 @@ impl EditorState {
         self.ensure_cursor_visible();
     }
 
+    /// Set the cursor to a specific line and column without clearing the selection.
+    /// Used for mouse drag selection where the anchor stays put.
+    pub fn set_cursor_position_for_selection(&mut self, line: usize, col: usize) {
+        self.cursor_line = line.min(self.buffer.len().saturating_sub(1));
+        let line_len = self
+            .buffer
+            .get(self.cursor_line)
+            .map(|l| l.len())
+            .unwrap_or(0);
+        self.cursor_col = col.min(line_len);
+        self.ensure_cursor_visible();
+    }
+
     /// Get the length of the current line.
     pub fn current_line_len(&self) -> usize {
         self.buffer

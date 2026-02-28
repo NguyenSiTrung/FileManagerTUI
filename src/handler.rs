@@ -105,26 +105,33 @@ fn handle_editor_mouse(app: &mut App, mouse: MouseEvent) {
     match mouse.kind {
         MouseEventKind::Down(MouseButton::Left) => {
             if let Some(ref mut editor) = app.editor_state {
-                // Calculate inner area (subtract border: 1px each side)
-                let inner_x = app.preview_area.x + 1;
-                let inner_y = app.preview_area.y + 1;
-                let gutter_w = editor.gutter_width();
-
-                // Code area starts after gutter
-                let code_x = inner_x + gutter_w;
-
-                // Calculate clicked line (relative to viewport + scroll offset)
-                let click_row = row.saturating_sub(inner_y) as usize;
-                let target_line = editor.scroll_offset + click_row;
-
-                // Calculate clicked column (relative to code area start)
-                let target_col = if col >= code_x {
-                    (col - code_x) as usize
-                } else {
-                    0 // Clicked in gutter — go to start of line
-                };
-
+                let (target_line, target_col) = mouse_to_editor_pos(editor, app.preview_area, col, row);
+                // Place cursor and start a new selection anchor
                 editor.set_cursor_position(target_line, target_col);
+                // Set anchor at the click point so dragging will create a selection
+                editor.selection = Some(crate::editor::Selection::new(
+                    editor.cursor_line,
+                    editor.cursor_col,
+                ));
+            }
+        }
+        MouseEventKind::Drag(MouseButton::Left) => {
+            if let Some(ref mut editor) = app.editor_state {
+                let (target_line, target_col) = mouse_to_editor_pos(editor, app.preview_area, col, row);
+                // Move cursor without clearing selection — anchor stays put
+                editor.set_cursor_position_for_selection(target_line, target_col);
+            }
+        }
+        MouseEventKind::Up(MouseButton::Left) => {
+            // If anchor == cursor after click-release (no drag), clear selection
+            if let Some(ref mut editor) = app.editor_state {
+                if let Some(ref sel) = editor.selection {
+                    if sel.anchor_line == editor.cursor_line
+                        && sel.anchor_col == editor.cursor_col
+                    {
+                        editor.selection = None;
+                    }
+                }
             }
         }
         MouseEventKind::ScrollUp => {
@@ -142,6 +149,30 @@ fn handle_editor_mouse(app: &mut App, mouse: MouseEvent) {
         }
         _ => {}
     }
+}
+
+/// Convert mouse screen coordinates to editor (line, col) position.
+fn mouse_to_editor_pos(
+    editor: &crate::editor::EditorState,
+    preview_area: ratatui::layout::Rect,
+    col: u16,
+    row: u16,
+) -> (usize, usize) {
+    let inner_x = preview_area.x + 1;
+    let inner_y = preview_area.y + 1;
+    let gutter_w = editor.gutter_width();
+    let code_x = inner_x + gutter_w;
+
+    let click_row = row.saturating_sub(inner_y) as usize;
+    let target_line = editor.scroll_offset + click_row;
+
+    let target_col = if col >= code_x {
+        (col - code_x) as usize
+    } else {
+        0
+    };
+
+    (target_line, target_col)
 }
 
 /// Check if a position (col, row) is inside a Rect.
