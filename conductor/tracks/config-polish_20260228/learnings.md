@@ -17,3 +17,15 @@ Patterns, gotchas, and context discovered during implementation.
 ---
 
 <!-- Learnings from implementation will be appended below -->
+
+## [2026-02-28 09:45] - Phase 1 Task 1: Create config.rs module with AppConfig struct
+- **Implemented:** Full config module with TOML loading, multi-source merge, 14 getter methods
+- **Files changed:** src/config.rs (new), src/main.rs (mod declaration), Cargo.toml (serde, toml, dirs deps)
+- **Commit:** dad644b
+- **Learnings:**
+  - Patterns: All config fields use `Option<T>` so partial configs from different sources compose cleanly via `.or()` merge
+  - Patterns: `#[serde(default)]` on both struct and fields ensures TOML parsing tolerates missing sections
+  - Gotchas: Raw strings containing `"#` sequences (hex colors) need `r##"..."##` double-hash delimiters — single `r#"..."#` breaks
+  - Gotchas: Adding `#[allow(dead_code)]` on the impl block (not individual methods) when all methods will be used in a later task
+  - Context: Config candidate path resolution: env var → CWD `.fm-tui.toml` → `dirs::config_dir()/fm-tui/config.toml`
+---

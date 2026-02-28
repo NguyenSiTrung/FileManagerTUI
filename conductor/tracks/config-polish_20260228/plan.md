@@ -3,13 +3,13 @@
 ## Phase 1: Configuration Foundation
 <!-- execution: sequential -->
 
-- [ ] Task 1: Create `config.rs` module with `AppConfig` struct
+- [x] Task 1: Create `config.rs` module with `AppConfig` struct *(dad644b)*
   <!-- files: src/config.rs -->
-  - [ ] Define `AppConfig`, `GeneralConfig`, `PreviewConfig`, `TreeConfig`, `WatcherConfig`, `ThemeConfig` structs with serde Deserialize
-  - [ ] All fields `Option<T>` with `Default` impl providing sensible defaults
-  - [ ] Add `AppConfig::load()` — resolution chain: CLI → env → local `.fm-tui.toml` → global `~/.config/fm-tui/config.toml` → defaults
-  - [ ] Merge logic: later sources fill in `None` fields from earlier sources
-  - [ ] Write unit tests for default values, TOML parsing, merge behavior, missing file handling
+  - [x] Define `AppConfig`, `GeneralConfig`, `PreviewConfig`, `TreeConfig`, `WatcherConfig`, `ThemeConfig` structs with serde Deserialize
+  - [x] All fields `Option<T>` with `Default` impl providing sensible defaults
+  - [x] Add `AppConfig::load()` — resolution chain: CLI → env → local `.fm-tui.toml` → global `~/.config/fm-tui/config.toml` → defaults
+  - [x] Merge logic: later sources fill in `None` fields from earlier sources
+  - [x] Write unit tests for default values, TOML parsing, merge behavior, missing file handling
 
 - [ ] Task 2: Extend CLI argument parsing with full options
   <!-- files: src/main.rs -->

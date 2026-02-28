@@ -15,21 +15,92 @@ use std::time::Duration;
 use clap::Parser;
 
 use crate::app::App;
+use crate::config::{AppConfig, GeneralConfig, PreviewConfig, TreeConfig, WatcherConfig};
 use crate::event::{Event, EventHandler};
 use crate::fs::watcher::FsWatcher;
 use crate::tui::{install_panic_hook, Tui};
 
 /// A terminal-based file manager TUI.
 #[derive(Parser, Debug)]
-#[command(name = "file_manager_tui", version, about)]
+#[command(name = "fm", version, about)]
 struct Cli {
     /// Root path to display (defaults to current directory)
     #[arg(default_value = ".")]
     path: PathBuf,
 
+    /// Path to config file
+    #[arg(short = 'c', long = "config")]
+    config: Option<PathBuf>,
+
+    /// Disable preview panel
+    #[arg(long)]
+    no_preview: bool,
+
     /// Disable filesystem watcher (auto-refresh)
     #[arg(long)]
     no_watcher: bool,
+
+    /// Use ASCII instead of Nerd Font icons
+    #[arg(long)]
+    no_icons: bool,
+
+    /// Disable mouse support
+    #[arg(long)]
+    no_mouse: bool,
+
+    /// Lines from top for large file preview
+    #[arg(long)]
+    head_lines: Option<usize>,
+
+    /// Lines from bottom for large file preview
+    #[arg(long)]
+    tail_lines: Option<usize>,
+
+    /// Max file size (bytes) for full preview
+    #[arg(long)]
+    max_preview: Option<u64>,
+
+    /// Color theme: dark, light
+    #[arg(long)]
+    theme: Option<String>,
+}
+
+impl Cli {
+    /// Convert CLI flags into a partial `AppConfig` for the merge chain.
+    /// Only flags that were explicitly set produce `Some` values.
+    fn as_config_overrides(&self) -> AppConfig {
+        AppConfig {
+            general: GeneralConfig {
+                default_path: None, // path is handled separately via positional arg
+                show_hidden: None,
+                confirm_delete: None,
+                mouse: if self.no_mouse { Some(false) } else { None },
+            },
+            preview: PreviewConfig {
+                max_full_preview_bytes: self.max_preview,
+                head_lines: self.head_lines,
+                tail_lines: self.tail_lines,
+                default_view_mode: None,
+                tab_width: None,
+                line_wrap: None,
+                syntax_theme: None,
+                enabled: if self.no_preview { Some(false) } else { None },
+            },
+            tree: TreeConfig {
+                sort_by: None,
+                dirs_first: None,
+                use_icons: if self.no_icons { Some(false) } else { None },
+            },
+            watcher: WatcherConfig {
+                enabled: if self.no_watcher { Some(false) } else { None },
+                debounce_ms: None,
+            },
+            theme: crate::config::ThemeConfig {
+                scheme: self.theme.clone(),
+                custom: None,
+            },
+        }
+    }
 }
 
 #[tokio::main]
@@ -40,6 +111,10 @@ async fn main() -> error::Result<()> {
         error::AppError::InvalidPath(format!("{} does not exist", cli.path.display()))
     })?;
 
+    // Load configuration: file sources + CLI overrides
+    let cli_overrides = cli.as_config_overrides();
+    let _config = AppConfig::load(cli.config.as_deref(), Some(&cli_overrides));
+
     install_panic_hook();
 
     let mut tui = Tui::new()?;
@@ -47,8 +122,8 @@ async fn main() -> error::Result<()> {
     let mut events = EventHandler::new(Duration::from_millis(16));
     let event_tx = events.sender();
 
-    // Initialize filesystem watcher (unless --no-watcher)
-    let _watcher = if cli.no_watcher {
+    // Initialize filesystem watcher (using merged config)
+    let _watcher = if !_config.watcher_enabled() {
         app.watcher_active = false;
         None
     } else {
@@ -59,7 +134,7 @@ async fn main() -> error::Result<()> {
 
         match FsWatcher::new(
             &path,
-            Duration::from_millis(fs::watcher::DEFAULT_DEBOUNCE_MS),
+            Duration::from_millis(_config.debounce_ms()),
             ignore_patterns,
             fs::watcher::DEFAULT_FLOOD_THRESHOLD,
             event_tx.clone(),
