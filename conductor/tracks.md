@@ -16,5 +16,4 @@
 
 ---
 
-## [x] Track: Embedded Terminal Panel
-*Link: [./conductor/tracks/terminal-panel_20260228/](./conductor/tracks/terminal-panel_20260228/)*
+<!-- Archived: terminal-panel_20260228 (2026-02-28) → conductor/archive/ -->

@@ -88,4 +88,13 @@ This file is the project's institutional knowledge - learnings extracted from co
 - Must account for border offset (y+1) when mapping mouse click row to flat_items index in bordered widgets (from: config-polish_20260228, archived 2026-02-28)
 - Every `load_children()` call MUST be followed by `sort_children_of()` — this is the canonical pattern; `sort_children_of_pub` enables callers outside TreeState (from: sort-order-fix_20260228, 2026-02-28)
 
-Last refreshed: 2026-02-28 (sort-order-fix_20260228 completed)
+- `portable-pty` for cross-platform PTY creation; `MasterPty` trait allows resize and writer/reader cloning (from: terminal-panel_20260228, archived 2026-02-28)
+- PTY reader must use `spawn_blocking` (not `spawn`) because `Read` is blocking I/O — then bridge to async via mpsc channel (from: terminal-panel_20260228, archived 2026-02-28)
+- VTE `Performer` struct must be separated from `TerminalEmulator` to avoid borrow checker issues — `vte::Parser::advance()` needs `&mut` on both parser and performer simultaneously (from: terminal-panel_20260228, archived 2026-02-28)
+- Terminal input must be routed BEFORE general global keys in handler — `q` should type 'q' in terminal, not quit the app (from: terminal-panel_20260228, archived 2026-02-28)
+- `key_event_to_bytes()` converts crossterm KeyEvents to VT100/xterm byte sequences for PTY input (from: terminal-panel_20260228, archived 2026-02-28)
+- Tab must be forwarded to PTY for shell autocompletion — do NOT intercept it for focus cycling when terminal is focused (from: terminal-panel_20260228, archived 2026-02-28)
+- Conditional vertical layout: `[main, terminal, status]` when terminal visible, `[main, status]` when hidden — use `Constraint::Length` for terminal rows from height_percent (from: terminal-panel_20260228, archived 2026-02-28)
+- PTY resize notification must be sent alongside emulator `resize()` on every layout change to keep grid and PTY in sync (from: terminal-panel_20260228, archived 2026-02-28)
+
+Last refreshed: 2026-02-28 (terminal-panel_20260228 archived)
