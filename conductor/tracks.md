@@ -20,5 +20,5 @@
 
 ---
 
-## [~] Track: Focus Navigation Keybinding Remap (Ctrl+Arrow directional focus, Ctrl+Shift+Arrow resize)
+## [x] Track: Focus Navigation Keybinding Remap (Ctrl+Arrow directional focus, Ctrl+Shift+Arrow resize)
 *Link: [./conductor/tracks/focus-nav-remap_20260228/](./conductor/tracks/focus-nav-remap_20260228/)*
