@@ -157,6 +157,8 @@ fm --theme light
 | `Ctrl+F` | Find |
 | `Ctrl+H` | Find & Replace |
 | `Ctrl+A` (in replace) | Replace all |
+| Mouse click | Position cursor at click point |
+| Scroll wheel | Scroll editor viewport |
 
 ### Terminal Panel
 

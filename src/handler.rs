@@ -15,7 +15,13 @@ pub fn handle_mouse_event(
     mouse: MouseEvent,
     _event_tx: &mpsc::UnboundedSender<Event>,
 ) {
-    // Only handle mouse in Normal mode
+    // Handle mouse in Edit mode for editor cursor positioning
+    if app.mode == AppMode::Edit {
+        handle_editor_mouse(app, mouse);
+        return;
+    }
+
+    // Only handle mouse in Normal mode for other panels
     if app.mode != AppMode::Normal {
         return;
     }
@@ -80,6 +86,58 @@ pub fn handle_mouse_event(
             } else if app.terminal_state.visible && is_in_rect(col, row, app.terminal_area) {
                 app.terminal_state.scroll_offset =
                     app.terminal_state.scroll_offset.saturating_sub(1);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Handle mouse events when in editor mode.
+fn handle_editor_mouse(app: &mut App, mouse: MouseEvent) {
+    let col = mouse.column;
+    let row = mouse.row;
+
+    // Only handle clicks within the preview/editor area
+    if !is_in_rect(col, row, app.preview_area) {
+        return;
+    }
+
+    match mouse.kind {
+        MouseEventKind::Down(MouseButton::Left) => {
+            if let Some(ref mut editor) = app.editor_state {
+                // Calculate inner area (subtract border: 1px each side)
+                let inner_x = app.preview_area.x + 1;
+                let inner_y = app.preview_area.y + 1;
+                let gutter_w = editor.gutter_width();
+
+                // Code area starts after gutter
+                let code_x = inner_x + gutter_w;
+
+                // Calculate clicked line (relative to viewport + scroll offset)
+                let click_row = row.saturating_sub(inner_y) as usize;
+                let target_line = editor.scroll_offset + click_row;
+
+                // Calculate clicked column (relative to code area start)
+                let target_col = if col >= code_x {
+                    (col - code_x) as usize
+                } else {
+                    0 // Clicked in gutter — go to start of line
+                };
+
+                editor.set_cursor_position(target_line, target_col);
+            }
+        }
+        MouseEventKind::ScrollUp => {
+            if let Some(ref mut editor) = app.editor_state {
+                editor.scroll_offset = editor.scroll_offset.saturating_sub(3);
+                editor.ensure_cursor_visible();
+            }
+        }
+        MouseEventKind::ScrollDown => {
+            if let Some(ref mut editor) = app.editor_state {
+                let max_scroll = editor.line_count().saturating_sub(1);
+                editor.scroll_offset = (editor.scroll_offset + 3).min(max_scroll);
+                editor.ensure_cursor_visible();
             }
         }
         _ => {}

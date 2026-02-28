@@ -240,6 +240,14 @@ const EDITOR_KEYS: &[KeyEntry] = &[
         key: "Ctrl+A (in replace)",
         description: "Replace all",
     },
+    KeyEntry {
+        key: "Mouse click",
+        description: "Position cursor at click point",
+    },
+    KeyEntry {
+        key: "Scroll wheel",
+        description: "Scroll editor viewport",
+    },
 ];
 
 const TERMINAL_KEYS: &[KeyEntry] = &[

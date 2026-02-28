@@ -162,6 +162,29 @@ impl EditorState {
         self.buffer.len()
     }
 
+    /// Width of the line number gutter (digits + space + separator).
+    pub fn gutter_width(&self) -> u16 {
+        let max_line = self.line_count();
+        let digits = if max_line == 0 {
+            1
+        } else {
+            (max_line as f64).log10().floor() as u16 + 1
+        };
+        digits + 2
+    }
+
+    /// Set the cursor to a specific line and column, clamping to valid bounds.
+    pub fn set_cursor_position(&mut self, line: usize, col: usize) {
+        self.cursor_line = line.min(self.buffer.len().saturating_sub(1));
+        let line_len = self
+            .buffer
+            .get(self.cursor_line)
+            .map(|l| l.len())
+            .unwrap_or(0);
+        self.cursor_col = col.min(line_len);
+        self.ensure_cursor_visible();
+    }
+
     /// Get the length of the current line.
     pub fn current_line_len(&self) -> usize {
         self.buffer
