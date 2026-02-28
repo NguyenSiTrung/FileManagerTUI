@@ -916,14 +916,14 @@ show head+tail.
 
 ---
 
-### Milestone 6: File Watcher + Auto-Refresh
+### Milestone 6: File Watcher + Auto-Refresh ✅
 **Goal**: Tree updates automatically when files change externally.
 
-- [ ] `fs/watcher.rs`: `notify` crate watcher with debouncing
-- [ ] Event channel: watcher → main event loop
-- [ ] `app.rs`: Handle `FsEvent` — refresh affected subtree
-- [ ] Preserve selection and scroll position on refresh
-- [ ] `config.rs`: Watcher enable/disable + debounce config
+- [x] `fs/watcher.rs`: `notify` crate watcher with debouncing
+- [x] Event channel: watcher → main event loop
+- [x] `app.rs`: Handle `FsEvent` — refresh affected subtree
+- [x] Preserve selection and scroll position on refresh
+- [x] `config.rs`: Watcher enable/disable + debounce config
 
 **Deliverable**: Creating a file via `touch` in another terminal appears
 automatically in the tree.
