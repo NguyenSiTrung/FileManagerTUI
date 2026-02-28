@@ -68,6 +68,14 @@ const NAVIGATION_KEYS: &[KeyEntry] = &[
         key: "Esc",
         description: "Clear multi-selection",
     },
+    KeyEntry {
+        key: "s",
+        description: "Cycle sort (name → size → modified)",
+    },
+    KeyEntry {
+        key: "S",
+        description: "Toggle dirs first",
+    },
 ];
 
 const FILE_OPS_KEYS: &[KeyEntry] = &[

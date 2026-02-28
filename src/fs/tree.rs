@@ -72,8 +72,8 @@ impl TreeNode {
 
     /// Load children for a directory node.
     ///
-    /// Reads the directory contents, creates child `TreeNode`s, and sorts them
-    /// with directories first, then alphabetical (case-insensitive).
+    /// Reads the directory contents, creates child `TreeNode`s.
+    /// Sorting is applied separately via `TreeState::sort_children_of`.
     /// Permission-denied and broken symlinks are silently skipped.
     pub fn load_children(&mut self) -> Result<()> {
         if self.node_type != NodeType::Directory {
@@ -86,20 +86,13 @@ impl TreeNode {
         for entry in entries {
             let entry = match entry {
                 Ok(e) => e,
-                Err(_) => continue, // skip permission-denied entries
+                Err(_) => continue,
             };
             match TreeNode::new(&entry.path(), self.depth + 1) {
                 Ok(node) => children.push(node),
-                Err(_) => continue, // skip broken symlinks or inaccessible nodes
+                Err(_) => continue,
             }
         }
-
-        // Sort: directories first, then alphabetical case-insensitive
-        children.sort_by(|a, b| {
-            let dir_order = matches!(b.node_type, NodeType::Directory)
-                .cmp(&matches!(a.node_type, NodeType::Directory));
-            dir_order.then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
-        });
 
         self.children = Some(children);
         Ok(())
@@ -119,6 +112,46 @@ pub struct FlatItem {
     pub is_hidden: bool,
 }
 
+/// Sort criteria for the tree.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SortBy {
+    /// Alphabetical (case-insensitive), default.
+    Name,
+    /// By file size (largest first).
+    Size,
+    /// By modification time (newest first).
+    Modified,
+}
+
+impl SortBy {
+    /// Parse sort_by from config string.
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "size" => SortBy::Size,
+            "modified" => SortBy::Modified,
+            _ => SortBy::Name,
+        }
+    }
+
+    /// Get the display label for the current sort.
+    pub fn label(&self) -> &'static str {
+        match self {
+            SortBy::Name => "Name",
+            SortBy::Size => "Size",
+            SortBy::Modified => "Modified",
+        }
+    }
+
+    /// Cycle to the next sort option.
+    pub fn next(&self) -> Self {
+        match self {
+            SortBy::Name => SortBy::Size,
+            SortBy::Size => SortBy::Modified,
+            SortBy::Modified => SortBy::Name,
+        }
+    }
+}
+
 /// State for the tree view.
 pub struct TreeState {
     pub root: TreeNode,
@@ -132,6 +165,10 @@ pub struct TreeState {
     pub filter_query: String,
     /// Whether the tree is currently being filtered.
     pub is_filtering: bool,
+    /// Current sort criteria.
+    pub sort_by: SortBy,
+    /// Whether directories are shown before files.
+    pub dirs_first: bool,
 }
 
 impl TreeState {
@@ -152,7 +189,10 @@ impl TreeState {
             multi_selected: HashSet::new(),
             filter_query: String::new(),
             is_filtering: false,
+            sort_by: SortBy::Name,
+            dirs_first: true,
         };
+        state.sort_all_children();
         state.flatten();
         Ok(state)
     }
@@ -224,9 +264,12 @@ impl TreeState {
             return;
         }
         let path = selected.path.clone();
+        let sort_by = self.sort_by.clone();
+        let dirs_first = self.dirs_first;
         if let Some(node) = Self::find_node_mut(&mut self.root, &path) {
             if !node.is_expanded {
                 let _ = node.load_children();
+                Self::sort_children_of(node, &sort_by, dirs_first);
                 node.is_expanded = true;
                 self.flatten();
             }
@@ -291,9 +334,12 @@ impl TreeState {
 
     /// Reload a specific directory's children and re-flatten.
     pub fn reload_dir(&mut self, dir_path: &Path) {
+        let sort_by = self.sort_by.clone();
+        let dirs_first = self.dirs_first;
         if let Some(node) = Self::find_node_mut(&mut self.root, dir_path) {
             if node.node_type == NodeType::Directory {
                 let _ = node.load_children();
+                Self::sort_children_of(node, &sort_by, dirs_first);
                 self.flatten();
             }
         }
@@ -302,6 +348,57 @@ impl TreeState {
     /// Toggle visibility of hidden files and re-flatten.
     pub fn toggle_hidden(&mut self) {
         self.show_hidden = !self.show_hidden;
+        self.flatten();
+    }
+
+    /// Sort a node's children (non-recursive, just immediate children).
+    fn sort_children_of(node: &mut TreeNode, sort_by: &SortBy, dirs_first: bool) {
+        if let Some(children) = &mut node.children {
+            children.sort_by(|a, b| {
+                let mut cmp = std::cmp::Ordering::Equal;
+
+                if dirs_first {
+                    cmp = matches!(b.node_type, NodeType::Directory)
+                        .cmp(&matches!(a.node_type, NodeType::Directory));
+                }
+
+                cmp.then_with(|| match sort_by {
+                    SortBy::Name => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+                    SortBy::Size => b.meta.size.cmp(&a.meta.size),
+                    SortBy::Modified => b.meta.modified.cmp(&a.meta.modified),
+                })
+            });
+        }
+    }
+
+    /// Recursively sort all loaded children in the tree.
+    fn sort_all_children_recursive(node: &mut TreeNode, sort_by: &SortBy, dirs_first: bool) {
+        Self::sort_children_of(node, sort_by, dirs_first);
+        if let Some(children) = &mut node.children {
+            for child in children.iter_mut() {
+                Self::sort_all_children_recursive(child, sort_by, dirs_first);
+            }
+        }
+    }
+
+    /// Sort all children in the entire tree and re-flatten.
+    pub fn sort_all_children(&mut self) {
+        let sort_by = self.sort_by.clone();
+        let dirs_first = self.dirs_first;
+        Self::sort_all_children_recursive(&mut self.root, &sort_by, dirs_first);
+    }
+
+    /// Cycle to the next sort mode and re-sort.
+    pub fn cycle_sort(&mut self) {
+        self.sort_by = self.sort_by.next();
+        self.sort_all_children();
+        self.flatten();
+    }
+
+    /// Toggle dirs_first and re-sort.
+    pub fn toggle_dirs_first(&mut self) {
+        self.dirs_first = !self.dirs_first;
+        self.sort_all_children();
         self.flatten();
     }
 
@@ -515,21 +612,62 @@ mod tests {
     }
 
     #[test]
-    fn load_children_sorts_dirs_first() {
+    fn tree_state_sorts_dirs_first_by_default() {
         let dir = setup_test_dir();
-        let mut node = TreeNode::new(dir.path(), 0).unwrap();
-        node.load_children().unwrap();
+        let state = TreeState::new(dir.path()).unwrap();
 
-        let children = node.children.as_ref().unwrap();
-        // Directories should come first (hidden .hidden is a file, then alpha, beta are dirs)
-        let dir_count = children
+        // After TreeState::new, children should be sorted: dirs first (alpha, beta) then files
+        // flat_items[0] is root
+        assert_eq!(state.flat_items[1].name, "alpha");
+        assert_eq!(state.flat_items[2].name, "beta");
+    }
+
+    #[test]
+    fn cycle_sort_changes_mode() {
+        let dir = setup_test_dir();
+        let mut state = TreeState::new(dir.path()).unwrap();
+        assert_eq!(state.sort_by, SortBy::Name);
+        state.cycle_sort();
+        assert_eq!(state.sort_by, SortBy::Size);
+        state.cycle_sort();
+        assert_eq!(state.sort_by, SortBy::Modified);
+        state.cycle_sort();
+        assert_eq!(state.sort_by, SortBy::Name);
+    }
+
+    #[test]
+    fn toggle_dirs_first() {
+        let dir = setup_test_dir();
+        let mut state = TreeState::new(dir.path()).unwrap();
+        assert!(state.dirs_first);
+        state.toggle_dirs_first();
+        assert!(!state.dirs_first);
+        state.toggle_dirs_first();
+        assert!(state.dirs_first);
+    }
+
+    #[test]
+    fn sort_by_size() {
+        let dir = setup_test_dir();
+        // Write different amounts to files to give them different sizes
+        std::fs::write(dir.path().join("file_a.txt"), "small").unwrap();
+        std::fs::write(dir.path().join("file_b.rs"), "this is a much larger file content").unwrap();
+
+        let mut state = TreeState::new(dir.path()).unwrap();
+        state.sort_by = SortBy::Size;
+        state.sort_all_children();
+        state.flatten();
+
+        // With dirs_first=true, dirs come first, then files by decreasing size
+        // file_b.rs is larger than file_a.txt
+        let file_items: Vec<&FlatItem> = state
+            .flat_items
             .iter()
-            .take_while(|c| c.node_type == NodeType::Directory)
-            .count();
-        // alpha and beta are directories
-        assert_eq!(dir_count, 2);
-        assert_eq!(children[0].name, "alpha");
-        assert_eq!(children[1].name, "beta");
+            .filter(|i| i.node_type == NodeType::File)
+            .collect();
+        assert!(file_items.len() >= 2);
+        assert_eq!(file_items[0].name, "file_b.rs");
+        assert_eq!(file_items[1].name, "file_a.txt");
     }
 
     #[test]

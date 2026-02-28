@@ -190,6 +190,10 @@ impl App {
         let mut tree_state = TreeState::new(path)?;
         // Apply config: show_hidden
         tree_state.show_hidden = config.show_hidden();
+        // Apply config: sort settings
+        tree_state.sort_by = crate::fs::tree::SortBy::from_str(config.sort_by());
+        tree_state.dirs_first = config.dirs_first();
+        tree_state.sort_all_children();
         tree_state.flatten();
 
         let syntax_set = SyntaxSet::load_defaults_newlines();

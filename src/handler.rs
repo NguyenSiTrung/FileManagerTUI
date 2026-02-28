@@ -189,6 +189,23 @@ fn handle_tree_keys(app: &mut App, key: KeyEvent, event_tx: &mpsc::UnboundedSend
             }
         }
 
+        // Sort options
+        KeyCode::Char('s') => {
+            app.tree_state.cycle_sort();
+            app.set_status_message(format!("Sort: {}", app.tree_state.sort_by.label()));
+        }
+        KeyCode::Char('S') => {
+            app.tree_state.toggle_dirs_first();
+            app.set_status_message(format!(
+                "Dirs first: {}",
+                if app.tree_state.dirs_first {
+                    "on"
+                } else {
+                    "off"
+                }
+            ));
+        }
+
         _ => {}
     }
 }
