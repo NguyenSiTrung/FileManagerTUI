@@ -125,6 +125,8 @@ pub enum AppMode {
     Search,
     Filter,
     Help,
+    #[allow(dead_code)]
+    Edit,
 }
 
 /// State for a dialog's text input.

@@ -104,7 +104,15 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent, event_tx: &mpsc::Unbounded
         AppMode::Search => handle_search_mode(app, key),
         AppMode::Filter => handle_filter_mode(app, key),
         AppMode::Help => handle_help_mode(app, key),
+        AppMode::Edit => handle_editor_keys(app, key),
     }
+}
+
+/// Handle keys when in Edit mode (editing a file in the preview panel).
+#[allow(dead_code)]
+fn handle_editor_keys(_app: &mut App, _key: KeyEvent) {
+    // Phase 2 will implement the full editor key handling.
+    // For now, Esc exits edit mode.
 }
 
 fn handle_normal_mode(app: &mut App, key: KeyEvent, event_tx: &mpsc::UnboundedSender<Event>) {
