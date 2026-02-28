@@ -52,6 +52,7 @@ async fn main() -> error::Result<()> {
             Event::Resize(_, _) => {}
             Event::Progress(update) => app.handle_progress(update),
             Event::OperationComplete(result) => app.handle_operation_complete(result),
+            Event::FsChange(_paths) => { /* Handled in Phase 2 */ }
         }
 
         if app.should_quit {

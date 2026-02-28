@@ -49,6 +49,8 @@ pub enum Event {
     Progress(ProgressUpdate),
     /// Async file operation completed.
     OperationComplete(OperationResult),
+    /// Filesystem change detected by watcher.
+    FsChange(Vec<PathBuf>),
 }
 
 /// Async event handler that polls crossterm events and forwards them via a channel.
