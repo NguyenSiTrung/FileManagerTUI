@@ -862,11 +862,23 @@ impl App {
             return false;
         }
 
+        // Warn about large files
+        let file_size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+        let max_preview = self.config.max_full_preview_bytes();
+        if file_size > max_preview {
+            self.set_status_message(format!(
+                "⚠ Large file ({:.1} KB) — editing may be slow",
+                file_size as f64 / 1024.0
+            ));
+        }
+
         // Load file into editor state
         match EditorState::from_file(&path) {
             Ok(state) => {
                 self.editor_state = Some(state);
                 self.mode = AppMode::Edit;
+                // Pause watcher to avoid conflicts during editing
+                self.watcher_active = false;
                 true
             }
             Err(e) => {
@@ -881,6 +893,8 @@ impl App {
     pub fn exit_edit_mode(&mut self) {
         self.editor_state = None;
         self.mode = AppMode::Normal;
+        // Resume watcher
+        self.watcher_active = true;
         // Force re-preview of the current file to reflect any saved changes
         self.last_previewed_index = None;
     }

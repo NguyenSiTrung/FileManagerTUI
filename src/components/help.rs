@@ -173,6 +173,73 @@ const PREVIEW_KEYS: &[KeyEntry] = &[
         key: "+ / -",
         description: "Adjust head/tail lines",
     },
+    KeyEntry {
+        key: "e",
+        description: "Enter edit mode",
+    },
+];
+
+const EDITOR_KEYS: &[KeyEntry] = &[
+    KeyEntry {
+        key: "Esc",
+        description: "Exit edit mode (prompt if unsaved)",
+    },
+    KeyEntry {
+        key: "Ctrl+S",
+        description: "Save file",
+    },
+    KeyEntry {
+        key: "Arrows",
+        description: "Move cursor",
+    },
+    KeyEntry {
+        key: "Home / End",
+        description: "Start / end of line",
+    },
+    KeyEntry {
+        key: "Ctrl+Home/End",
+        description: "Top / bottom of file",
+    },
+    KeyEntry {
+        key: "PgUp / PgDn",
+        description: "Page up / page down",
+    },
+    KeyEntry {
+        key: "Tab / Shift+Tab",
+        description: "Indent / dedent",
+    },
+    KeyEntry {
+        key: "Ctrl+Z",
+        description: "Undo",
+    },
+    KeyEntry {
+        key: "Ctrl+Y",
+        description: "Redo",
+    },
+    KeyEntry {
+        key: "Ctrl+C",
+        description: "Copy line",
+    },
+    KeyEntry {
+        key: "Ctrl+X",
+        description: "Cut line",
+    },
+    KeyEntry {
+        key: "Ctrl+V",
+        description: "Paste",
+    },
+    KeyEntry {
+        key: "Ctrl+F",
+        description: "Find",
+    },
+    KeyEntry {
+        key: "Ctrl+H",
+        description: "Find & Replace",
+    },
+    KeyEntry {
+        key: "Ctrl+A (in replace)",
+        description: "Replace all",
+    },
 ];
 
 const TERMINAL_KEYS: &[KeyEntry] = &[
@@ -245,6 +312,10 @@ const CATEGORIES: &[KeyCategory] = &[
     KeyCategory {
         name: "Preview Panel",
         entries: PREVIEW_KEYS,
+    },
+    KeyCategory {
+        name: "Editor Mode (Preview)",
+        entries: EDITOR_KEYS,
     },
     KeyCategory {
         name: "Terminal Panel",
