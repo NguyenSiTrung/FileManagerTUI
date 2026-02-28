@@ -15,6 +15,13 @@
 | `clap` | 4 | CLI argument parsing (derive macros) |
 | `syntect` | 5 | Syntax highlighting for file preview |
 | `fuzzy-matcher` | 0.3 | Fuzzy string matching for file search |
+| `thiserror` | 1 | Ergonomic error type derivation |
+| `serde_json` | 1 | JSON parsing (Jupyter notebook .ipynb files) |
+
+### Planned for Milestone 7 (Configuration + Polish)
+
+| Crate | Version | Purpose |
+|-------|---------|---------|
 | `unicode-width` | 0.2 | Correct character width (CJK, emoji) |
 | `serde` | 1 | Config file deserialization (derive feature) |
 | `toml` | 0.8 | TOML config file parsing |

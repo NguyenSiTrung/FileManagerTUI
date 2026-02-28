@@ -93,21 +93,25 @@ experience in any terminal, including web-based terminals in KubeFlow pods.
 ```
 file-manager-tui/
 ├── Cargo.toml
-├── config/
-│   └── default.toml            # Default configuration shipped with binary
+├── config/                         # [Planned: M7] Default config shipped with binary
+│   └── default.toml
 ├── src/
 │   ├── main.rs                 # Entry point: CLI parsing, terminal setup/teardown
 │   ├── app.rs                  # App state machine, central state holder
 │   ├── event.rs                # Event loop: crossterm poll + fs watcher channel
 │   ├── handler.rs              # Maps key/mouse events → actions per app mode
 │   ├── ui.rs                   # Master layout: splits terminal into panels
-│   ├── config.rs               # Config loading: CLI args → file → defaults
+│   ├── tui.rs                  # Terminal init/restore helpers (crossterm setup)
+│   ├── error.rs                # AppError type via thiserror
+│   ├── preview_content.rs      # Preview content loading: syntax highlighting,
+│   │                           #   large file head+tail, binary/dir/notebook detection
+│   ├── config.rs               # [Planned: M7] Config loading: CLI args → file → defaults
 │   ├── components/
 │   │   ├── mod.rs              # Re-exports
 │   │   ├── tree.rs             # Folder tree StatefulWidget
 │   │   ├── preview.rs          # File preview StatefulWidget
 │   │   ├── status_bar.rs       # Bottom bar widget
-│   │   ├── dialog.rs           # Modal dialog widget (input, confirm)
+│   │   ├── dialog.rs           # Modal dialog widget (input, confirm, progress)
 │   │   └── search.rs           # Fuzzy search overlay widget
 │   └── fs/
 │       ├── mod.rs              # Re-exports
@@ -115,10 +119,7 @@ file-manager-tui/
 │       ├── operations.rs       # Filesystem CRUD with error handling
 │       ├── watcher.rs          # File system watcher (notify crate)
 │       └── clipboard.rs        # Copy/cut buffer management
-└── tests/
-    ├── tree_tests.rs           # Unit tests for tree operations
-    ├── operations_tests.rs     # Unit tests for fs operations
-    └── integration_tests.rs    # Full app integration tests
+└── # Tests are inline modules (#[cfg(test)] mod tests) within each source file
 ```
 
 ---

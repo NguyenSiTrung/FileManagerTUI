@@ -1,0 +1,30 @@
+{
+    "last_refresh": "2026-02-28T09:27:00+07:00",
+    "scope": "all",
+    "changes_applied": [
+        "tech-stack.md: Added thiserror + serde_json to core deps, moved unicode-width/serde/toml/dirs to planned M7 section",
+        "PLAN.md §3: Updated project structure to reflect actual layout (preview_content.rs, tui.rs, error.rs, inline tests)",
+        "Beads sync: Closed 24 tasks across 4 archived tracks (core-loop-tree, file-ops-dialogs, preview-panel, fuzzy-search)"
+    ],
+    "drift_detected": {
+        "tech_stack": [
+            "thiserror undocumented",
+            "serde_json undocumented",
+            "M7 deps listed but not yet in Cargo.toml"
+        ],
+        "project_structure": [
+            "preview_content.rs exists but not in plan",
+            "tui.rs exists but not in plan",
+            "tests/ dir in plan but tests are inline"
+        ],
+        "beads": [
+            "24 tasks from 4 archived tracks were open, now closed"
+        ],
+        "no_drift": [
+            "product.md",
+            "workflow.md",
+            "tracks.md",
+            "patterns.md"
+        ]
+    }
+}
