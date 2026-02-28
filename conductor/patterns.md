@@ -67,4 +67,11 @@ This file is the project's institutional knowledge - learnings extracted from co
 - `flatten_node_filtered` recurses children first to decide parent inclusion — parent appears only if it or a descendant matches (from: fuzzy-search_20260228, 2026-02-28)
 - `fuzzy_matcher::FuzzyMatcher` trait must be imported for `fuzzy_indices` method (from: fuzzy-search_20260228, 2026-02-28)
 
-Last refreshed: 2026-02-28 (fuzzy-search_20260228 completed)
+- `notify-debouncer-mini` v0.5 callback type is `Result<Vec<DebouncedEvent>, notify::Error>` (not `Vec<Error>`) — must annotate closure explicitly for type inference (from: file-watcher_20260228, archived 2026-02-28)
+- `FsWatcher` uses `Arc<AtomicBool>` for pause/resume — keeps inotify watches alive, avoids expensive re-registration (from: file-watcher_20260228, archived 2026-02-28)
+- State preservation on tree refresh: capture (selected path, scroll, expanded set) → reload subtrees → restore_expanded → flatten → restore selection by path lookup → clamp scroll (from: file-watcher_20260228, archived 2026-02-28)
+- `handle_fs_change()` deduplicates parent directories before reloading to avoid redundant I/O (from: file-watcher_20260228, archived 2026-02-28)
+- Watcher sync in main loop: compare `app.watcher_active` vs `watcher.is_active()` each iteration to keep them in sync (from: file-watcher_20260228, archived 2026-02-28)
+- Graceful degradation for optional subsystems: wrap initialization in match, set state flag to false, show status message on error (from: file-watcher_20260228, archived 2026-02-28)
+
+Last refreshed: 2026-02-28 (file-watcher_20260228 archived)
