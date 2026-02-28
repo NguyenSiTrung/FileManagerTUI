@@ -543,7 +543,7 @@ impl TreeState {
     pub fn restore_expanded(&mut self, expanded: &HashSet<PathBuf>) {
         let sort_by = self.sort_by.clone();
         let dirs_first = self.dirs_first;
-        for path in expanded {
+        for path in Self::expanded_paths_in_restore_order(expanded) {
             if let Some(node) = Self::find_node_mut(&mut self.root, path) {
                 if node.node_type == NodeType::Directory && !node.is_expanded {
                     let _ = node.load_children();
@@ -552,6 +552,18 @@ impl TreeState {
                 }
             }
         }
+    }
+
+    /// Return expanded paths sorted so ancestors are restored before descendants.
+    fn expanded_paths_in_restore_order(expanded: &HashSet<PathBuf>) -> Vec<&PathBuf> {
+        let mut ordered: Vec<&PathBuf> = expanded.iter().collect();
+        ordered.sort_by(|a, b| {
+            a.components()
+                .count()
+                .cmp(&b.components().count())
+                .then_with(|| a.cmp(b))
+        });
+        ordered
     }
 
     /// Find the nearest surviving sibling or parent for a deleted path.
@@ -956,5 +968,70 @@ mod tests {
         state.flatten();
         let alpha = state.flat_items.iter().find(|i| i.name == "alpha").unwrap();
         assert!(alpha.is_expanded);
+    }
+
+    #[test]
+    fn expanded_restore_order_is_parent_first() {
+        let root = PathBuf::from("/tmp/root");
+        let alpha = root.join("alpha");
+        let nested = alpha.join("nested");
+
+        let mut expanded = HashSet::new();
+        expanded.insert(nested.clone());
+        expanded.insert(root.clone());
+        expanded.insert(alpha.clone());
+
+        let ordered = TreeState::expanded_paths_in_restore_order(&expanded);
+        let ordered_paths: Vec<PathBuf> = ordered.into_iter().cloned().collect();
+
+        assert_eq!(ordered_paths, vec![root, alpha, nested]);
+    }
+
+    #[test]
+    fn restore_expanded_re_expands_nested_dir() {
+        let dir = setup_test_dir();
+        let nested_file = dir.path().join("alpha").join("nested").join("deep.txt");
+        File::create(&nested_file).unwrap();
+
+        let mut state = TreeState::new(dir.path()).unwrap();
+        let alpha_path = dir.path().join("alpha");
+        let nested_path = alpha_path.join("nested");
+
+        let alpha_idx = state.find_index_by_path(&alpha_path).unwrap();
+        state.selected_index = alpha_idx;
+        state.expand_selected();
+
+        let nested_idx = state.find_index_by_path(&nested_path).unwrap();
+        state.selected_index = nested_idx;
+        state.expand_selected();
+
+        let expanded = state.collect_expanded_paths();
+
+        // Simulate watcher refresh of root: this recreates root children as collapsed nodes.
+        state.reload_dir(dir.path());
+        let alpha_before = state
+            .flat_items
+            .iter()
+            .find(|i| i.path == alpha_path)
+            .expect("alpha should exist after reload");
+        assert!(!alpha_before.is_expanded);
+
+        state.restore_expanded(&expanded);
+        state.flatten();
+
+        let alpha_after = state
+            .flat_items
+            .iter()
+            .find(|i| i.path == alpha_path)
+            .expect("alpha should exist after restore");
+        assert!(alpha_after.is_expanded);
+
+        let nested_after = state
+            .flat_items
+            .iter()
+            .find(|i| i.path == nested_path)
+            .expect("nested should exist after restore");
+        assert!(nested_after.is_expanded);
+        assert!(state.flat_items.iter().any(|i| i.path == nested_file));
     }
 }

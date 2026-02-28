@@ -1,4 +1,6 @@
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use crossterm::event::{
+    KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
 use tokio::sync::mpsc;
 
 use crate::app::{App, AppMode, DialogKind, FocusedPanel};
@@ -85,6 +87,11 @@ fn is_in_rect(col: u16, row: u16, rect: ratatui::layout::Rect) -> bool {
 
 /// Handle a key event and dispatch to the appropriate app method.
 pub fn handle_key_event(app: &mut App, key: KeyEvent, event_tx: &mpsc::UnboundedSender<Event>) {
+    // Ignore key release events to prevent duplicate actions from press/release pairs.
+    if key.kind == KeyEventKind::Release {
+        return;
+    }
+
     match &app.mode {
         AppMode::Normal => handle_normal_mode(app, key, event_tx),
         AppMode::Dialog(_) => handle_dialog_mode(app, key),
@@ -553,6 +560,22 @@ mod tests {
         assert_eq!(app.tree_state.flat_items[1].name, "alpha");
         handle_key(&mut app, make_key(KeyCode::Enter));
         assert!(app.tree_state.flat_items[1].is_expanded);
+    }
+
+    #[test]
+    fn key_release_event_is_ignored() {
+        let (_dir, mut app) = setup_app();
+        assert_eq!(app.tree_state.selected_index, 0);
+
+        handle_key(&mut app, make_key(KeyCode::Char('j')));
+        assert_eq!(app.tree_state.selected_index, 1);
+
+        let mut release_j = make_key(KeyCode::Char('j'));
+        release_j.kind = KeyEventKind::Release;
+        handle_key(&mut app, release_j);
+
+        // Selection should not move again on key release.
+        assert_eq!(app.tree_state.selected_index, 1);
     }
 
     #[test]
