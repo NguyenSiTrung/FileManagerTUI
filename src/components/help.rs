@@ -182,11 +182,11 @@ const TERMINAL_KEYS: &[KeyEntry] = &[
     },
     KeyEntry {
         key: "Esc",
-        description: "Return focus to tree panel",
+        description: "Leave terminal (focus → tree)",
     },
     KeyEntry {
         key: "Tab",
-        description: "Cycle focus between panels",
+        description: "Shell autocompletion (sent to PTY)",
     },
     KeyEntry {
         key: "Shift+↑/↓",

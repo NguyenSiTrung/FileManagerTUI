@@ -286,11 +286,10 @@ fn handle_terminal_keys(app: &mut App, key: KeyEvent) {
             app.focused_panel = FocusedPanel::Tree;
             return;
         }
-        // Tab cycles focus (same as global)
-        KeyCode::Tab => {
-            app.toggle_focus();
-            return;
-        }
+        // Note: Tab is NOT intercepted here — it is forwarded to the PTY
+        // for shell autocompletion (e.g. `cd <Tab>`).
+        // Use Esc or Ctrl+T to leave the terminal panel.
+        //
         // Scrollback navigation (Shift+Up/Down)
         KeyCode::Up if key.modifiers.contains(KeyModifiers::SHIFT) => {
             if app.terminal_state.scroll_offset < app.terminal_state.emulator.total_lines().saturating_sub(app.terminal_state.emulator.visible_rows()) {
