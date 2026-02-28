@@ -86,5 +86,6 @@ This file is the project's institutional knowledge - learnings extracted from co
 - Clone sort fields (sort_by, dirs_first) before `find_node_mut` to avoid borrow checker conflict on `&mut self` (from: config-polish_20260228, archived 2026-02-28)
 - `SortBy::next()` enum cycling — clean pattern without index arithmetic for mode cycling (from: config-polish_20260228, archived 2026-02-28)
 - Must account for border offset (y+1) when mapping mouse click row to flat_items index in bordered widgets (from: config-polish_20260228, archived 2026-02-28)
+- Every `load_children()` call MUST be followed by `sort_children_of()` — this is the canonical pattern; `sort_children_of_pub` enables callers outside TreeState (from: sort-order-fix_20260228, 2026-02-28)
 
-Last refreshed: 2026-02-28 (config-polish_20260228 archived)
+Last refreshed: 2026-02-28 (sort-order-fix_20260228 completed)

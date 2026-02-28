@@ -14,5 +14,5 @@
 
 ---
 
-## [~] Track: Sort Order Lost After File Watcher Refresh
+## [x] Track: Sort Order Lost After File Watcher Refresh
 *Link: [./conductor/tracks/sort-order-fix_20260228/](./conductor/tracks/sort-order-fix_20260228/)*
