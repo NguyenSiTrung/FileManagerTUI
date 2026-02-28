@@ -3,6 +3,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
+use fuzzy_matcher::skim::SkimMatcherV2;
+use fuzzy_matcher::FuzzyMatcher;
 use ratatui::text::Line;
 use syntect::highlighting::Theme;
 use syntect::parsing::SyntaxSet;
@@ -78,12 +80,43 @@ pub struct PreviewState {
     pub tail_lines: usize,
 }
 
+/// A single fuzzy search result.
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct SearchResult {
+    /// The relative path string.
+    pub path: PathBuf,
+    /// Display string (relative path from root).
+    pub display: String,
+    /// Match score from fuzzy-matcher.
+    pub score: i64,
+    /// Indices of matched characters in the display string.
+    pub match_indices: Vec<usize>,
+}
+
+/// State for the fuzzy finder overlay (Ctrl+P).
+#[derive(Debug, Default)]
+pub struct SearchState {
+    /// Current search query string.
+    pub query: String,
+    /// Cursor position within the query.
+    pub cursor_position: usize,
+    /// Filtered and scored results.
+    pub results: Vec<SearchResult>,
+    /// Currently selected result index.
+    pub selected_index: usize,
+    /// Cached file path index (lazily built, invalidated on tree mutations).
+    pub cached_paths: Option<Vec<PathBuf>>,
+}
+
 /// Application mode.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub enum AppMode {
     #[default]
     Normal,
     Dialog(DialogKind),
+    Search,
+    Filter,
 }
 
 /// State for a dialog's text input.
@@ -128,6 +161,10 @@ pub struct App {
     pub cancel_token: Arc<AtomicBool>,
     /// Last reversible operation (single-level undo).
     pub last_undo: Option<UndoAction>,
+    /// State for the fuzzy finder overlay (Ctrl+P).
+    pub search_state: SearchState,
+    /// Fuzzy matcher instance (reused across searches).
+    pub fuzzy_matcher: SkimMatcherV2,
 }
 
 impl App {
@@ -150,6 +187,8 @@ impl App {
             clipboard: ClipboardState::new(),
             cancel_token: Arc::new(AtomicBool::new(false)),
             last_undo: None,
+            search_state: SearchState::default(),
+            fuzzy_matcher: SkimMatcherV2::default(),
         })
     }
 
@@ -799,6 +838,238 @@ impl App {
     pub fn toggle_hidden(&mut self) {
         self.tree_state.toggle_hidden();
     }
+
+    // === Search (Ctrl+P) methods ===
+
+    /// Open the fuzzy finder overlay.
+    pub fn open_search(&mut self) {
+        // Build path index lazily if not cached
+        if self.search_state.cached_paths.is_none() {
+            self.search_state.cached_paths = Some(self.build_path_index());
+        }
+        self.search_state.query.clear();
+        self.search_state.cursor_position = 0;
+        self.search_state.results.clear();
+        self.search_state.selected_index = 0;
+        self.mode = AppMode::Search;
+    }
+
+    /// Close the fuzzy finder overlay without navigating.
+    pub fn close_search(&mut self) {
+        self.mode = AppMode::Normal;
+    }
+
+    /// Insert a character into the search query and re-score.
+    pub fn search_input_char(&mut self, c: char) {
+        self.search_state
+            .query
+            .insert(self.search_state.cursor_position, c);
+        self.search_state.cursor_position += c.len_utf8();
+        self.update_search_results();
+    }
+
+    /// Delete the character before the cursor in the search query.
+    pub fn search_delete_char(&mut self) {
+        if self.search_state.cursor_position > 0 {
+            let byte_pos = self.search_state.cursor_position;
+            let prev_char = self.search_state.query[..byte_pos]
+                .chars()
+                .next_back()
+                .expect("cursor > 0 guarantees at least one char");
+            self.search_state.cursor_position -= prev_char.len_utf8();
+            self.search_state
+                .query
+                .remove(self.search_state.cursor_position);
+            self.update_search_results();
+        }
+    }
+
+    /// Move search result selection down.
+    pub fn search_select_next(&mut self) {
+        if !self.search_state.results.is_empty()
+            && self.search_state.selected_index < self.search_state.results.len() - 1
+        {
+            self.search_state.selected_index += 1;
+        }
+    }
+
+    /// Move search result selection up.
+    pub fn search_select_previous(&mut self) {
+        if self.search_state.selected_index > 0 {
+            self.search_state.selected_index -= 1;
+        }
+    }
+
+    /// Confirm the selected search result: navigate tree to that path.
+    pub fn search_confirm(&mut self) {
+        if let Some(result) = self
+            .search_state
+            .results
+            .get(self.search_state.selected_index)
+        {
+            let path = result.path.clone();
+            self.mode = AppMode::Normal;
+            self.navigate_to_path(&path);
+        }
+    }
+
+    /// Update search results by scoring cached paths against the query.
+    fn update_search_results(&mut self) {
+        let query = &self.search_state.query;
+        if query.is_empty() {
+            self.search_state.results.clear();
+            self.search_state.selected_index = 0;
+            return;
+        }
+
+        let paths = match &self.search_state.cached_paths {
+            Some(p) => p,
+            None => return,
+        };
+
+        let root = &self.tree_state.root.path;
+        let mut results: Vec<SearchResult> = paths
+            .iter()
+            .filter_map(|path| {
+                let display = path
+                    .strip_prefix(root)
+                    .unwrap_or(path)
+                    .to_string_lossy()
+                    .to_string();
+                let (score, indices) = self.fuzzy_matcher.fuzzy_indices(&display, query)?;
+                Some(SearchResult {
+                    path: path.clone(),
+                    display,
+                    score,
+                    match_indices: indices,
+                })
+            })
+            .collect();
+
+        // Sort by score descending
+        results.sort_by(|a, b| b.score.cmp(&a.score));
+        // Limit to top 50
+        results.truncate(50);
+
+        self.search_state.results = results;
+        self.search_state.selected_index = 0;
+    }
+
+    /// Build a flat list of all file paths by walking the tree recursively.
+    /// Uses iterative stack-based walk with 10K entry cap.
+    fn build_path_index(&self) -> Vec<PathBuf> {
+        const MAX_ENTRIES: usize = 10_000;
+        let mut paths = Vec::new();
+        let mut stack: Vec<PathBuf> = vec![self.tree_state.root.path.clone()];
+
+        while let Some(dir) = stack.pop() {
+            if paths.len() >= MAX_ENTRIES {
+                break;
+            }
+            let entries = match std::fs::read_dir(&dir) {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+            for entry in entries {
+                if paths.len() >= MAX_ENTRIES {
+                    break;
+                }
+                let entry = match entry {
+                    Ok(e) => e,
+                    Err(_) => continue,
+                };
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else {
+                    paths.push(path);
+                }
+            }
+        }
+        paths
+    }
+
+    /// Invalidate the cached path index (call after tree mutations).
+    #[allow(dead_code)]
+    pub fn invalidate_search_cache(&mut self) {
+        self.search_state.cached_paths = None;
+    }
+
+    /// Navigate tree to a specific path: expand all ancestors, select the target.
+    pub fn navigate_to_path(&mut self, target: &Path) {
+        // Collect ancestor directories that need to be expanded
+        let root_path = self.tree_state.root.path.clone();
+        let mut ancestors = Vec::new();
+        let mut current = target.parent();
+        while let Some(p) = current {
+            if p == root_path {
+                break;
+            }
+            ancestors.push(p.to_path_buf());
+            current = p.parent();
+        }
+        ancestors.reverse();
+
+        // Expand each ancestor
+        for ancestor in &ancestors {
+            if let Some(node) = TreeState::find_node_mut_pub(&mut self.tree_state.root, ancestor) {
+                if !node.is_expanded {
+                    let _ = node.load_children();
+                    node.is_expanded = true;
+                }
+            }
+        }
+
+        // Re-flatten to reflect expansions
+        self.tree_state.flatten();
+
+        // Find and select the target in flat_items
+        for (i, item) in self.tree_state.flat_items.iter().enumerate() {
+            if item.path == target {
+                self.tree_state.selected_index = i;
+                break;
+            }
+        }
+    }
+
+    // === Filter (/) methods ===
+
+    /// Activate inline tree filter mode.
+    pub fn start_filter(&mut self) {
+        self.tree_state.filter_query.clear();
+        self.tree_state.is_filtering = false;
+        self.mode = AppMode::Filter;
+    }
+
+    /// Clear the filter and restore the full tree.
+    pub fn clear_filter(&mut self) {
+        self.tree_state.filter_query.clear();
+        self.tree_state.is_filtering = false;
+        self.tree_state.flatten();
+        self.mode = AppMode::Normal;
+    }
+
+    /// Accept the current filter and return to normal mode (filtered view stays).
+    pub fn accept_filter(&mut self) {
+        self.mode = AppMode::Normal;
+    }
+
+    /// Insert a character into the filter query and re-filter.
+    pub fn filter_input_char(&mut self, c: char) {
+        self.tree_state.filter_query.push(c);
+        self.tree_state.apply_filter();
+    }
+
+    /// Delete the last character from the filter query and re-filter.
+    pub fn filter_delete_char(&mut self) {
+        self.tree_state.filter_query.pop();
+        if self.tree_state.filter_query.is_empty() {
+            self.tree_state.is_filtering = false;
+            self.tree_state.flatten();
+        } else {
+            self.tree_state.apply_filter();
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1239,5 +1510,263 @@ mod tests {
         // Should not reset scroll
         assert_eq!(app.preview_state.scroll_offset, 5);
         assert_eq!(app.preview_state.current_path, first_path);
+    }
+
+    // === Search (Ctrl+P) tests ===
+
+    #[test]
+    fn open_search_sets_mode() {
+        let (_dir, mut app) = setup_app();
+        app.open_search();
+        assert_eq!(app.mode, AppMode::Search);
+        assert!(app.search_state.cached_paths.is_some());
+    }
+
+    #[test]
+    fn close_search_returns_to_normal() {
+        let (_dir, mut app) = setup_app();
+        app.open_search();
+        app.close_search();
+        assert_eq!(app.mode, AppMode::Normal);
+    }
+
+    #[test]
+    fn search_input_updates_query() {
+        let (_dir, mut app) = setup_app();
+        app.open_search();
+        app.search_input_char('f');
+        assert_eq!(app.search_state.query, "f");
+        app.search_input_char('i');
+        assert_eq!(app.search_state.query, "fi");
+    }
+
+    #[test]
+    fn search_delete_char_removes() {
+        let (_dir, mut app) = setup_app();
+        app.open_search();
+        app.search_input_char('a');
+        app.search_input_char('b');
+        app.search_delete_char();
+        assert_eq!(app.search_state.query, "a");
+    }
+
+    #[test]
+    fn search_delete_at_empty_is_noop() {
+        let (_dir, mut app) = setup_app();
+        app.open_search();
+        app.search_delete_char();
+        assert_eq!(app.search_state.query, "");
+    }
+
+    #[test]
+    fn search_results_update_on_input() {
+        let (_dir, mut app) = setup_app();
+        app.open_search();
+        app.search_input_char('f');
+        app.search_input_char('i');
+        app.search_input_char('l');
+        app.search_input_char('e');
+        // Should find file_a.txt and file_b.rs
+        assert!(app.search_state.results.len() >= 2);
+    }
+
+    #[test]
+    fn search_empty_query_clears_results() {
+        let (_dir, mut app) = setup_app();
+        app.open_search();
+        app.search_input_char('a');
+        assert!(!app.search_state.results.is_empty());
+        app.search_delete_char();
+        assert!(app.search_state.results.is_empty());
+    }
+
+    #[test]
+    fn search_no_matches_empty_results() {
+        let (_dir, mut app) = setup_app();
+        app.open_search();
+        app.search_input_char('z');
+        app.search_input_char('z');
+        app.search_input_char('z');
+        assert!(app.search_state.results.is_empty());
+    }
+
+    #[test]
+    fn search_select_navigation() {
+        let (_dir, mut app) = setup_app();
+        app.open_search();
+        app.search_input_char('f');
+        assert_eq!(app.search_state.selected_index, 0);
+        app.search_select_next();
+        assert_eq!(app.search_state.selected_index, 1);
+        app.search_select_previous();
+        assert_eq!(app.search_state.selected_index, 0);
+    }
+
+    #[test]
+    fn search_select_clamps() {
+        let (_dir, mut app) = setup_app();
+        app.open_search();
+        app.search_select_previous(); // at 0, should stay
+        assert_eq!(app.search_state.selected_index, 0);
+    }
+
+    #[test]
+    fn search_confirm_navigates_to_file() {
+        let (dir, mut app) = setup_app();
+        // Create a nested file for navigation test
+        fs::create_dir_all(dir.path().join("alpha").join("nested")).unwrap();
+        File::create(dir.path().join("alpha").join("nested").join("deep.txt")).unwrap();
+        app.tree_state.reload_dir(dir.path());
+        app.invalidate_search_cache();
+
+        app.open_search();
+        app.search_input_char('d');
+        app.search_input_char('e');
+        app.search_input_char('e');
+        app.search_input_char('p');
+
+        assert!(!app.search_state.results.is_empty());
+        app.search_confirm();
+        assert_eq!(app.mode, AppMode::Normal);
+
+        // Should have navigated to the deep.txt file
+        let selected = &app.tree_state.flat_items[app.tree_state.selected_index];
+        assert_eq!(selected.name, "deep.txt");
+    }
+
+    #[test]
+    fn build_path_index_finds_files() {
+        let (_dir, app) = setup_app();
+        let index = app.build_path_index();
+        // Should find file_a.txt, file_b.rs, .hidden
+        assert!(index.len() >= 2);
+    }
+
+    #[test]
+    fn invalidate_search_cache_clears() {
+        let (_dir, mut app) = setup_app();
+        app.open_search();
+        assert!(app.search_state.cached_paths.is_some());
+        app.invalidate_search_cache();
+        assert!(app.search_state.cached_paths.is_none());
+    }
+
+    // === Filter (/) tests ===
+
+    #[test]
+    fn start_filter_sets_mode() {
+        let (_dir, mut app) = setup_app();
+        app.start_filter();
+        assert_eq!(app.mode, AppMode::Filter);
+    }
+
+    #[test]
+    fn filter_input_filters_tree() {
+        let (_dir, mut app) = setup_app();
+        app.start_filter();
+        let total_before = app.tree_state.flat_items.len();
+        app.filter_input_char('a');
+        // Should show fewer items (only matching + ancestors)
+        assert!(app.tree_state.flat_items.len() <= total_before);
+        assert!(app.tree_state.is_filtering);
+    }
+
+    #[test]
+    fn filter_preserves_parent_dirs() {
+        let (dir, mut app) = setup_app();
+        // Create inner.txt inside alpha
+        File::create(dir.path().join("alpha").join("inner.txt")).unwrap();
+        // Expand alpha so its children are loaded
+        app.tree_state.selected_index = 1; // alpha dir
+        app.expand_selected();
+
+        app.start_filter();
+        app.filter_input_char('i');
+        app.filter_input_char('n');
+        app.filter_input_char('n');
+        app.filter_input_char('e');
+        app.filter_input_char('r');
+
+        // "alpha" directory should be preserved as parent of "inner.txt"
+        let names: Vec<&str> = app
+            .tree_state
+            .flat_items
+            .iter()
+            .map(|i| i.name.as_str())
+            .collect();
+        assert!(names.contains(&"alpha"));
+        assert!(names.contains(&"inner.txt"));
+    }
+
+    #[test]
+    fn clear_filter_restores_tree() {
+        let (_dir, mut app) = setup_app();
+        let original_count = app.tree_state.flat_items.len();
+        app.start_filter();
+        app.filter_input_char('x');
+        app.clear_filter();
+        assert_eq!(app.mode, AppMode::Normal);
+        assert!(!app.tree_state.is_filtering);
+        assert_eq!(app.tree_state.flat_items.len(), original_count);
+    }
+
+    #[test]
+    fn accept_filter_keeps_filtered_view() {
+        let (_dir, mut app) = setup_app();
+        app.start_filter();
+        app.filter_input_char('f');
+        let filtered_count = app.tree_state.flat_items.len();
+        app.accept_filter();
+        assert_eq!(app.mode, AppMode::Normal);
+        // Filtered view should persist
+        assert_eq!(app.tree_state.flat_items.len(), filtered_count);
+    }
+
+    #[test]
+    fn filter_backspace_updates_filter() {
+        let (_dir, mut app) = setup_app();
+        let original_count = app.tree_state.flat_items.len();
+        app.start_filter();
+        app.filter_input_char('z');
+        app.filter_input_char('z');
+        app.filter_delete_char();
+        app.filter_delete_char();
+        // Should restore full tree when filter query becomes empty
+        assert!(!app.tree_state.is_filtering);
+        assert_eq!(app.tree_state.flat_items.len(), original_count);
+    }
+
+    #[test]
+    fn filter_case_insensitive() {
+        let (_dir, mut app) = setup_app();
+        app.start_filter();
+        app.filter_input_char('F');
+        app.filter_input_char('I');
+        app.filter_input_char('L');
+        app.filter_input_char('E');
+        // Should match "file_a.txt" and "file_b.rs" despite uppercase query
+        let names: Vec<&str> = app
+            .tree_state
+            .flat_items
+            .iter()
+            .map(|i| i.name.as_str())
+            .collect();
+        assert!(names.contains(&"file_a.txt"));
+        assert!(names.contains(&"file_b.rs"));
+    }
+
+    #[test]
+    fn navigate_to_path_expands_ancestors() {
+        let (dir, mut app) = setup_app();
+        // Create nested structure
+        fs::create_dir_all(dir.path().join("alpha").join("nested")).unwrap();
+        File::create(dir.path().join("alpha").join("nested").join("target.txt")).unwrap();
+        app.tree_state.reload_dir(dir.path());
+
+        let target = dir.path().join("alpha").join("nested").join("target.txt");
+        app.navigate_to_path(&target);
+
+        let selected = &app.tree_state.flat_items[app.tree_state.selected_index];
+        assert_eq!(selected.name, "target.txt");
     }
 }

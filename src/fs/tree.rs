@@ -128,6 +128,10 @@ pub struct TreeState {
     pub show_hidden: bool,
     /// Indices of multi-selected items.
     pub multi_selected: HashSet<usize>,
+    /// Current inline filter query string.
+    pub filter_query: String,
+    /// Whether the tree is currently being filtered.
+    pub is_filtering: bool,
 }
 
 impl TreeState {
@@ -146,6 +150,8 @@ impl TreeState {
             scroll_offset: 0,
             show_hidden: false,
             multi_selected: HashSet::new(),
+            filter_query: String::new(),
+            is_filtering: false,
         };
         state.flatten();
         Ok(state)
@@ -297,6 +303,104 @@ impl TreeState {
     pub fn toggle_hidden(&mut self) {
         self.show_hidden = !self.show_hidden;
         self.flatten();
+    }
+
+    /// Public accessor to find a mutable node by path (used by navigate_to_path).
+    pub fn find_node_mut_pub<'a>(
+        node: &'a mut TreeNode,
+        target: &Path,
+    ) -> Option<&'a mut TreeNode> {
+        Self::find_node_mut(node, target)
+    }
+
+    /// Apply inline filter: rebuild flat_items showing only matches + ancestor dirs.
+    /// Case-insensitive substring match on filename.
+    pub fn apply_filter(&mut self) {
+        if self.filter_query.is_empty() {
+            self.is_filtering = false;
+            self.flatten();
+            return;
+        }
+
+        self.is_filtering = true;
+        self.flat_items.clear();
+        self.multi_selected.clear();
+
+        let query_lower = self.filter_query.to_lowercase();
+        Self::flatten_node_filtered(
+            &self.root,
+            &mut self.flat_items,
+            self.show_hidden,
+            true,
+            true,
+            &query_lower,
+        );
+
+        // Clamp selected index
+        if !self.flat_items.is_empty() && self.selected_index >= self.flat_items.len() {
+            self.selected_index = self.flat_items.len() - 1;
+        }
+    }
+
+    /// Recursively flatten, but only include nodes whose name matches the filter
+    /// or that are ancestors of matching nodes.
+    /// Returns true if this subtree contains any matches.
+    fn flatten_node_filtered(
+        node: &TreeNode,
+        items: &mut Vec<FlatItem>,
+        show_hidden: bool,
+        is_last: bool,
+        is_root: bool,
+        query: &str,
+    ) -> bool {
+        if !is_root && !show_hidden && node.meta.is_hidden {
+            return false;
+        }
+
+        let name_lower = node.name.to_lowercase();
+        let self_matches = name_lower.contains(query);
+
+        // Check if any child subtree matches
+        let mut child_matches = false;
+        let mut child_items = Vec::new();
+
+        if let Some(children) = &node.children {
+            let visible_children: Vec<&TreeNode> = if show_hidden {
+                children.iter().collect()
+            } else {
+                children.iter().filter(|c| !c.meta.is_hidden).collect()
+            };
+
+            for (i, child) in visible_children.iter().enumerate() {
+                let is_last_child = i == visible_children.len() - 1;
+                if Self::flatten_node_filtered(
+                    child,
+                    &mut child_items,
+                    show_hidden,
+                    is_last_child,
+                    false,
+                    query,
+                ) {
+                    child_matches = true;
+                }
+            }
+        }
+
+        if self_matches || child_matches || is_root {
+            items.push(FlatItem {
+                name: node.name.clone(),
+                path: node.path.clone(),
+                node_type: node.node_type.clone(),
+                depth: node.depth,
+                is_expanded: node.is_expanded || child_matches,
+                is_last_sibling: is_last,
+                is_hidden: node.meta.is_hidden,
+            });
+            items.extend(child_items);
+            true
+        } else {
+            false
+        }
     }
 
     /// Toggle multi-selection of the currently focused item.

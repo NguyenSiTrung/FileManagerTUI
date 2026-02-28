@@ -7,3 +7,6 @@
 <!-- Archived: clipboard-multiselect_20260227 (2026-02-27) → conductor/archive/ -->
 
 ---
+
+## [~] Track: Fuzzy Finder + Search (Milestone 5)
+*Link: [./conductor/tracks/fuzzy-search_20260228/](./conductor/tracks/fuzzy-search_20260228/)*

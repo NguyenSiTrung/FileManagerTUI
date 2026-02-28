@@ -10,6 +10,8 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent, event_tx: &mpsc::Unbounded
     match &app.mode {
         AppMode::Normal => handle_normal_mode(app, key, event_tx),
         AppMode::Dialog(_) => handle_dialog_mode(app, key),
+        AppMode::Search => handle_search_mode(app, key),
+        AppMode::Filter => handle_filter_mode(app, key),
     }
 }
 
@@ -30,6 +32,14 @@ fn handle_normal_mode(app: &mut App, key: KeyEvent, event_tx: &mpsc::UnboundedSe
         }
         KeyCode::Char('z') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             app.undo();
+            return;
+        }
+        KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.open_search();
+            return;
+        }
+        KeyCode::Char('/') => {
+            app.start_filter();
             return;
         }
         _ => {}
@@ -122,6 +132,34 @@ fn handle_preview_keys(app: &mut App, key: KeyEvent) {
             app.adjust_preview_lines(-(crate::preview_content::LINE_COUNT_STEP as isize));
         }
 
+        _ => {}
+    }
+}
+
+fn handle_search_mode(app: &mut App, key: KeyEvent) {
+    match key.code {
+        KeyCode::Esc => app.close_search(),
+        KeyCode::Enter => app.search_confirm(),
+        KeyCode::Down | KeyCode::Char('j') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.search_select_next();
+        }
+        KeyCode::Up | KeyCode::Char('k') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.search_select_previous();
+        }
+        KeyCode::Down => app.search_select_next(),
+        KeyCode::Up => app.search_select_previous(),
+        KeyCode::Backspace => app.search_delete_char(),
+        KeyCode::Char(c) => app.search_input_char(c),
+        _ => {}
+    }
+}
+
+fn handle_filter_mode(app: &mut App, key: KeyEvent) {
+    match key.code {
+        KeyCode::Esc => app.clear_filter(),
+        KeyCode::Enter => app.accept_filter(),
+        KeyCode::Backspace => app.filter_delete_char(),
+        KeyCode::Char(c) => app.filter_input_char(c),
         _ => {}
     }
 }
