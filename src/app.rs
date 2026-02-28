@@ -118,6 +118,19 @@ pub struct SearchState {
     pub cached_paths: Option<Vec<PathBuf>>,
 }
 
+/// State for the search action menu overlay.
+#[derive(Debug, Clone)]
+pub struct SearchActionState {
+    /// Absolute path to the selected file/directory.
+    pub path: PathBuf,
+    /// Display string (relative path from root).
+    pub display: String,
+    /// Whether the target is a directory.
+    pub is_directory: bool,
+    /// Whether the target is a binary file.
+    pub is_binary: bool,
+}
+
 /// Application mode.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub enum AppMode {
@@ -125,6 +138,7 @@ pub enum AppMode {
     Normal,
     Dialog(DialogKind),
     Search,
+    SearchAction,
     Filter,
     Help,
     Edit,
@@ -194,6 +208,8 @@ pub struct App {
     pub terminal_area: Rect,
     /// Editor state for the preview panel edit mode.
     pub editor_state: Option<EditorState>,
+    /// State for the search action menu overlay.
+    pub search_action_state: Option<SearchActionState>,
 }
 
 impl App {
@@ -236,6 +252,7 @@ impl App {
             terminal_state: TerminalState::default(),
             terminal_area: Rect::default(),
             editor_state: None,
+            search_action_state: None,
         })
     }
 
@@ -1224,7 +1241,7 @@ impl App {
         }
     }
 
-    /// Confirm the selected search result: navigate tree to that path.
+    /// Confirm the selected search result: open action menu for that file.
     pub fn search_confirm(&mut self) {
         if let Some(result) = self
             .search_state
@@ -1232,8 +1249,184 @@ impl App {
             .get(self.search_state.selected_index)
         {
             let path = result.path.clone();
+            let display = result.display.clone();
+            let (is_directory, is_binary) = Self::detect_file_type(&path);
+            self.search_action_state = Some(SearchActionState {
+                path,
+                display,
+                is_directory,
+                is_binary,
+            });
+            self.mode = AppMode::SearchAction;
+        }
+    }
+
+    /// Detect whether a path is a directory and/or a binary file.
+    pub fn detect_file_type(path: &Path) -> (bool, bool) {
+        let is_directory = path.is_dir();
+        let is_binary = if is_directory {
+            false
+        } else {
+            crate::preview_content::is_binary_file(path)
+        };
+        (is_directory, is_binary)
+    }
+
+    /// Return from the action menu to the search overlay (preserving query/results).
+    pub fn search_action_back(&mut self) {
+        self.search_action_state = None;
+        self.mode = AppMode::Search;
+    }
+
+    /// Close both search action and search overlays, return to Normal mode.
+    pub fn close_search_action(&mut self) {
+        self.search_action_state = None;
+        self.mode = AppMode::Normal;
+        self.invalidate_search_cache();
+        self.last_previewed_index = None;
+    }
+
+    /// Search action: navigate to the file in the tree.
+    pub fn search_action_navigate(&mut self) {
+        if let Some(state) = self.search_action_state.take() {
             self.mode = AppMode::Normal;
-            self.navigate_to_path(&path);
+            self.invalidate_search_cache();
+            self.last_previewed_index = None;
+            self.navigate_to_path(&state.path);
+        }
+    }
+
+    /// Search action: navigate to file and focus preview panel.
+    pub fn search_action_preview(&mut self) {
+        if let Some(state) = self.search_action_state.take() {
+            self.mode = AppMode::Normal;
+            self.invalidate_search_cache();
+            self.last_previewed_index = None;
+            self.navigate_to_path(&state.path);
+            self.focused_panel = FocusedPanel::Preview;
+        }
+    }
+
+    /// Search action: navigate to file and enter edit mode.
+    pub fn search_action_edit(&mut self) {
+        if let Some(state) = self.search_action_state.take() {
+            self.mode = AppMode::Normal;
+            self.invalidate_search_cache();
+            self.last_previewed_index = None;
+            self.navigate_to_path(&state.path);
+            self.focused_panel = FocusedPanel::Preview;
+            // Force preview update so enter_edit_mode can find the file
+            self.update_preview();
+            self.enter_edit_mode();
+        }
+    }
+
+    /// Search action: copy the absolute path to the status bar.
+    pub fn search_action_copy_path(&mut self) {
+        if let Some(state) = self.search_action_state.take() {
+            let path_str = state.path.to_string_lossy().to_string();
+            self.set_status_message(format!("📋 Path copied: {}", path_str));
+            self.mode = AppMode::Normal;
+            self.invalidate_search_cache();
+            self.last_previewed_index = None;
+        }
+    }
+
+    /// Search action: navigate to file and open rename dialog.
+    pub fn search_action_rename(&mut self) {
+        if let Some(state) = self.search_action_state.take() {
+            self.mode = AppMode::Normal;
+            self.invalidate_search_cache();
+            self.last_previewed_index = None;
+            self.navigate_to_path(&state.path);
+            self.open_dialog(DialogKind::Rename {
+                original: state.path,
+            });
+        }
+    }
+
+    /// Search action: navigate to file and open delete confirm.
+    pub fn search_action_delete(&mut self) {
+        if let Some(state) = self.search_action_state.take() {
+            self.mode = AppMode::Normal;
+            self.invalidate_search_cache();
+            self.last_previewed_index = None;
+            self.navigate_to_path(&state.path);
+            self.open_dialog(DialogKind::DeleteConfirm {
+                targets: vec![state.path],
+            });
+        }
+    }
+
+    /// Search action: add file to internal clipboard for copy.
+    pub fn search_action_copy_clipboard(&mut self) {
+        if let Some(state) = self.search_action_state.take() {
+            use crate::fs::clipboard::ClipboardOp;
+            self.clipboard
+                .set(vec![state.path.clone()], ClipboardOp::Copy);
+            let name = state
+                .path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+            self.set_status_message(format!("📋 Copied: {}", name));
+            self.mode = AppMode::Normal;
+            self.invalidate_search_cache();
+            self.last_previewed_index = None;
+        }
+    }
+
+    /// Search action: cut file to internal clipboard for move.
+    pub fn search_action_cut_clipboard(&mut self) {
+        if let Some(state) = self.search_action_state.take() {
+            use crate::fs::clipboard::ClipboardOp;
+            self.clipboard
+                .set(vec![state.path.clone()], ClipboardOp::Cut);
+            let name = state
+                .path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+            self.set_status_message(format!("✂ Cut: {}", name));
+            self.mode = AppMode::Normal;
+            self.invalidate_search_cache();
+            self.last_previewed_index = None;
+        }
+    }
+
+    /// Search action: open file's parent directory in the embedded terminal.
+    pub fn search_action_open_terminal(
+        &mut self,
+        event_tx: &mpsc::UnboundedSender<crate::event::Event>,
+    ) {
+        if let Some(state) = self.search_action_state.take() {
+            self.mode = AppMode::Normal;
+            self.invalidate_search_cache();
+            self.last_previewed_index = None;
+
+            let parent_dir = if state.is_directory {
+                state.path.clone()
+            } else {
+                state
+                    .path
+                    .parent()
+                    .map(|p| p.to_path_buf())
+                    .unwrap_or_else(|| state.path.clone())
+            };
+
+            // Ensure terminal is visible (spawns PTY if needed)
+            if !self.terminal_state.visible {
+                self.toggle_terminal(event_tx);
+            }
+
+            // Send cd command to PTY
+            if let Some(ref pty) = self.terminal_state.pty {
+                let cd_cmd = format!("cd {}\n", parent_dir.to_string_lossy());
+                let _ = pty.write(cd_cmd.as_bytes());
+            }
+
+            self.focused_panel = FocusedPanel::Terminal;
+            self.set_status_message(format!("Terminal: cd {}", parent_dir.to_string_lossy()));
         }
     }
 
@@ -2090,6 +2283,11 @@ mod tests {
 
         assert!(!app.search_state.results.is_empty());
         app.search_confirm();
+        assert_eq!(app.mode, AppMode::SearchAction);
+        assert!(app.search_action_state.is_some());
+
+        // Navigate from action menu
+        app.search_action_navigate();
         assert_eq!(app.mode, AppMode::Normal);
 
         // Should have navigated to the deep.txt file

@@ -11,6 +11,7 @@ use crate::components::editor::EditorWidget;
 use crate::components::help::HelpOverlay;
 use crate::components::preview::PreviewWidget;
 use crate::components::search::SearchWidget;
+use crate::components::search_action::SearchActionWidget;
 use crate::components::status_bar::StatusBarWidget;
 use crate::components::terminal::TerminalWidget;
 use crate::components::tree::TreeWidget;
@@ -271,6 +272,14 @@ pub fn render(app: &mut App, frame: &mut Frame) {
     if app.mode == AppMode::Search {
         let search_widget = SearchWidget::new(&app.search_state, &theme);
         frame.render_widget(search_widget, area);
+    }
+
+    // Render search action overlay on top if in search action mode
+    if app.mode == AppMode::SearchAction {
+        if let Some(ref state) = app.search_action_state {
+            let action_widget = SearchActionWidget::new(state, &theme);
+            frame.render_widget(action_widget, area);
+        }
     }
 
     // Render help overlay on top if in help mode

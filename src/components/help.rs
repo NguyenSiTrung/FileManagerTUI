@@ -136,7 +136,50 @@ const SEARCH_FILTER_KEYS: &[KeyEntry] = &[
     },
     KeyEntry {
         key: "Enter",
-        description: "Accept filter",
+        description: "Accept filter / Open action menu",
+    },
+];
+
+const SEARCH_ACTION_KEYS: &[KeyEntry] = &[
+    KeyEntry {
+        key: "Enter",
+        description: "Navigate (Go to file in tree)",
+    },
+    KeyEntry {
+        key: "p",
+        description: "Preview (navigate + focus preview)",
+    },
+    KeyEntry {
+        key: "e",
+        description: "Edit (open inline editor)",
+    },
+    KeyEntry {
+        key: "y",
+        description: "Copy path to status bar",
+    },
+    KeyEntry {
+        key: "r",
+        description: "Rename file",
+    },
+    KeyEntry {
+        key: "d",
+        description: "Delete file",
+    },
+    KeyEntry {
+        key: "c",
+        description: "Copy to clipboard",
+    },
+    KeyEntry {
+        key: "x",
+        description: "Cut to clipboard",
+    },
+    KeyEntry {
+        key: "t",
+        description: "Open parent dir in terminal",
+    },
+    KeyEntry {
+        key: "Esc",
+        description: "Back to search results",
     },
 ];
 
@@ -336,6 +379,10 @@ const CATEGORIES: &[KeyCategory] = &[
     KeyCategory {
         name: "Search & Filter",
         entries: SEARCH_FILTER_KEYS,
+    },
+    KeyCategory {
+        name: "Search Action Menu",
+        entries: SEARCH_ACTION_KEYS,
     },
     KeyCategory {
         name: "Preview Panel",

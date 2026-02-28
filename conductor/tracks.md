@@ -25,3 +25,6 @@
 <!-- Archived: preview-edit_20260228 (2026-02-28) → conductor/archive/ -->
 
 ---
+
+## [~] Track: Search Action Menu
+*Link: [./conductor/tracks/search-action_20260228/](./conductor/tracks/search-action_20260228/)*

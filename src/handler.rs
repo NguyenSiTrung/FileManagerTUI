@@ -192,6 +192,7 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent, event_tx: &mpsc::Unbounded
         AppMode::Normal => handle_normal_mode(app, key, event_tx),
         AppMode::Dialog(_) => handle_dialog_mode(app, key),
         AppMode::Search => handle_search_mode(app, key),
+        AppMode::SearchAction => handle_search_action_mode(app, key, event_tx),
         AppMode::Filter => handle_filter_mode(app, key),
         AppMode::Help => handle_help_mode(app, key),
         AppMode::Edit => handle_editor_keys(app, key),
@@ -834,6 +835,61 @@ fn handle_search_mode(app: &mut App, key: KeyEvent) {
         KeyCode::Up => app.search_select_previous(),
         KeyCode::Backspace => app.search_delete_char(),
         KeyCode::Char(c) => app.search_input_char(c),
+        _ => {}
+    }
+}
+
+fn handle_search_action_mode(
+    app: &mut App,
+    key: KeyEvent,
+    event_tx: &mpsc::UnboundedSender<Event>,
+) {
+    let state = match &app.search_action_state {
+        Some(s) => s.clone(),
+        None => {
+            app.close_search_action();
+            return;
+        }
+    };
+
+    match key.code {
+        KeyCode::Esc => app.search_action_back(),
+        // Navigate (Go to) — always available
+        KeyCode::Enter => {
+            app.search_action_navigate();
+        }
+        // Preview — hidden for directories
+        KeyCode::Char('p') if !state.is_directory => {
+            app.search_action_preview();
+        }
+        // Edit — hidden for directories and binary files
+        KeyCode::Char('e') if !state.is_directory && !state.is_binary => {
+            app.search_action_edit();
+        }
+        // Copy path — always available
+        KeyCode::Char('y') => {
+            app.search_action_copy_path();
+        }
+        // Rename — always available
+        KeyCode::Char('r') => {
+            app.search_action_rename();
+        }
+        // Delete — always available
+        KeyCode::Char('d') => {
+            app.search_action_delete();
+        }
+        // Copy (clipboard) — always available
+        KeyCode::Char('c') => {
+            app.search_action_copy_clipboard();
+        }
+        // Cut (clipboard) — always available
+        KeyCode::Char('x') => {
+            app.search_action_cut_clipboard();
+        }
+        // Open in terminal — always available
+        KeyCode::Char('t') => {
+            app.search_action_open_terminal(event_tx);
+        }
         _ => {}
     }
 }
@@ -1827,6 +1883,9 @@ mod tests {
         handle_key(&mut app, make_key(KeyCode::Char('e')));
         assert!(!app.search_state.results.is_empty());
         handle_key(&mut app, make_key(KeyCode::Enter));
+        assert_eq!(app.mode, AppMode::SearchAction);
+        // Press Enter again to navigate
+        handle_key(&mut app, make_key(KeyCode::Enter));
         assert_eq!(app.mode, AppMode::Normal);
     }
 
@@ -1938,7 +1997,11 @@ mod tests {
         }
         assert!(!app.search_state.results.is_empty());
 
-        // Confirm
+        // Confirm -> goes to SearchAction
+        handle_key(&mut app, make_key(KeyCode::Enter));
+        assert_eq!(app.mode, AppMode::SearchAction);
+
+        // Navigate from action menu
         handle_key(&mut app, make_key(KeyCode::Enter));
         assert_eq!(app.mode, AppMode::Normal);
 

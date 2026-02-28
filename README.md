@@ -9,7 +9,7 @@ A fast, keyboard-driven terminal file manager built with Rust and [Ratatui](http
 
 - **Dual-pane layout** — file tree + live preview with syntax highlighting
 - **Vim-style navigation** — `j`/`k`/`g`/`G` and arrow keys
-- **Fuzzy finder** — `Ctrl+P` for project-wide file search
+- **Fuzzy finder** — `Ctrl+P` for project-wide file search with action menu
 - **Inline filter** — `/` to filter the current directory tree
 - **File operations** — create, rename, delete, copy, cut, paste with undo
 - **Multi-select** — `Space` to select, batch operations on selection
@@ -121,7 +121,26 @@ fm --theme light
 | `Ctrl+P` | Open fuzzy finder |
 | `/` | Start inline filter |
 | `Esc` | Cancel / clear filter |
-| `Enter` | Accept filter |
+| `Enter` | Accept filter / Open action menu |
+
+### Search Action Menu
+
+After selecting a file in the fuzzy finder, an action menu appears:
+
+| Key | Action |
+|-----|--------|
+| `Enter` | Navigate (Go to file in tree) |
+| `p` | Preview (navigate + focus preview) |
+| `e` | Edit (open inline editor) |
+| `y` | Copy path to status bar |
+| `r` | Rename file |
+| `d` | Delete file |
+| `c` | Copy to clipboard |
+| `x` | Cut to clipboard |
+| `t` | Open parent dir in terminal |
+| `Esc` | Back to search results |
+
+> **Context filtering:** Edit/Preview are hidden for directories; Edit is hidden for binary files.
 
 ### Preview Panel
 
@@ -283,6 +302,7 @@ src/
 │   ├── status_bar.rs  # Status bar widget
 │   ├── dialog.rs      # Modal dialog widget
 │   ├── search.rs      # Fuzzy finder overlay
+│   ├── search_action.rs # Search action menu overlay
 │   ├── help.rs        # Help overlay widget
 │   └── terminal.rs    # Terminal panel widget
 ├── fs/

@@ -1,0 +1,26 @@
+{
+    "track_id": "search-action_20260228",
+    "type": "feature",
+    "status": "new",
+    "priority": "high",
+    "depends_on": [],
+    "estimated_hours": null,
+    "created_at": "2026-02-28T15:42:37+07:00",
+    "updated_at": "2026-02-28T15:42:37+07:00",
+    "description": "Add context-aware action menu after selecting a file from fuzzy search (Ctrl+P), offering navigate, preview, edit, copy path, rename, delete, copy/cut clipboard, and open in terminal actions.",
+    "beads_epic": "FileManagerTUI-jzo",
+    "beads_tasks": {
+        "phase1": "FileManagerTUI-jzo.1",
+        "phase1_task1": "FileManagerTUI-jzo.1.1",
+        "phase1_task2": "FileManagerTUI-jzo.1.2",
+        "phase2": "FileManagerTUI-jzo.2",
+        "phase2_task1": "FileManagerTUI-jzo.2.1",
+        "phase3": "FileManagerTUI-jzo.3",
+        "phase3_task1": "FileManagerTUI-jzo.3.1",
+        "phase4": "FileManagerTUI-jzo.4",
+        "phase4_task1": "FileManagerTUI-jzo.4.1",
+        "phase4_task2": "FileManagerTUI-jzo.4.2",
+        "phase5": "FileManagerTUI-jzo.5",
+        "phase5_task1": "FileManagerTUI-jzo.5.1"
+    }
+}
