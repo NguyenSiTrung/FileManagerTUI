@@ -10,5 +10,5 @@
 
 ---
 
-## [~] Track: File Watcher + Auto-Refresh
+## [x] Track: File Watcher + Auto-Refresh
 *Link: [./conductor/tracks/file-watcher_20260228/](./conductor/tracks/file-watcher_20260228/)*

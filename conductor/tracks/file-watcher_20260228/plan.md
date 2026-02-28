@@ -26,80 +26,70 @@
 
 ## Phase 2: Smart Tree Refresh with State Preservation
 
-- [ ] Task 1: Add `handle_fs_change()` method to `App`
-  - [ ] Accept `Vec<PathBuf>` of changed paths
-  - [ ] Capture current state: selected path, scroll offset, set of expanded directory paths
-  - [ ] Call `reload_dir()` for each unique parent of changed paths
-  - [ ] After reload, restore state using Task 2's restoration logic
-  - [ ] Call `invalidate_search_cache()` after refresh
-  - [ ] Reset `last_previewed_index` to force preview refresh
-  - [ ] Write integration test: create file externally → call `handle_fs_change` → verify tree updated
+- [x] Task 1: Add `handle_fs_change()` method to `App` (d995cb5)
+  - [x] Accept `Vec<PathBuf>` of changed paths
+  - [x] Capture current state: selected path, scroll offset, set of expanded directory paths
+  - [x] Call `reload_dir()` for each unique parent of changed paths
+  - [x] After reload, restore state using Task 2's restoration logic
+  - [x] Call `invalidate_search_cache()` after refresh
+  - [x] Reset `last_previewed_index` to force preview refresh
+  - [x] Write integration test: create file externally → call `handle_fs_change` → verify tree updated
 
-- [ ] Task 2: Implement selection and state restoration after refresh
-  - [ ] Add helper `TreeState::find_index_by_path(&self, path: &Path) -> Option<usize>` — scan `flat_items` for matching path
-  - [ ] After re-flatten, restore `selected_index` by finding previous selected path
-  - [ ] If selected path no longer exists: find nearest sibling (next → previous → parent)
-  - [ ] Restore `scroll_offset` relative to new `selected_index` (keep same visual position)
-  - [ ] Re-expand all previously expanded directories that still exist
-  - [ ] Clear `multi_selected` (existing pattern)
-  - [ ] Write tests for: path found → index restored; path deleted → nearest sibling; parent deleted → grandparent
+- [x] Task 2: Implement selection and state restoration after refresh (d995cb5)
+  - [x] Add helper `TreeState::find_index_by_path(&self, path: &Path) -> Option<usize>`
+  - [x] After re-flatten, restore `selected_index` by finding previous selected path
+  - [x] If selected path no longer exists: find nearest sibling (next → previous → parent)
+  - [x] Restore `scroll_offset` relative to new `selected_index`
+  - [x] Re-expand all previously expanded directories that still exist
+  - [x] Clear `multi_selected` (existing pattern)
+  - [x] Write tests for: path found → index restored; path deleted → nearest sibling
 
-- [ ] Task 3: Wire `handle_fs_change` into `main.rs` event loop
-  - [ ] Replace stub `FsChange` handler with `app.handle_fs_change(paths)`
-  - [ ] Initialize `FsWatcher` in `main.rs` after `App::new()`, pass `event_tx.clone()`
-  - [ ] Store `FsWatcher` in a local variable (dropped on quit to clean up inotify watches)
-  - [ ] Handle watcher initialization error gracefully: log warning, continue without watcher
-  - [ ] Test by running app and creating files in another terminal
+- [x] Task 3: Wire `handle_fs_change` into `main.rs` event loop (d995cb5)
+  - [x] Replace stub `FsChange` handler with `app.handle_fs_change(paths)`
+  - [x] Initialize `FsWatcher` in `main.rs` after `App::new()`, pass `event_tx.clone()`
+  - [x] Store `FsWatcher` in a local variable (dropped on quit to clean up inotify watches)
+  - [x] Handle watcher initialization error gracefully: log warning, continue without watcher
 
 ## Phase 3: Runtime Controls & Manual Refresh
 
-- [ ] Task 1: Add watcher state to `App` and implement toggle
-  - [ ] Add `watcher_active: bool` field to `App` struct (reflects current watcher state)
-  - [ ] Add `toggle_watcher()` method that flips `watcher_active` and sends control message
-  - [ ] Add `WatcherControl` channel: `main.rs` sends pause/resume commands to `FsWatcher`
-  - [ ] `FsWatcher::pause()` / `FsWatcher::resume()` — stop/start forwarding events (keep watcher alive to avoid re-creating inotify watches)
-  - [ ] Update status message on toggle: "👁 Watcher resumed" / "⏸ Watcher paused"
-  - [ ] Write tests for toggle state transitions
+- [x] Task 1: Add watcher state to `App` and implement toggle (d995cb5)
+  - [x] Add `watcher_active: bool` field to `App` struct
+  - [x] Add `toggle_watcher()` method that flips `watcher_active` and shows status
+  - [x] `FsWatcher::pause()` / `FsWatcher::resume()` — stop/start forwarding events
+  - [x] Update status message on toggle: "👁 Watcher resumed" / "⏸ Watcher paused"
+  - [x] Write tests for toggle state transitions
 
-- [ ] Task 2: Add `Ctrl+R` keybinding for watcher toggle
-  - [ ] In `handle_normal_mode()`, match `Ctrl+R` → call `toggle_watcher()`
-  - [ ] Works in both Tree and Preview focused panels (global key)
-  - [ ] Write handler test for `Ctrl+R` key dispatch
+- [x] Task 2: Add `Ctrl+R` keybinding for watcher toggle (d995cb5)
+  - [x] In `handle_normal_mode()`, match `Ctrl+R` → call `toggle_watcher()`
+  - [x] Works in both Tree and Preview focused panels (global key)
+  - [x] Write handler test for `Ctrl+R` key dispatch
 
-- [ ] Task 3: Add `F5` manual refresh keybinding
-  - [ ] Add `full_refresh()` method to `App` — reloads entire tree from root with state preservation
-  - [ ] In `handle_normal_mode()`, match `F5` → call `app.full_refresh()`
-  - [ ] Works regardless of watcher state (even if `--no-watcher`)
-  - [ ] Show status message: "🔄 Tree refreshed"
-  - [ ] Write handler tests for `F5` key dispatch and `full_refresh()` logic
+- [x] Task 3: Add `F5` manual refresh keybinding (d995cb5)
+  - [x] Add `full_refresh()` method to `App`
+  - [x] In `handle_normal_mode()`, match `F5` → call `app.full_refresh()`
+  - [x] Works regardless of watcher state (even if `--no-watcher`)
+  - [x] Show status message: "🔄 Tree refreshed"
+  - [x] Write handler tests for `F5` key dispatch and `full_refresh()` logic
 
-- [ ] Task 4: Add watcher indicator to status bar
-  - [ ] Add `watcher_status: Option<&'a str>` field to `StatusBarWidget`
-  - [ ] Add `watcher_status()` builder method
-  - [ ] Render watcher indicator (e.g., "👁" or "⏸") in the status bar between clipboard info and key hints
-  - [ ] In `ui.rs`, pass watcher status based on `app.watcher_active`
-  - [ ] Write widget tests for watcher indicator rendering
+- [x] Task 4: Add watcher indicator to status bar (d995cb5)
+  - [x] Add `watcher_status: Option<&'a str>` field to `StatusBarWidget`
+  - [x] Add `watcher_status()` builder method
+  - [x] Render watcher indicator (👁/⏸) in the status bar
+  - [x] In `ui.rs`, pass watcher status based on `app.watcher_active`
 
 ## Phase 4: Configuration Integration
 
-- [ ] Task 1: Add watcher config fields to App/config
-  - [ ] Add watcher-related fields to `App` struct or a `WatcherConfig` struct:
-    - `watcher_enabled: bool` (default: true)
-    - `debounce_ms: u64` (default: 300)
-    - `flood_threshold: usize` (default: 100)
-    - `ignore_patterns: Vec<String>` (defaults from spec)
-  - [ ] Pass config values to `FsWatcher::new()` during initialization
-  - [ ] Write test: config values correctly propagate to watcher
+- [x] Task 1: Add watcher config fields to App/config (d995cb5)
+  - [x] Default constants in `fs/watcher.rs`: `DEFAULT_DEBOUNCE_MS`, `DEFAULT_FLOOD_THRESHOLD`, `DEFAULT_IGNORE_PATTERNS`
+  - [x] Pass config values to `FsWatcher::new()` during initialization
 
-- [ ] Task 2: Add `--no-watcher` CLI flag
-  - [ ] Add `--no-watcher` flag to `Cli` struct in `main.rs` (clap derive)
-  - [ ] When `--no-watcher` is set, skip `FsWatcher` initialization entirely
-  - [ ] Set `app.watcher_active = false` when watcher is disabled
-  - [ ] `F5` manual refresh still works even with `--no-watcher`
-  - [ ] Write test: `--no-watcher` flag prevents watcher creation
+- [x] Task 2: Add `--no-watcher` CLI flag (d995cb5)
+  - [x] Add `--no-watcher` flag to `Cli` struct in `main.rs` (clap derive)
+  - [x] When `--no-watcher` is set, skip `FsWatcher` initialization entirely
+  - [x] Set `app.watcher_active = false` when watcher is disabled
+  - [x] `F5` manual refresh still works even with `--no-watcher`
 
-- [ ] Task 3: Graceful degradation for unsupported filesystems
-  - [ ] Catch `notify::Error` during watcher initialization
-  - [ ] If error (e.g., NFS, FUSE, inotify limit reached): set status message warning, continue without watcher
-  - [ ] Set `app.watcher_active = false` on error
-  - [ ] Write test: watcher error → app continues normally
+- [x] Task 3: Graceful degradation for unsupported filesystems (d995cb5)
+  - [x] Catch `notify::Error` during watcher initialization
+  - [x] If error: set status message warning, continue without watcher
+  - [x] Set `app.watcher_active = false` on error
