@@ -62,7 +62,8 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         .borders(Borders::ALL)
         .border_style(tree_border_style);
 
-    let tree_widget = TreeWidget::new(&app.tree_state, &theme).block(tree_block);
+    let tree_widget =
+        TreeWidget::new(&app.tree_state, &theme, app.config.use_icons()).block(tree_block);
     frame.render_widget(tree_widget, tree_area);
 
     // Render preview panel

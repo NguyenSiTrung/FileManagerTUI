@@ -13,14 +13,16 @@ use crate::theme::ThemeColors;
 pub struct TreeWidget<'a> {
     tree_state: &'a TreeState,
     theme: &'a ThemeColors,
+    use_icons: bool,
     block: Option<Block<'a>>,
 }
 
 impl<'a> TreeWidget<'a> {
-    pub fn new(tree_state: &'a TreeState, theme: &'a ThemeColors) -> Self {
+    pub fn new(tree_state: &'a TreeState, theme: &'a ThemeColors, use_icons: bool) -> Self {
         Self {
             tree_state,
             theme,
+            use_icons,
             block: None,
         }
     }
@@ -73,12 +75,61 @@ impl<'a> TreeWidget<'a> {
         parts.join("")
     }
 
-    /// Get the directory indicator character.
-    fn dir_indicator(item: &FlatItem) -> &'static str {
-        match item.node_type {
-            NodeType::Directory if item.is_expanded => "▼ ",
-            NodeType::Directory => "▶ ",
-            _ => "",
+    /// Get the directory/file indicator.
+    fn item_indicator(&self, item: &FlatItem) -> &'static str {
+        if self.use_icons {
+            match item.node_type {
+                NodeType::Directory if item.is_expanded => " ",
+                NodeType::Directory => " ",
+                NodeType::Symlink => " ",
+                NodeType::File => Self::file_icon_by_ext(&item.name),
+            }
+        } else {
+            match item.node_type {
+                NodeType::Directory if item.is_expanded => "[D] ",
+                NodeType::Directory => "[D] ",
+                NodeType::Symlink => "[L] ",
+                NodeType::File => "[F] ",
+            }
+        }
+    }
+
+    /// Get a Nerd Font icon for a file based on its extension.
+    fn file_icon_by_ext(name: &str) -> &'static str {
+        let ext = name.rsplit('.').next().unwrap_or("").to_lowercase();
+        match ext.as_str() {
+            "rs" => " ",
+            "py" => " ",
+            "js" | "jsx" => " ",
+            "ts" | "tsx" => " ",
+            "html" | "htm" => " ",
+            "css" | "scss" | "sass" => " ",
+            "json" => " ",
+            "toml" | "yaml" | "yml" | "ini" | "cfg" => " ",
+            "md" | "markdown" | "rst" | "txt" => " ",
+            "sh" | "bash" | "zsh" | "fish" => " ",
+            "go" => " ",
+            "java" | "jar" | "class" => " ",
+            "c" | "h" => " ",
+            "cpp" | "cxx" | "cc" | "hpp" => " ",
+            "rb" => " ",
+            "php" => " ",
+            "lua" => " ",
+            "r" => " ",
+            "swift" => " ",
+            "kt" | "kts" => " ",
+            "ex" | "exs" => " ",
+            "lock" => " ",
+            "gitignore" | "gitmodules" | "gitattributes" => " ",
+            "dockerfile" => " ",
+            "png" | "jpg" | "jpeg" | "gif" | "bmp" | "svg" | "ico" | "webp" => " ",
+            "mp3" | "wav" | "flac" | "ogg" | "aac" => " ",
+            "mp4" | "mkv" | "avi" | "mov" | "webm" => " ",
+            "zip" | "tar" | "gz" | "xz" | "bz2" | "rar" | "7z" => " ",
+            "pdf" => " ",
+            "ipynb" => " ",
+            "sql" | "db" | "sqlite" => " ",
+            _ => " ",
         }
     }
 }
@@ -113,7 +164,7 @@ impl<'a> Widget for TreeWidget<'a> {
             }
 
             let prefix = Self::build_prefix(item, items, idx);
-            let indicator = Self::dir_indicator(item);
+            let indicator = self.item_indicator(item);
 
             let is_selected = idx == selected;
             let is_multi_selected = self.tree_state.multi_selected.contains(&idx);
