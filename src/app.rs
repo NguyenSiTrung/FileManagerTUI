@@ -1321,20 +1321,16 @@ impl App {
         }
     }
 
-    /// Search action: copy the absolute path to the status bar.
+    /// Search action: copy the absolute path to the system clipboard.
     pub fn search_action_copy_path(&mut self) {
         if let Some(state) = self.search_action_state.take() {
             let path_str = state.path.to_string_lossy().to_string();
-            match cli_clipboard::set_contents(path_str.clone()) {
+            match copy_to_system_clipboard(&path_str) {
                 Ok(()) => {
                     self.set_status_message(format!("📋 Path copied: {}", path_str));
                 }
-                Err(_) => {
-                    // Fallback: show in status bar even if clipboard unavailable
-                    self.set_status_message(format!(
-                        "📋 Path (clipboard unavailable): {}",
-                        path_str
-                    ));
+                Err(msg) => {
+                    self.set_status_message(format!("📋 {}: {}", msg, path_str));
                 }
             }
             self.mode = AppMode::Normal;
@@ -1711,6 +1707,45 @@ impl App {
         }
         self.watcher_active
     }
+}
+
+/// Copy text to the system clipboard using platform-native commands.
+/// Tries (in order): xclip, xsel, wl-copy (Linux/BSD), pbcopy (macOS).
+/// Returns Ok(()) on success, Err(message) on failure.
+fn copy_to_system_clipboard(text: &str) -> std::result::Result<(), String> {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    // List of clipboard commands to try, with args
+    let commands: &[(&str, &[&str])] = &[
+        ("xclip", &["-selection", "clipboard"]),
+        ("xsel", &["--clipboard", "--input"]),
+        ("wl-copy", &[]),
+        ("pbcopy", &[]),
+    ];
+
+    for (cmd, args) in commands {
+        if let Ok(mut child) = Command::new(cmd)
+            .args(*args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+        {
+            if let Some(ref mut stdin) = child.stdin {
+                if stdin.write_all(text.as_bytes()).is_ok() {
+                    drop(child.stdin.take()); // close stdin to signal EOF
+                    if let Ok(status) = child.wait() {
+                        if status.success() {
+                            return Ok(());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Err("No clipboard tool found (install xclip or xsel)".to_string())
 }
 
 #[cfg(test)]
