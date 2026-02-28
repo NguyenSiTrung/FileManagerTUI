@@ -596,4 +596,89 @@ mod tests {
         // Just check it doesn't panic
         state.toggle_multi_select();
     }
+
+    // === Filter tests ===
+
+    #[test]
+    fn apply_filter_matches_files() {
+        let dir = setup_test_dir();
+        let mut state = TreeState::new(dir.path()).unwrap();
+        state.filter_query = "file".to_string();
+        state.apply_filter();
+        assert!(state.is_filtering);
+        let names: Vec<&str> = state.flat_items.iter().map(|i| i.name.as_str()).collect();
+        assert!(names.contains(&"file_a.txt"));
+        assert!(names.contains(&"file_b.rs"));
+    }
+
+    #[test]
+    fn apply_filter_preserves_ancestors() {
+        let dir = setup_test_dir();
+        let mut state = TreeState::new(dir.path()).unwrap();
+        // Expand alpha to load children
+        state.selected_index = 1; // alpha
+        state.expand_selected();
+        state.filter_query = "inner".to_string();
+        state.apply_filter();
+        let names: Vec<&str> = state.flat_items.iter().map(|i| i.name.as_str()).collect();
+        assert!(names.contains(&"alpha"), "ancestor should be preserved");
+        assert!(names.contains(&"inner.txt"));
+    }
+
+    #[test]
+    fn apply_filter_empty_query_restores() {
+        let dir = setup_test_dir();
+        let mut state = TreeState::new(dir.path()).unwrap();
+        let original_count = state.flat_items.len();
+        state.filter_query = "file".to_string();
+        state.apply_filter();
+        assert!(state.flat_items.len() < original_count);
+        state.filter_query.clear();
+        state.apply_filter();
+        assert!(!state.is_filtering);
+        assert_eq!(state.flat_items.len(), original_count);
+    }
+
+    #[test]
+    fn apply_filter_case_insensitive() {
+        let dir = setup_test_dir();
+        let mut state = TreeState::new(dir.path()).unwrap();
+        state.filter_query = "FILE".to_string();
+        state.apply_filter();
+        let names: Vec<&str> = state.flat_items.iter().map(|i| i.name.as_str()).collect();
+        assert!(names.contains(&"file_a.txt"));
+        assert!(names.contains(&"file_b.rs"));
+    }
+
+    #[test]
+    fn apply_filter_no_matches_shows_root() {
+        let dir = setup_test_dir();
+        let mut state = TreeState::new(dir.path()).unwrap();
+        state.filter_query = "zzzznonexistent".to_string();
+        state.apply_filter();
+        // Root is always shown
+        assert_eq!(state.flat_items.len(), 1);
+    }
+
+    #[test]
+    fn apply_filter_clears_multi_select() {
+        let dir = setup_test_dir();
+        let mut state = TreeState::new(dir.path()).unwrap();
+        state.selected_index = 1;
+        state.toggle_multi_select();
+        assert!(!state.multi_selected.is_empty());
+        state.filter_query = "file".to_string();
+        state.apply_filter();
+        assert!(state.multi_selected.is_empty());
+    }
+
+    #[test]
+    fn find_node_mut_pub_finds_node() {
+        let dir = setup_test_dir();
+        let mut state = TreeState::new(dir.path()).unwrap();
+        let alpha_path = dir.path().join("alpha");
+        let node = TreeState::find_node_mut_pub(&mut state.root, &alpha_path);
+        assert!(node.is_some());
+        assert_eq!(node.unwrap().name, "alpha");
+    }
 }
