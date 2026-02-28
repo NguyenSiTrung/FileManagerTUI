@@ -746,6 +746,12 @@ impl TreeState {
             return;
         }
         let idx = self.selected_index;
+        // Skip LoadMore virtual nodes — they're not real entries
+        if let Some(item) = self.flat_items.get(idx) {
+            if item.node_type == NodeType::LoadMore {
+                return;
+            }
+        }
         if self.multi_selected.contains(&idx) {
             self.multi_selected.remove(&idx);
         } else {

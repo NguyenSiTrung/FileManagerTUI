@@ -46,7 +46,7 @@ const NAVIGATION_KEYS: &[KeyEntry] = &[
     },
     KeyEntry {
         key: "Enter / l / →",
-        description: "Expand directory",
+        description: "Expand dir / Load more entries",
     },
     KeyEntry {
         key: "Backspace / h / ←",

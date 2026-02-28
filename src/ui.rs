@@ -217,10 +217,26 @@ pub fn render(app: &mut App, frame: &mut Frame) {
 
     let file_info = selected_item
         .map(|item| match item.node_type {
-            NodeType::Directory => "Dir".to_string(),
+            NodeType::Directory => {
+                if let Some(count) = item.child_count {
+                    if let Some(remaining) = item.load_more_remaining {
+                        format!("Dir ({}/{} loaded)", count - remaining, count)
+                    } else {
+                        format!("Dir ({} items)", count)
+                    }
+                } else {
+                    "Dir".to_string()
+                }
+            }
             NodeType::File => "File".to_string(),
             NodeType::Symlink => "Symlink".to_string(),
-            NodeType::LoadMore => "Load more...".to_string(),
+            NodeType::LoadMore => {
+                if let Some(remaining) = item.load_more_remaining {
+                    format!("Load more... (~{} remaining)", remaining)
+                } else {
+                    "Load more...".to_string()
+                }
+            }
         })
         .unwrap_or_default();
 
