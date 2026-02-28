@@ -176,6 +176,21 @@ async fn main() -> error::Result<()> {
             Event::OperationComplete(result) => app.handle_operation_complete(result),
             Event::FsChange(paths) => app.handle_fs_change(paths),
             Event::TerminalOutput(data) => app.terminal_state.emulator.process(&data),
+            Event::DirScanComplete { path, snapshot } => {
+                app.handle_dir_scan_complete(&path, snapshot);
+            }
+            Event::DirCountComplete { path, count } => {
+                app.handle_dir_count_complete(&path, count);
+            }
+            Event::DirSummaryUpdate {
+                path,
+                files,
+                dirs,
+                size,
+                done,
+            } => {
+                app.handle_dir_summary_update(&path, files, dirs, size, done);
+            }
         }
 
         // Sync watcher pause/resume state

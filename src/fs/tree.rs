@@ -317,7 +317,7 @@ impl TreeNode {
     /// Create TreeNodes from snapshot entries by stat-ing each one.
     ///
     /// Entries that fail to stat (permission denied, broken symlink) are skipped.
-    fn load_nodes_from_snapshot(
+    pub fn load_nodes_from_snapshot(
         entries: &[SnapshotEntry],
         parent_path: &Path,
         child_depth: usize,

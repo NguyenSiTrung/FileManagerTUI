@@ -2,32 +2,32 @@
 
 ## Phase 1: Core Snapshot Infrastructure (FR-1, FR-2)
 
-- [ ] Task 1: Implement `DirSnapshot` struct and single-pass collection
-  - [ ] Define `DirSnapshot` struct: `Vec<SnapshotEntry>` where `SnapshotEntry = { name: OsString, is_dir: bool }`
-  - [ ] Implement `DirSnapshot::collect(path)` — single `read_dir()` pass, collects entries
-  - [ ] Implement `DirSnapshot::sort(sort_by, dirs_first)` — sort the snapshot
-  - [ ] Add `snapshot: Option<DirSnapshot>` field to `TreeNode`
-  - [ ] Add `loaded_offset: usize` field to `TreeNode` for tracking pagination position
-  - [ ] Write unit tests for `DirSnapshot` collection, sorting, empty dir, permission errors
+- [x] Task 1: Implement `DirSnapshot` struct and single-pass collection
+  - [x] Define `DirSnapshot` struct: `Vec<SnapshotEntry>` where `SnapshotEntry = { name: OsString, is_dir: bool }`
+  - [x] Implement `DirSnapshot::collect(path)` — single `read_dir()` pass, collects entries
+  - [x] Implement `DirSnapshot::sort(sort_by, dirs_first)` — sort the snapshot
+  - [x] Add `snapshot: Option<DirSnapshot>` field to `TreeNode`
+  - [x] Add `loaded_offset: usize` field to `TreeNode` for tracking pagination position
+  - [x] Write unit tests for `DirSnapshot` collection, sorting, empty dir, permission errors
 
-- [ ] Task 2: Refactor `load_children_paged()` to use snapshot
-  - [ ] For dirs ≤ page_size: keep current `load_children_all()` (backward compatible)
-  - [ ] For dirs > page_size: collect snapshot, sort it, load first page from snapshot indices
-  - [ ] Load `TreeNode` metadata (stat) only for current page entries
-  - [ ] Update `total_child_count` from snapshot length (eliminates separate count pass)
-  - [ ] Write tests: small dir (no snapshot), large dir (snapshot + pagination)
+- [x] Task 2: Refactor `load_children_paged()` to use snapshot
+  - [x] For dirs ≤ page_size: keep current `load_children_all()` (backward compatible)
+  - [x] For dirs > page_size: collect snapshot, sort it, load first page from snapshot indices
+  - [x] Load `TreeNode` metadata (stat) only for current page entries
+  - [x] Update `total_child_count` from snapshot length (eliminates separate count pass)
+  - [x] Write tests: small dir (no snapshot), large dir (snapshot + pagination)
 
-- [ ] Task 3: Refactor `load_next_page()` to use snapshot index
-  - [ ] Replace HashSet dedup with `loaded_offset` index into snapshot
-  - [ ] Load `snapshot[loaded_offset..loaded_offset+page_size]`, stat each, create TreeNode
-  - [ ] Increment `loaded_offset` after load
-  - [ ] Update `has_more_children` from `loaded_offset < snapshot.len()`
-  - [ ] Write tests: sequential page loads, last page, empty remaining
+- [x] Task 3: Refactor `load_next_page()` to use snapshot index
+  - [x] Replace HashSet dedup with `loaded_offset` index into snapshot
+  - [x] Load `snapshot[loaded_offset..loaded_offset+page_size]`, stat each, create TreeNode
+  - [x] Increment `loaded_offset` after load
+  - [x] Update `has_more_children` from `loaded_offset < snapshot.len()`
+  - [x] Write tests: sequential page loads, last page, empty remaining
 
-- [ ] Task 4: Update sort integration
-  - [ ] `sort_children_of()` must re-sort the snapshot when sort mode changes
-  - [ ] `cycle_sort()` / `toggle_dirs_first()` must invalidate loaded pages and re-paginate from snapshot
-  - [ ] Write tests: sort change re-paginates correctly
+- [x] Task 4: Update sort integration
+  - [x] `sort_children_of()` must re-sort the snapshot when sort mode changes
+  - [x] `cycle_sort()` / `toggle_dirs_first()` must invalidate loaded pages and re-paginate from snapshot
+  - [x] Write tests: sort change re-paginates correctly
 
 ## Phase 2: Async Operations Pipeline (FR-1 async, FR-4, FR-6, FR-7)
 

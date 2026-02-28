@@ -6,6 +6,8 @@ use tokio::sync::mpsc;
 
 use crate::error::Result;
 
+use crate::fs::tree::DirSnapshot;
+
 /// Progress update from an async file operation.
 #[derive(Debug, Clone)]
 pub struct ProgressUpdate {
@@ -55,6 +57,24 @@ pub enum Event {
     FsChange(Vec<PathBuf>),
     /// Raw output from the embedded terminal PTY.
     TerminalOutput(Vec<u8>),
+    /// Async directory snapshot collection completed.
+    #[allow(dead_code)]
+    DirScanComplete {
+        path: PathBuf,
+        snapshot: DirSnapshot,
+    },
+    /// Async directory child count completed.
+    #[allow(dead_code)]
+    DirCountComplete { path: PathBuf, count: usize },
+    /// Async directory summary update (streaming).
+    #[allow(dead_code)]
+    DirSummaryUpdate {
+        path: PathBuf,
+        files: u64,
+        dirs: u64,
+        size: u64,
+        done: bool,
+    },
 }
 
 /// Async event handler that polls crossterm events and forwards them via a channel.

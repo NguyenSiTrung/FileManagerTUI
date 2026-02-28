@@ -1778,8 +1778,121 @@ impl App {
         }
         self.watcher_active
     }
+
+    // === Async directory operation handlers ===
+
+    /// Handle an async directory scan completion.
+    ///
+    /// Installs the snapshot into the tree node and loads the first page.
+    #[allow(dead_code)]
+    pub fn handle_dir_scan_complete(
+        &mut self,
+        path: &std::path::Path,
+        mut snapshot: crate::fs::tree::DirSnapshot,
+    ) {
+        let sort_by = self.tree_state.sort_by.clone();
+        let dirs_first = self.tree_state.dirs_first;
+        let page_size = self.tree_state.page_size;
+
+        if let Some(node) =
+            crate::fs::tree::TreeState::find_node_mut_pub(&mut self.tree_state.root, path)
+        {
+            // Sort the snapshot with current settings
+            snapshot.sort(&sort_by, dirs_first);
+
+            let total = snapshot.len();
+            node.total_child_count = Some(total);
+
+            if total <= page_size {
+                // Small enough → just load all (no snapshot needed)
+                let _ = node.load_children_paged_with_sort(page_size, &sort_by, dirs_first);
+            } else {
+                // Install snapshot and load first page
+                let page_entries = snapshot.page(0, page_size);
+                let children = crate::fs::tree::TreeNode::load_nodes_from_snapshot(
+                    page_entries,
+                    &node.path,
+                    node.depth + 1,
+                );
+                let loaded = children.len();
+                node.children = Some(children);
+                node.loaded_child_count = loaded;
+                node.loaded_offset = loaded;
+                node.has_more_children = loaded < total;
+                node.snapshot = Some(snapshot);
+            }
+
+            TreeState::sort_children_of_pub(node, &sort_by, dirs_first);
+            node.is_expanded = true;
+            self.tree_state.flatten();
+        }
+    }
+
+    /// Handle an async child count completion.
+    ///
+    /// Updates the node's total_child_count cache for badge display.
+    #[allow(dead_code)]
+    pub fn handle_dir_count_complete(&mut self, path: &std::path::Path, count: usize) {
+        if let Some(node) =
+            crate::fs::tree::TreeState::find_node_mut_pub(&mut self.tree_state.root, path)
+        {
+            node.total_child_count = Some(count);
+        }
+        // No flatten needed — badge display reads from TreeNode directly
+    }
+
+    /// Handle an async directory summary update.
+    ///
+    /// Updates the preview panel with directory statistics.
+    #[allow(dead_code)]
+    pub fn handle_dir_summary_update(
+        &mut self,
+        path: &std::path::Path,
+        files: u64,
+        dirs: u64,
+        size: u64,
+        done: bool,
+    ) {
+        // Only update if the preview is showing this directory
+        if self.preview_state.current_path.as_deref() != Some(path) {
+            return;
+        }
+
+        let status = if done { "Complete" } else { "Scanning..." };
+        let size_str = format_size_bytes(size);
+        let summary = format!(
+            "📁 Directory Summary ({})\n\n  Files: {}\n  Directories: {}\n  Total size: {}",
+            status, files, dirs, size_str
+        );
+
+        self.preview_state.content_lines = summary
+            .lines()
+            .map(|l| ratatui::text::Line::raw(l.to_string()))
+            .collect();
+        self.preview_state.total_lines = self.preview_state.content_lines.len();
+    }
 }
 
+/// Format a byte size into a human-readable string.
+#[allow(dead_code)]
+fn format_size_bytes(bytes: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = KB * 1024;
+    const GB: u64 = MB * 1024;
+    const TB: u64 = GB * 1024;
+
+    if bytes >= TB {
+        format!("{:.2} TB", bytes as f64 / TB as f64)
+    } else if bytes >= GB {
+        format!("{:.2} GB", bytes as f64 / GB as f64)
+    } else if bytes >= MB {
+        format!("{:.2} MB", bytes as f64 / MB as f64)
+    } else if bytes >= KB {
+        format!("{:.2} KB", bytes as f64 / KB as f64)
+    } else {
+        format!("{} B", bytes)
+    }
+}
 /// Copy text to the system clipboard using platform-native commands.
 /// Tries (in order): xclip, xsel, wl-copy (Linux/BSD), pbcopy (macOS).
 /// Returns Ok(()) on success, Err(message) on failure.
