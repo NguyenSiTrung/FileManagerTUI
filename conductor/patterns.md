@@ -107,4 +107,10 @@ This file is the project's institutional knowledge - learnings extracted from co
 - Shift+Arrow extends selection by updating cursor while keeping anchor fixed — Ctrl+A sets anchor=(0,0) cursor=(last_line, last_col) (from: editor-selection, 2026-02-28)
 - Editor theme colors for selection highlight (`editor_selection_bg`) added alongside existing cursor/match colors (from: editor-selection, 2026-02-28)
 
-Last refreshed: 2026-02-28 (editor selection + mouse support)
+- Two-state overlay transition (Search → SearchAction) preserves search query when going back via Esc — reusable pattern for multi-step overlays (from: search-action_20260228, archived 2026-03-01)
+- Clone SearchActionState before match in handler to avoid borrow conflicts — same pattern as DialogKind clone (from: search-action_20260228, archived 2026-03-01)
+- `enter_edit_mode()` requires `update_preview()` first since it reads `preview_state.current_path` — order-dependent state setup (from: search-action_20260228, archived 2026-03-01)
+- `detect_file_type` must handle directory case before checking binary — directories are never binary (from: search-action_20260228, archived 2026-03-01)
+- Action filtering at both handler level (guards on key matches) and widget level (dynamic action list) for context-aware menus (from: search-action_20260228, archived 2026-03-01)
+
+Last refreshed: 2026-03-01 (search action menu patterns)

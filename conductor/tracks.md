@@ -26,10 +26,6 @@
 
 ---
 
-## [x] Track: Search Action Menu
-*Link: [./conductor/tracks/search-action_20260228/](./conductor/tracks/search-action_20260228/)*
+<!-- Archived: search-action_20260228 (2026-03-01) → conductor/archive/ -->
 
----
-
-## [x] Track: Large Directory Performance
-*Link: [./conductor/tracks/large-dir-perf_20260228/](./conductor/tracks/large-dir-perf_20260228/)*
+<!-- Archived: large-dir-perf_20260228 (2026-03-01) → conductor/archive/ -->
