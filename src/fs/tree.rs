@@ -348,6 +348,9 @@ impl TreeNode {
     /// Uses cached `total_child_count` if available, otherwise performs
     /// a fast `read_dir().count()` and caches the result.
     /// Returns `None` on permission denied or other errors.
+    ///
+    /// **Note**: This can block on large or network directories.
+    /// Prefer `child_count_cached()` for UI rendering code.
     #[allow(dead_code)]
     pub fn get_child_count(&mut self) -> Option<usize> {
         if let Some(count) = self.total_child_count {
@@ -364,6 +367,15 @@ impl TreeNode {
             }
             Err(_) => None,
         }
+    }
+
+    /// Get the cached child count without any I/O.
+    ///
+    /// Returns `None` if the count hasn't been computed yet.
+    /// Use `spawn_async_child_count` to populate this value asynchronously.
+    #[allow(dead_code)]
+    pub fn child_count_cached(&self) -> Option<usize> {
+        self.total_child_count
     }
 
     /// Load the next page of children for a paginated directory.
