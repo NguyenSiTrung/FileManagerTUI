@@ -206,6 +206,57 @@ impl TreeNode {
             Err(_) => None,
         }
     }
+
+    /// Load the next page of children for a paginated directory.
+    ///
+    /// Skips already-loaded entries by checking against the existing child
+    /// paths, then loads up to `page_size` new entries. Appends them to
+    /// the existing children vec.
+    ///
+    /// Returns the number of newly loaded entries.
+    pub fn load_next_page(&mut self, page_size: usize) -> Result<usize> {
+        if self.node_type != NodeType::Directory || !self.has_more_children {
+            return Ok(0);
+        }
+
+        // Collect already-loaded child paths for dedup
+        let existing: std::collections::HashSet<PathBuf> = self
+            .children
+            .as_ref()
+            .map(|c| c.iter().map(|n| n.path.clone()).collect())
+            .unwrap_or_default();
+
+        let entries = fs::read_dir(&self.path)?;
+        let children = self.children.get_or_insert_with(Vec::new);
+        let mut newly_loaded = 0;
+
+        for entry in entries {
+            if newly_loaded >= page_size {
+                break;
+            }
+            let entry = match entry {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+            let path = entry.path();
+            // Skip already-loaded entries
+            if existing.contains(&path) {
+                continue;
+            }
+            match TreeNode::new(&path, self.depth + 1) {
+                Ok(node) => {
+                    children.push(node);
+                    newly_loaded += 1;
+                }
+                Err(_) => continue,
+            }
+        }
+
+        self.loaded_child_count += newly_loaded;
+        let total = self.total_child_count.unwrap_or(0);
+        self.has_more_children = self.loaded_child_count < total;
+        Ok(newly_loaded)
+    }
 }
 
 /// A flattened representation of a tree node for rendering.
@@ -424,6 +475,32 @@ impl TreeState {
                 self.flatten();
             }
         }
+    }
+
+    /// Load the next page of a paginated directory.
+    ///
+    /// Called when the user activates a "Load more..." virtual node.
+    /// `parent_path` is the directory to load more entries from.
+    /// Returns the number of newly loaded entries.
+    pub fn load_next_page(&mut self, parent_path: &Path) -> usize {
+        let sort_by = self.sort_by.clone();
+        let dirs_first = self.dirs_first;
+        let page_size = self.page_size;
+
+        let loaded = if let Some(node) = Self::find_node_mut(&mut self.root, parent_path) {
+            let count = node.load_next_page(page_size).unwrap_or(0);
+            if count > 0 {
+                Self::sort_children_of(node, &sort_by, dirs_first);
+            }
+            count
+        } else {
+            0
+        };
+
+        if loaded > 0 {
+            self.flatten();
+        }
+        loaded
     }
 
     /// Collapse the currently selected directory, or jump to parent.
@@ -1286,5 +1363,80 @@ mod tests {
         node.load_children().unwrap();
         assert_eq!(node.children.as_ref().unwrap().len(), 50);
         assert!(!node.has_more_children);
+    }
+
+    #[test]
+    fn load_next_page_sequential() {
+        let dir = setup_large_dir(25);
+        let mut node = TreeNode::new(dir.path(), 0).unwrap();
+
+        // First page: 10 entries
+        node.load_children_paged(10).unwrap();
+        assert_eq!(node.loaded_child_count, 10);
+        assert!(node.has_more_children);
+
+        // Second page: 10 more entries
+        let loaded = node.load_next_page(10).unwrap();
+        assert_eq!(loaded, 10);
+        assert_eq!(node.loaded_child_count, 20);
+        assert_eq!(node.children.as_ref().unwrap().len(), 20);
+        assert!(node.has_more_children);
+
+        // Third page: only 5 remaining
+        let loaded = node.load_next_page(10).unwrap();
+        assert_eq!(loaded, 5);
+        assert_eq!(node.loaded_child_count, 25);
+        assert_eq!(node.children.as_ref().unwrap().len(), 25);
+        assert!(!node.has_more_children);
+
+        // Fourth page: nothing left
+        let loaded = node.load_next_page(10).unwrap();
+        assert_eq!(loaded, 0);
+    }
+
+    #[test]
+    fn tree_state_load_next_page_removes_load_more() {
+        let dir = setup_large_dir(15);
+        let mut state = TreeState::with_page_size(dir.path(), 5).unwrap();
+        state.flatten();
+
+        // Initially: root + 5 children + LoadMore = 7
+        assert_eq!(
+            state
+                .flat_items
+                .iter()
+                .filter(|i| i.node_type == NodeType::LoadMore)
+                .count(),
+            1
+        );
+
+        // Load next page
+        let loaded = state.load_next_page(dir.path());
+        assert_eq!(loaded, 5);
+
+        // Now: root + 10 children + LoadMore = 12
+        assert_eq!(
+            state
+                .flat_items
+                .iter()
+                .filter(|i| i.node_type == NodeType::LoadMore)
+                .count(),
+            1
+        );
+
+        // Load final page
+        let loaded = state.load_next_page(dir.path());
+        assert_eq!(loaded, 5);
+
+        // All loaded: root + 15 children, no LoadMore
+        assert_eq!(
+            state
+                .flat_items
+                .iter()
+                .filter(|i| i.node_type == NodeType::LoadMore)
+                .count(),
+            0
+        );
+        assert!(!state.root.has_more_children);
     }
 }

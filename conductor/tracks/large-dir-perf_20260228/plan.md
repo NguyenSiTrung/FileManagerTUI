@@ -17,16 +17,16 @@
   - [x] Add `FlatItem` support for `NodeType::LoadMore` (carries parent path + remaining count)
   - [x] Add unit tests for new TreeNode fields
 
-- [ ] Task 3: Implement paginated `load_children()`
+- [x] Task 3: Implement paginated `load_children()`
   <!-- files: src/fs/tree.rs -->
   <!-- depends: task2 -->
-  - [ ] Rename current `load_children()` to `load_children_all()` (internal, for small dirs)
-  - [ ] Create new `load_children_paged(&mut self, page_size: usize)` that reads only N entries via `read_dir()` iterator
-  - [ ] Store the directory's total immediate child count via a fast `read_dir().count()` pre-scan
-  - [ ] If total <= page_size, call `load_children_all()` (no pagination needed — backward compatible)
-  - [ ] If total > page_size, load first page, set `has_more_children = true`
-  - [ ] Add a synthetic "Load more" `TreeNode` child when `has_more_children` is true
-  - [ ] Add unit tests: small dir (no pagination), large dir (pagination triggers), edge cases
+  - [x] Rename current `load_children()` to `load_children_all()` (internal, for small dirs)
+  - [x] Create new `load_children_paged(&mut self, page_size: usize)` that reads only N entries via `read_dir()` iterator
+  - [x] Store the directory's total immediate child count via a fast `read_dir().count()` pre-scan
+  - [x] If total <= page_size, call `load_children_all()` (no pagination needed — backward compatible)
+  - [x] If total > page_size, load first page, set `has_more_children = true`
+  - [x] Add a synthetic "Load more" `TreeNode` child when `has_more_children` is true
+  - [x] Add unit tests: small dir (no pagination), large dir (pagination triggers), edge cases
 
 - [ ] Task 4: Implement `load_next_page()`
   <!-- files: src/fs/tree.rs, src/app.rs -->

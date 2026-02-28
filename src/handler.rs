@@ -46,10 +46,21 @@ pub fn handle_mouse_event(
                     app.tree_state.selected_index = clicked_index;
                     app.last_previewed_index = None; // Force preview update
 
-                    // If clicking already-selected directory, toggle expand/collapse
+                    // If clicking already-selected item, toggle expand/collapse or load more
                     if already_selected {
                         if let Some(item) = app.tree_state.flat_items.get(clicked_index) {
-                            if item.node_type == NodeType::Directory {
+                            if item.node_type == NodeType::LoadMore {
+                                if let Some(parent_path) = item.load_more_parent.clone() {
+                                    let loaded = app.tree_state.load_next_page(&parent_path);
+                                    if loaded > 0 {
+                                        app.set_status_message(format!(
+                                            "Loaded {} more entries",
+                                            loaded
+                                        ));
+                                        app.invalidate_search_cache();
+                                    }
+                                }
+                            } else if item.node_type == NodeType::Directory {
                                 if item.is_expanded {
                                     app.collapse_selected();
                                 } else {
@@ -617,8 +628,23 @@ fn handle_tree_keys(app: &mut App, key: KeyEvent, event_tx: &mpsc::UnboundedSend
         KeyCode::Char('g') | KeyCode::Home => app.select_first(),
         KeyCode::Char('G') | KeyCode::End => app.select_last(),
 
-        // Tree expand/collapse
-        KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => app.expand_selected(),
+        // Tree expand/collapse / Load more
+        KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => {
+            if let Some(item) = app.tree_state.flat_items.get(app.tree_state.selected_index) {
+                if item.node_type == NodeType::LoadMore {
+                    // Trigger load_next_page on the parent directory
+                    if let Some(parent_path) = item.load_more_parent.clone() {
+                        let loaded = app.tree_state.load_next_page(&parent_path);
+                        if loaded > 0 {
+                            app.set_status_message(format!("Loaded {} more entries", loaded));
+                            app.invalidate_search_cache();
+                        }
+                    }
+                } else {
+                    app.expand_selected();
+                }
+            }
+        }
         KeyCode::Backspace | KeyCode::Char('h') | KeyCode::Left => app.collapse_selected(),
 
         // Toggle hidden files
