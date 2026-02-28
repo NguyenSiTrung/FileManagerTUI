@@ -28,3 +28,8 @@
 
 ## [x] Track: Search Action Menu
 *Link: [./conductor/tracks/search-action_20260228/](./conductor/tracks/search-action_20260228/)*
+
+---
+
+## [ ] Track: Large Directory Performance
+*Link: [./conductor/tracks/large-dir-perf_20260228/](./conductor/tracks/large-dir-perf_20260228/)*
