@@ -2041,4 +2041,98 @@ mod tests {
         let (msg, _) = app.status_message.as_ref().unwrap();
         assert!(msg.contains("resumed") || msg.contains("👁"));
     }
+
+    #[test]
+    fn handle_fs_change_preserves_sort_order() {
+        let (dir, mut app) = setup_app();
+
+        // Verify initial sort order: dirs first (alpha, beta), then files (file_a.txt, file_b.rs)
+        // flat_items[0] = root, [1] = alpha, [2] = beta, [3] = file_a.txt, [4] = file_b.rs
+        assert_eq!(app.tree_state.flat_items[1].name, "alpha");
+        assert_eq!(app.tree_state.flat_items[2].name, "beta");
+        assert_eq!(app.tree_state.flat_items[3].name, "file_a.txt");
+        assert_eq!(app.tree_state.flat_items[4].name, "file_b.rs");
+
+        // Create a new file externally to trigger a change
+        File::create(dir.path().join("aaa_new.txt")).unwrap();
+        fs::create_dir(dir.path().join("gamma")).unwrap();
+        app.handle_fs_change(vec![
+            dir.path().join("aaa_new.txt"),
+            dir.path().join("gamma"),
+        ]);
+
+        // After fs change, dirs must still appear first, alphabetically sorted
+        let names: Vec<&str> = app
+            .tree_state
+            .flat_items
+            .iter()
+            .skip(1) // skip root
+            .map(|item| item.name.as_str())
+            .collect();
+
+        // Find the boundary between dirs and files
+        let dir_count = names
+            .iter()
+            .take_while(|n| {
+                app.tree_state
+                    .flat_items
+                    .iter()
+                    .find(|i| i.name == **n)
+                    .map(|i| i.node_type == crate::fs::tree::NodeType::Directory)
+                    .unwrap_or(false)
+            })
+            .count();
+
+        // All directories should come first
+        assert!(
+            dir_count >= 3,
+            "Expected at least 3 dirs (alpha, beta, gamma), got {dir_count}"
+        );
+
+        // Directories should be alphabetically sorted
+        let dir_names: Vec<&str> = names[..dir_count].to_vec();
+        assert_eq!(dir_names, vec!["alpha", "beta", "gamma"]);
+
+        // Files should be alphabetically sorted
+        let file_names: Vec<&str> = names[dir_count..].to_vec();
+        let mut expected_files = file_names.clone();
+        expected_files.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
+        assert_eq!(
+            file_names, expected_files,
+            "Files should be alphabetically sorted"
+        );
+    }
+
+    #[test]
+    fn navigate_to_path_preserves_sort_order() {
+        let (dir, mut app) = setup_app();
+
+        // Create nested structure: alpha/z_file.txt, alpha/a_file.txt, alpha/nested_dir/
+        fs::create_dir_all(dir.path().join("alpha").join("nested_dir")).unwrap();
+        File::create(dir.path().join("alpha").join("z_file.txt")).unwrap();
+        File::create(dir.path().join("alpha").join("a_file.txt")).unwrap();
+
+        // Navigate to a nested file — this forces alpha to expand
+        let target = dir.path().join("alpha").join("a_file.txt");
+        app.navigate_to_path(&target);
+
+        // Find alpha's children in the flat list
+        let alpha_children: Vec<&str> = app
+            .tree_state
+            .flat_items
+            .iter()
+            .filter(|i| i.depth == 2) // alpha's children are at depth 2
+            .map(|i| i.name.as_str())
+            .collect();
+
+        // nested_dir (directory) should come first, then a_file, z_file (alphabetical)
+        assert!(
+            !alpha_children.is_empty(),
+            "Alpha should have children after navigate_to_path"
+        );
+        assert_eq!(
+            alpha_children[0], "nested_dir",
+            "Directory should come first"
+        );
+    }
 }

@@ -13,12 +13,12 @@
 - [x] Task 3: Add sorting after `load_children()` in `navigate_to_path()`
   - In `app.rs`, after `node.load_children()` in the ancestor expansion loop, apply sorting via `TreeState::sort_children_of()`
 
-- [ ] Task 4: Add regression test for sort order after `handle_fs_change()`
+- [x] Task 4: Add regression test for sort order after `handle_fs_change()`
   - Create test `handle_fs_change_preserves_sort_order` in `app.rs` tests
   - Setup: create dirs + files, trigger `handle_fs_change`, assert dirs-first order is maintained
   - Run `cargo test` to verify all tests pass
 
-- [ ] Task 5: Final verification
+- [x] Task 5: Final verification
   - Run `cargo clippy -- -D warnings`
   - Run `cargo fmt --check`
   - Run `cargo test`
