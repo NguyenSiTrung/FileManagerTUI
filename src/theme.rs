@@ -47,6 +47,16 @@ pub struct ThemeColors {
     pub info_fg: Color,
     pub accent_fg: Color,
     pub dim_fg: Color,
+
+    // Editor (preview edit mode)
+    pub editor_line_nr: Color,
+    pub editor_line_nr_current: Color,
+    pub editor_gutter_sep: Color,
+    pub editor_cursor_fg: Color,
+    pub editor_cursor_bg: Color,
+    pub editor_current_line_bg: Color,
+    pub editor_find_match_bg: Color,
+    pub editor_find_bar_bg: Color,
 }
 
 // ── Built-in palettes ────────────────────────────────────────────────────────
@@ -87,6 +97,16 @@ pub fn dark_theme() -> ThemeColors {
         info_fg: Color::Rgb(137, 180, 250),    // #89b4fa (blue)
         accent_fg: Color::Rgb(203, 166, 247),  // #cba6f7 (mauve)
         dim_fg: Color::Rgb(108, 112, 134),     // #6c7086
+
+        // Editor
+        editor_line_nr: Color::Rgb(108, 112, 134), // #6c7086 (overlay0)
+        editor_line_nr_current: Color::Rgb(249, 226, 175), // #f9e2af (yellow)
+        editor_gutter_sep: Color::Rgb(69, 71, 90), // #45475a (surface1)
+        editor_cursor_fg: Color::Rgb(30, 30, 46),  // #1e1e2e (base)
+        editor_cursor_bg: Color::Rgb(205, 214, 244), // #cdd6f4 (text)
+        editor_current_line_bg: Color::Rgb(49, 50, 68), // #313244 (surface0)
+        editor_find_match_bg: Color::Rgb(249, 226, 175), // #f9e2af (yellow)
+        editor_find_bar_bg: Color::Rgb(49, 50, 68), // #313244 (surface0)
     }
 }
 
@@ -126,6 +146,16 @@ pub fn light_theme() -> ThemeColors {
         info_fg: Color::Rgb(30, 102, 245),
         accent_fg: Color::Rgb(136, 57, 239), // #8839ef (mauve)
         dim_fg: Color::Rgb(156, 160, 176),
+
+        // Editor
+        editor_line_nr: Color::Rgb(156, 160, 176), // #9ca0b0
+        editor_line_nr_current: Color::Rgb(223, 142, 29), // #df8e1d (yellow)
+        editor_gutter_sep: Color::Rgb(204, 208, 218), // #ccd0da (surface1)
+        editor_cursor_fg: Color::Rgb(239, 241, 245), // #eff1f5 (base)
+        editor_cursor_bg: Color::Rgb(76, 79, 105), // #4c4f69 (text)
+        editor_current_line_bg: Color::Rgb(230, 233, 239), // #e6e9ef (surface0)
+        editor_find_match_bg: Color::Rgb(223, 142, 29), // #df8e1d (yellow)
+        editor_find_bar_bg: Color::Rgb(230, 233, 239), // #e6e9ef
     }
 }
 

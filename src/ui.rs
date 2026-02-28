@@ -7,6 +7,7 @@ use ratatui::{
 
 use crate::app::{App, AppMode, FocusedPanel};
 use crate::components::dialog::DialogWidget;
+use crate::components::editor::EditorWidget;
 use crate::components::help::HelpOverlay;
 use crate::components::preview::PreviewWidget;
 use crate::components::search::SearchWidget;
@@ -95,41 +96,79 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         TreeWidget::new(&app.tree_state, &theme, app.config.use_icons()).block(tree_block);
     frame.render_widget(tree_widget, tree_area);
 
-    // Render preview panel
-    let preview_title = match &app.preview_state.current_path {
-        Some(path) => {
-            let name = path
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_else(|| "Preview".to_string());
-            if path.extension().and_then(|e| e.to_str()) == Some("ipynb") {
-                // Count cells from content lines (cell headers start with ━━━)
-                let cell_count = app
-                    .preview_state
-                    .content_lines
-                    .iter()
-                    .filter(|l| {
-                        l.spans
-                            .first()
-                            .map(|s| s.content.starts_with('━'))
-                            .unwrap_or(false)
-                    })
-                    .count();
-                format!(" Notebook: {} cells ", cell_count)
-            } else {
-                format!(" {} ", name)
+    // Render preview panel (or editor if in edit mode)
+    if app.mode == AppMode::Edit && app.editor_state.is_some() {
+        // Edit mode: render editor widget
+        let dirty = app.editor_state.as_ref().is_some_and(|e| e.modified);
+        let editor_title = match &app.preview_state.current_path {
+            Some(path) => {
+                let name = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "Editor".to_string());
+                if dirty {
+                    format!(" {} ● [EDIT] ", name)
+                } else {
+                    format!(" {} [EDIT] ", name)
+                }
             }
+            None => " Editor ".to_string(),
+        };
+
+        let editor_block = Block::default()
+            .title(editor_title)
+            .borders(Borders::ALL)
+            .border_style(preview_border_style);
+
+        // Update visible_height before rendering
+        if let Some(ref mut editor) = app.editor_state {
+            let inner_height = preview_area.height.saturating_sub(2) as usize;
+            editor.visible_height = inner_height;
+            editor.ensure_cursor_visible();
         }
-        None => " Preview ".to_string(),
-    };
 
-    let preview_block = Block::default()
-        .title(preview_title)
-        .borders(Borders::ALL)
-        .border_style(preview_border_style);
+        if let Some(ref editor) = app.editor_state {
+            let editor_widget =
+                EditorWidget::new(editor, &theme, &app.syntax_set, &app.syntax_theme)
+                    .block(editor_block);
+            frame.render_widget(editor_widget, preview_area);
+        }
+    } else {
+        // Normal preview mode
+        let preview_title = match &app.preview_state.current_path {
+            Some(path) => {
+                let name = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "Preview".to_string());
+                if path.extension().and_then(|e| e.to_str()) == Some("ipynb") {
+                    let cell_count = app
+                        .preview_state
+                        .content_lines
+                        .iter()
+                        .filter(|l| {
+                            l.spans
+                                .first()
+                                .map(|s| s.content.starts_with('━'))
+                                .unwrap_or(false)
+                        })
+                        .count();
+                    format!(" Notebook: {} cells ", cell_count)
+                } else {
+                    format!(" {} ", name)
+                }
+            }
+            None => " Preview ".to_string(),
+        };
 
-    let preview_widget = PreviewWidget::new(&app.preview_state, &theme).block(preview_block);
-    frame.render_widget(preview_widget, preview_area);
+        let preview_block = Block::default()
+            .title(preview_title)
+            .borders(Borders::ALL)
+            .border_style(preview_border_style);
+
+        let preview_widget = PreviewWidget::new(&app.preview_state, &theme).block(preview_block);
+        frame.render_widget(preview_widget, preview_area);
+    }
 
     // Render terminal panel if visible
     if terminal_visible {
