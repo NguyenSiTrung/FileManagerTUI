@@ -651,7 +651,11 @@ mod tests {
         let dir = setup_test_dir();
         // Write different amounts to files to give them different sizes
         std::fs::write(dir.path().join("file_a.txt"), "small").unwrap();
-        std::fs::write(dir.path().join("file_b.rs"), "this is a much larger file content").unwrap();
+        std::fs::write(
+            dir.path().join("file_b.rs"),
+            "this is a much larger file content",
+        )
+        .unwrap();
 
         let mut state = TreeState::new(dir.path()).unwrap();
         state.sort_by = SortBy::Size;
