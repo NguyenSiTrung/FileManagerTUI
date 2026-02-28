@@ -31,5 +31,5 @@
 
 ---
 
-## [~] Track: Large Directory Performance
+## [x] Track: Large Directory Performance
 *Link: [./conductor/tracks/large-dir-perf_20260228/](./conductor/tracks/large-dir-perf_20260228/)*
