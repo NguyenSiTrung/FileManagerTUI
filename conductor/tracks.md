@@ -12,5 +12,5 @@
 
 ---
 
-## [~] Track: Configuration + Polish (Milestone 7)
+## [x] Track: Configuration + Polish (Milestone 7)
 *Link: [./conductor/tracks/config-polish_20260228/](./conductor/tracks/config-polish_20260228/)*
