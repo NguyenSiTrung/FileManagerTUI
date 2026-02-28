@@ -778,11 +778,36 @@ impl TreeState {
     }
 
     /// Recursively sort all loaded children in the tree.
-    fn sort_all_children_recursive(node: &mut TreeNode, sort_by: &SortBy, dirs_first: bool) {
+    ///
+    /// For paginated directories with snapshots: re-sort the snapshot,
+    /// drop loaded children, and re-load the first page from the new order.
+    fn sort_all_children_recursive(
+        node: &mut TreeNode,
+        sort_by: &SortBy,
+        dirs_first: bool,
+        page_size: usize,
+    ) {
+        // If this node has a snapshot (paginated), re-sort and re-paginate
+        if let Some(ref mut snapshot) = node.snapshot {
+            snapshot.sort(sort_by, dirs_first);
+            // Re-load first page from re-sorted snapshot
+            let page_entries = snapshot.page(0, page_size);
+            let children =
+                TreeNode::load_nodes_from_snapshot(page_entries, &node.path, node.depth + 1);
+            let loaded = children.len();
+            node.children = Some(children);
+            node.loaded_child_count = loaded;
+            node.loaded_offset = loaded;
+            node.has_more_children = loaded < snapshot.len();
+        }
+
+        // Sort currently loaded children (applies full metadata sort: size/modified/name)
         Self::sort_children_of(node, sort_by, dirs_first);
+
+        // Recurse into children
         if let Some(children) = &mut node.children {
             for child in children.iter_mut() {
-                Self::sort_all_children_recursive(child, sort_by, dirs_first);
+                Self::sort_all_children_recursive(child, sort_by, dirs_first, page_size);
             }
         }
     }
@@ -791,7 +816,8 @@ impl TreeState {
     pub fn sort_all_children(&mut self) {
         let sort_by = self.sort_by.clone();
         let dirs_first = self.dirs_first;
-        Self::sort_all_children_recursive(&mut self.root, &sort_by, dirs_first);
+        let page_size = self.page_size;
+        Self::sort_all_children_recursive(&mut self.root, &sort_by, dirs_first, page_size);
     }
 
     /// Cycle to the next sort mode and re-sort.
@@ -1767,5 +1793,69 @@ mod tests {
             .collect();
 
         assert_eq!(names1, names2);
+    }
+
+    #[test]
+    fn sort_change_re_paginates_snapshot_dir() {
+        let dir = setup_large_dir(20);
+        let mut state = TreeState::with_page_size(dir.path(), 5).unwrap();
+
+        // Root has snapshot with 20 entries, first page loaded
+        assert!(state.root.snapshot.is_some());
+        assert_eq!(state.root.loaded_child_count, 5);
+        assert_eq!(state.root.loaded_offset, 5);
+        assert!(state.root.has_more_children);
+
+        // Load second page
+        state.load_next_page(dir.path());
+        assert_eq!(state.root.loaded_child_count, 10);
+        assert_eq!(state.root.loaded_offset, 10);
+
+        // Now change sort mode
+        state.cycle_sort(); // Name -> Size
+
+        // After sort change, paginated dir should be re-paginated from beginning
+        assert_eq!(state.root.loaded_child_count, 5);
+        assert_eq!(state.root.loaded_offset, 5);
+        assert!(state.root.has_more_children);
+        assert!(state.root.snapshot.is_some());
+    }
+
+    #[test]
+    fn toggle_dirs_first_re_paginates_snapshot_dir() {
+        let dir = TempDir::new().unwrap();
+        // Create mix of files and dirs (>5 entries for pagination)
+        for i in 0..4 {
+            fs::create_dir(dir.path().join(format!("dir_{:02}", i))).unwrap();
+        }
+        for i in 0..6 {
+            File::create(dir.path().join(format!("file_{:02}.txt", i))).unwrap();
+        }
+
+        let mut state = TreeState::with_page_size(dir.path(), 5).unwrap();
+
+        // First page should be dirs + some files (dirs_first=true)
+        let first_page_names: Vec<String> = state
+            .root
+            .children
+            .as_ref()
+            .unwrap()
+            .iter()
+            .map(|n| n.name.clone())
+            .collect();
+
+        // All 4 dirs should be in first page (dirs_first=true)
+        let dir_count = first_page_names
+            .iter()
+            .filter(|n| n.starts_with("dir_"))
+            .count();
+        assert_eq!(dir_count, 4);
+
+        // Toggle dirs_first off
+        state.toggle_dirs_first();
+
+        // Now re-paginated: first 5 alphabetically (no dirs-first preference)
+        assert_eq!(state.root.loaded_child_count, 5);
+        assert_eq!(state.root.loaded_offset, 5);
     }
 }
