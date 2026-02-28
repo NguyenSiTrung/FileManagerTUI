@@ -1862,13 +1862,21 @@ impl App {
         let page_size = self.tree_state.page_size;
 
         // Reload each affected directory and apply sorting
+        // For paginated dirs with snapshots: mark stale (lazy re-scan on interaction)
+        // For non-paginated dirs: reload immediately
         for dir in &dirs_to_reload {
             if let Some(node) =
                 crate::fs::tree::TreeState::find_node_mut_pub(&mut self.tree_state.root, dir)
             {
                 if node.node_type == crate::fs::tree::NodeType::Directory {
-                    let _ = node.load_children_paged_with_sort(page_size, &sort_by, dirs_first);
-                    TreeState::sort_children_of_pub(node, &sort_by, dirs_first);
+                    if node.snapshot.is_some() {
+                        // Paginated dir: mark stale, avoid expensive re-scan
+                        node.is_stale = true;
+                    } else {
+                        // Non-paginated dir: reload immediately
+                        let _ = node.load_children_paged_with_sort(page_size, &sort_by, dirs_first);
+                        TreeState::sort_children_of_pub(node, &sort_by, dirs_first);
+                    }
                 }
             }
         }

@@ -175,6 +175,9 @@ pub struct TreeNode {
     pub snapshot: Option<DirSnapshot>,
     /// Index into the snapshot of the next unloaded entry.
     pub loaded_offset: usize,
+    /// Whether the directory contents may have changed since last load.
+    /// Set by FS watcher for paginated dirs; cleared on re-scan.
+    pub is_stale: bool,
 }
 
 impl TreeNode {
@@ -215,6 +218,7 @@ impl TreeNode {
             has_more_children: false,
             snapshot: None,
             loaded_offset: 0,
+            is_stale: false,
         })
     }
 
@@ -310,6 +314,7 @@ impl TreeNode {
         self.loaded_offset = loaded;
         self.has_more_children = loaded < total;
         self.snapshot = Some(snapshot);
+        self.is_stale = false;
 
         Ok(())
     }
@@ -387,6 +392,12 @@ impl TreeNode {
     pub fn load_next_page(&mut self, page_size: usize) -> Result<usize> {
         if self.node_type != NodeType::Directory || !self.has_more_children {
             return Ok(0);
+        }
+
+        // If stale, re-collect snapshot before loading next page
+        if self.is_stale && self.snapshot.is_some() {
+            self.load_children_paged_with_sort(page_size, &SortBy::Name, true)?;
+            return Ok(self.loaded_child_count);
         }
 
         // If we have a snapshot, use O(1) index-based access
@@ -645,6 +656,8 @@ impl TreeState {
     }
 
     /// Expand the currently selected directory node.
+    ///
+    /// If the node is already expanded but stale, re-loads its children.
     pub fn expand_selected(&mut self) {
         if self.flat_items.is_empty() {
             return;
@@ -658,7 +671,7 @@ impl TreeState {
         let dirs_first = self.dirs_first;
         let page_size = self.page_size;
         if let Some(node) = Self::find_node_mut(&mut self.root, &path) {
-            if !node.is_expanded {
+            if !node.is_expanded || node.is_stale {
                 let _ = node.load_children_paged_with_sort(page_size, &sort_by, dirs_first);
                 Self::sort_children_of(node, &sort_by, dirs_first);
                 node.is_expanded = true;
