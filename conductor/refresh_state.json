@@ -1,10 +1,12 @@
 {
-    "last_refresh": "2026-02-28T14:20:00+07:00",
+    "last_refresh": "2026-02-28T15:21:38+07:00",
     "changes": [
-        "README.md: Updated keybindings — Ctrl+Arrow directional focus, Ctrl+Shift+Arrow terminal resize, removed old Tab cycling from terminal section, added scrollback keys",
-        "PLAN.md: Updated keybinding sections 8.1 and 8.4 to reflect directional focus navigation",
-        "patterns.md: Elevated 3 patterns from focus-nav-remap_20260228 (modifier bitflag checks, reserved-keys block placement, intercept ordering)",
-        "Beads: Closed FileManagerTUI-idn (focus-nav-remap epic, was still open)"
+        "product.md: Added Inline Text Editor as key feature #9 with selection and mouse support",
+        "PLAN.md: Added selection/mouse keybindings to §8.5 Editor Mode (Shift+Arrow, Ctrl+A, mouse click/drag, scroll)",
+        "PLAN.md: Added 3 completed tasks to Milestone 9 (mouse cursor, text selection, drag selection)",
+        "README.md: Added Shift+Arrow, Ctrl+A, mouse drag rows to Editor Mode keybinding table; expanded feature description",
+        "patterns.md: Elevated 5 patterns from editor selection/mouse work (selection anchor, mouse coordinate mapping, drag selection, Shift+Arrow behavior, selection theme colors)",
+        "Beads: Closed FileManagerTUI-yop.6.3 (Replace bar and replace all — was stale in_progress)"
     ],
-    "drift_source": "focus-nav-remap_20260228 track completed and archived without propagating keybinding changes to docs"
+    "drift_source": "editor mouse support + text selection features added without conductor track (3 commits: 67e7bc4, e916f9b, f0c6ca0)"
 }

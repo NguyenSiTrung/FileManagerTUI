@@ -659,6 +659,11 @@ For files exceeding `max_full_preview_bytes`:
 | `Ctrl+F`                | Find                                           |
 | `Ctrl+H`                | Find & Replace                                 |
 | `Ctrl+A` (in replace)   | Replace all                                    |
+| `Shift+Arrow`           | Extend text selection                           |
+| `Ctrl+A`                | Select all text                                 |
+| Mouse click             | Position cursor at click point                  |
+| Mouse drag              | Select text                                     |
+| Scroll wheel            | Scroll editor viewport                          |
 
 ---
 
@@ -1026,9 +1031,12 @@ automatically in the tree.
 - [x] `ui.rs`: Conditional editor vs preview rendering, dirty indicator (●) in title
 - [x] Guards: binary files blocked, large file warning, file watcher paused during editing
 - [x] `components/help.rs`: Editor Mode keybindings documented in help overlay
+- [x] `editor.rs` + `handler.rs`: Mouse click to position cursor + scroll wheel support
+- [x] `editor.rs` + `handler.rs`: Text selection (Shift+Arrow, Ctrl+A select all)
+- [x] `editor.rs` + `handler.rs` + `components/editor.rs`: Mouse click-and-drag text selection with visual highlighting
 
 **Deliverable**: Press `e` in preview to edit files with syntax highlighting, undo/redo,
-find & replace, auto-indent, and save confirmation.
+find & replace, auto-indent, text selection, mouse support, and save confirmation.
 
 ---
 

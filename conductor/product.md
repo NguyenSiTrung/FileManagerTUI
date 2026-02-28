@@ -33,6 +33,7 @@ A single static binary that provides a VS Code-like file explorer experience in 
 6. **ML-Aware** — Special handling for .ipynb, .pt, .h5, .csv, .parquet, .yaml files
 7. **Configurable** — TOML config, CLI args, themes, keybindings
 8. **Embedded Terminal** — Integrated PTY shell panel with VT100 emulation, dynamic resize, and scrollback
+9. **Inline Text Editor** — Press `e` in preview to edit files with syntax highlighting, undo/redo, find & replace, auto-indent, text selection (Shift+Arrow, Ctrl+A, mouse drag), and mouse cursor positioning
 
 ## Non-Functional Requirements
 - Binary size target: < 10MB (static musl build)

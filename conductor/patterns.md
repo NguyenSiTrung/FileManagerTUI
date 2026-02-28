@@ -101,4 +101,10 @@ This file is the project's institutional knowledge - learnings extracted from co
 - All Ctrl+Arrow and Ctrl+Shift+Arrow must be intercepted BEFORE the terminal key forwarding check in `handle_normal_mode`, otherwise they get forwarded as PTY input (from: focus-nav-remap_20260228, archived 2026-02-28)
 - Reserved-keys block at the top of `handle_normal_mode` is the correct place for global intercepts — runs before the terminal focus check (from: focus-nav-remap_20260228, archived 2026-02-28)
 
-Last refreshed: 2026-02-28 (focus-nav-remap_20260228 archived)
+- Selection state uses `Option<(line, col)>` anchor — set on Shift+Arrow start, cleared on non-shift movement or Escape (from: editor-selection, 2026-02-28)
+- Editor mouse click maps screen coordinates to buffer position using `area.x + gutter_width` offset and `scroll_offset + row` for line — same border-offset pattern as tree widget (from: editor-mouse, 2026-02-28)
+- Mouse drag selection: set anchor on MouseDown, extend selection on MouseDrag event, clear on next non-shift keystroke (from: editor-mouse, 2026-02-28)
+- Shift+Arrow extends selection by updating cursor while keeping anchor fixed — Ctrl+A sets anchor=(0,0) cursor=(last_line, last_col) (from: editor-selection, 2026-02-28)
+- Editor theme colors for selection highlight (`editor_selection_bg`) added alongside existing cursor/match colors (from: editor-selection, 2026-02-28)
+
+Last refreshed: 2026-02-28 (editor selection + mouse support)

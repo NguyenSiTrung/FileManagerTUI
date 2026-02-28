@@ -22,7 +22,7 @@ A fast, keyboard-driven terminal file manager built with Rust and [Ratatui](http
 - **Jupyter notebook preview** — renders `.ipynb` cells with syntax highlighting
 - **Large file handling** — head/tail preview mode for files over configurable threshold
 - **Embedded terminal** — integrated PTY shell panel with VT100 emulation, dynamic resize, and scrollback
-- **Inline text editor** — press `e` in preview to edit files with syntax highlighting, undo/redo, find & replace, and auto-indent
+- **Inline text editor** — press `e` in preview to edit files with syntax highlighting, undo/redo, find & replace, auto-indent, text selection (Shift+Arrow, Ctrl+A, mouse drag), and mouse cursor positioning
 
 ## Installation
 
@@ -157,7 +157,10 @@ fm --theme light
 | `Ctrl+F` | Find |
 | `Ctrl+H` | Find & Replace |
 | `Ctrl+A` (in replace) | Replace all |
+| `Shift+Arrow` | Extend text selection |
+| `Ctrl+A` | Select all text |
 | Mouse click | Position cursor at click point |
+| Mouse drag | Select text |
 | Scroll wheel | Scroll editor viewport |
 
 ### Terminal Panel
