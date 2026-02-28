@@ -220,6 +220,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
             NodeType::Directory => "Dir".to_string(),
             NodeType::File => "File".to_string(),
             NodeType::Symlink => "Symlink".to_string(),
+            NodeType::LoadMore => "Load more...".to_string(),
         })
         .unwrap_or_default();
 

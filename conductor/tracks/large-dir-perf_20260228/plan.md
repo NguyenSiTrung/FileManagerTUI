@@ -3,12 +3,12 @@
 ## Phase 1: Core Pagination Infrastructure
 <!-- execution: parallel -->
 
-- [ ] Task 1: Add pagination config options
+- [x] Task 1: Add pagination config options
   <!-- files: src/config.rs -->
-  - [ ] Add `max_entries_per_page: Option<u32>` to `GeneralConfig` in `config.rs` (default: 1000)
-  - [ ] Add `search_max_entries: Option<u32>` to `GeneralConfig` (default: 10000)
-  - [ ] Add validation: clamp page size to 100..50000 range
-  - [ ] Add tests for config parsing with new fields
+  - [x] Add `max_entries_per_page: Option<u32>` to `GeneralConfig` in `config.rs` (default: 1000)
+  - [x] Add `search_max_entries: Option<u32>` to `GeneralConfig` (default: 10000)
+  - [x] Add validation: clamp page size to 100..50000 range
+  - [x] Add tests for config parsing with new fields
 
 - [ ] Task 2: Extend TreeNode with pagination state
   <!-- files: src/fs/tree.rs -->

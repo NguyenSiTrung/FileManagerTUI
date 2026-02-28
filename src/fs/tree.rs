@@ -11,6 +11,9 @@ pub enum NodeType {
     File,
     Directory,
     Symlink,
+    /// Virtual node for paginated directory loading.
+    #[allow(dead_code)]
+    LoadMore,
 }
 
 /// File metadata for display purposes.
@@ -24,6 +27,7 @@ pub struct FileMeta {
 
 /// A node in the filesystem tree.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct TreeNode {
     pub name: String,
     pub path: PathBuf,
@@ -32,6 +36,13 @@ pub struct TreeNode {
     pub is_expanded: bool,
     pub depth: usize,
     pub meta: FileMeta,
+    /// Total immediate children count (from fast `read_dir().count()`).
+    /// `None` means not yet counted.
+    pub total_child_count: Option<usize>,
+    /// Number of children currently loaded (for pagination tracking).
+    pub loaded_child_count: usize,
+    /// Whether more children remain to be loaded.
+    pub has_more_children: bool,
 }
 
 impl TreeNode {
@@ -67,6 +78,9 @@ impl TreeNode {
             is_expanded: false,
             depth,
             meta,
+            total_child_count: None,
+            loaded_child_count: 0,
+            has_more_children: false,
         })
     }
 
@@ -110,6 +124,10 @@ pub struct FlatItem {
     pub is_expanded: bool,
     pub is_last_sibling: bool,
     pub is_hidden: bool,
+    /// For `NodeType::LoadMore`: the parent directory path to load more from.
+    pub load_more_parent: Option<PathBuf>,
+    /// For `NodeType::LoadMore`: approximate remaining entries.
+    pub load_more_remaining: Option<usize>,
 }
 
 /// Sort criteria for the tree.
@@ -236,6 +254,8 @@ impl TreeState {
             is_expanded: node.is_expanded,
             is_last_sibling: is_last,
             is_hidden: node.meta.is_hidden,
+            load_more_parent: None,
+            load_more_remaining: None,
         });
 
         if node.is_expanded {
@@ -497,6 +517,8 @@ impl TreeState {
                 is_expanded: node.is_expanded || child_matches,
                 is_last_sibling: is_last,
                 is_hidden: node.meta.is_hidden,
+                load_more_parent: None,
+                load_more_remaining: None,
             });
             items.extend(child_items);
             true
