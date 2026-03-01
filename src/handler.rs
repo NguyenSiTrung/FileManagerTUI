@@ -483,13 +483,27 @@ fn handle_editor_find_keys(app: &mut App, key: KeyEvent) {
             if editor.find_state.in_replace_field {
                 if editor.find_state.replacement_cursor > 0 {
                     let pos = editor.find_state.replacement_cursor;
-                    editor.find_state.replacement.remove(pos - 1);
-                    editor.find_state.replacement_cursor -= 1;
+                    let prev_char = editor.find_state.replacement[..pos]
+                        .chars()
+                        .next_back()
+                        .expect("cursor > 0 guarantees at least one char");
+                    editor.find_state.replacement_cursor -= prev_char.len_utf8();
+                    editor
+                        .find_state
+                        .replacement
+                        .remove(editor.find_state.replacement_cursor);
                 }
             } else if editor.find_state.query_cursor > 0 {
                 let pos = editor.find_state.query_cursor;
-                editor.find_state.query.remove(pos - 1);
-                editor.find_state.query_cursor -= 1;
+                let prev_char = editor.find_state.query[..pos]
+                    .chars()
+                    .next_back()
+                    .expect("cursor > 0 guarantees at least one char");
+                editor.find_state.query_cursor -= prev_char.len_utf8();
+                editor
+                    .find_state
+                    .query
+                    .remove(editor.find_state.query_cursor);
                 editor.update_find_matches();
             }
         }
@@ -497,11 +511,11 @@ fn handle_editor_find_keys(app: &mut App, key: KeyEvent) {
             if editor.find_state.in_replace_field {
                 let pos = editor.find_state.replacement_cursor;
                 editor.find_state.replacement.insert(pos, c);
-                editor.find_state.replacement_cursor += 1;
+                editor.find_state.replacement_cursor += c.len_utf8();
             } else {
                 let pos = editor.find_state.query_cursor;
                 editor.find_state.query.insert(pos, c);
-                editor.find_state.query_cursor += 1;
+                editor.find_state.query_cursor += c.len_utf8();
                 editor.update_find_matches();
             }
         }
@@ -514,7 +528,7 @@ fn handle_normal_mode(app: &mut App, key: KeyEvent, event_tx: &mpsc::UnboundedSe
     // These keys are intercepted regardless of which panel is focused.
     match key.code {
         KeyCode::Char('t') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            app.toggle_terminal(event_tx);
+            let _ = app.toggle_terminal(event_tx);
             return;
         }
         // Directional focus navigation: Ctrl+Arrow
@@ -1136,9 +1150,10 @@ fn handle_progress_dialog(app: &mut App, key: KeyEvent) {
 fn handle_save_confirm(app: &mut App, key: KeyEvent) {
     match key.code {
         KeyCode::Char('y') | KeyCode::Char('Y') => {
-            let _ = app.save_editor_buffer();
-            app.close_dialog();
-            app.exit_edit_mode();
+            if app.save_editor_buffer().is_ok() {
+                app.close_dialog();
+                app.exit_edit_mode();
+            }
         }
         KeyCode::Char('n') | KeyCode::Char('N') => {
             app.close_dialog();
@@ -1392,6 +1407,93 @@ mod tests {
         handle_key(&mut app, make_key(KeyCode::Char('b')));
         handle_key(&mut app, make_key(KeyCode::Backspace));
         assert_eq!(app.dialog_state.input, "a");
+    }
+
+    #[test]
+    fn save_confirm_yes_exits_edit_mode_on_success() {
+        let (dir, mut app) = setup_app();
+        let file = dir.path().join("editable.txt");
+        fs::write(&file, "old").unwrap();
+
+        let mut editor = crate::editor::EditorState::new("new", file.clone());
+        editor.modified = true;
+        app.editor_state = Some(editor);
+        app.mode = AppMode::Dialog(DialogKind::SaveConfirm);
+
+        handle_key(&mut app, make_key(KeyCode::Char('y')));
+
+        assert_eq!(app.mode, AppMode::Normal);
+        assert!(app.editor_state.is_none());
+        assert_eq!(fs::read_to_string(file).unwrap(), "new");
+    }
+
+    #[test]
+    fn save_confirm_yes_stays_in_dialog_on_save_error() {
+        let (dir, mut app) = setup_app();
+        let invalid_path = dir.path().join("missing").join("editable.txt");
+
+        let mut editor = crate::editor::EditorState::new("new", invalid_path);
+        editor.modified = true;
+        app.editor_state = Some(editor);
+        app.mode = AppMode::Dialog(DialogKind::SaveConfirm);
+
+        handle_key(&mut app, make_key(KeyCode::Char('y')));
+
+        assert!(matches!(app.mode, AppMode::Dialog(DialogKind::SaveConfirm)));
+        assert!(app.editor_state.is_some());
+        assert!(app.status_message.is_some());
+        let (msg, _) = app.status_message.as_ref().unwrap();
+        assert!(msg.contains("Save failed"));
+    }
+
+    #[test]
+    fn editor_find_query_handles_multibyte_input_and_backspace() {
+        let (dir, mut app) = setup_app();
+        let file = dir.path().join("unicode_find.txt");
+        fs::write(&file, "abc").unwrap();
+
+        app.editor_state = Some(crate::editor::EditorState::new("abc", file));
+        app.mode = AppMode::Edit;
+        app.editor_state.as_mut().unwrap().open_find();
+
+        handle_key(&mut app, make_key(KeyCode::Char('é')));
+        {
+            let editor = app.editor_state.as_ref().unwrap();
+            assert_eq!(editor.find_state.query, "é");
+            assert_eq!(editor.find_state.query_cursor, 'é'.len_utf8());
+        }
+
+        handle_key(&mut app, make_key(KeyCode::Backspace));
+        let editor = app.editor_state.as_ref().unwrap();
+        assert_eq!(editor.find_state.query, "");
+        assert_eq!(editor.find_state.query_cursor, 0);
+    }
+
+    #[test]
+    fn editor_find_replace_field_handles_multibyte_input_and_backspace() {
+        let (dir, mut app) = setup_app();
+        let file = dir.path().join("unicode_replace.txt");
+        fs::write(&file, "abc").unwrap();
+
+        app.editor_state = Some(crate::editor::EditorState::new("abc", file));
+        app.mode = AppMode::Edit;
+        {
+            let editor = app.editor_state.as_mut().unwrap();
+            editor.open_find_replace();
+            editor.find_state.in_replace_field = true;
+        }
+
+        handle_key(&mut app, make_key(KeyCode::Char('한')));
+        {
+            let editor = app.editor_state.as_ref().unwrap();
+            assert_eq!(editor.find_state.replacement, "한");
+            assert_eq!(editor.find_state.replacement_cursor, '한'.len_utf8());
+        }
+
+        handle_key(&mut app, make_key(KeyCode::Backspace));
+        let editor = app.editor_state.as_ref().unwrap();
+        assert_eq!(editor.find_state.replacement, "");
+        assert_eq!(editor.find_state.replacement_cursor, 0);
     }
 
     // === Integration tests: actual file operations ===

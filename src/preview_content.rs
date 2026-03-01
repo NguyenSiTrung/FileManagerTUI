@@ -1,5 +1,5 @@
 use std::fs;
-use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
+use std::io::{BufRead, BufReader, Read};
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
@@ -163,21 +163,20 @@ pub fn fast_line_count(path: &Path) -> std::io::Result<usize> {
     let mut file = fs::File::open(path)?;
     let mut buf = [0u8; 65536];
     let mut count = 0usize;
+    let mut saw_bytes = false;
+    let mut last_byte = None;
     loop {
         let n = file.read(&mut buf)?;
         if n == 0 {
             break;
         }
+        saw_bytes = true;
+        last_byte = Some(buf[n - 1]);
         count += buf[..n].iter().filter(|&&b| b == b'\n').count();
     }
-    // If file doesn't end with newline, the last line still counts
-    if count == 0 {
-        // Check if file has any content
-        file.seek(SeekFrom::Start(0))?;
-        let mut check = [0u8; 1];
-        if file.read(&mut check)? > 0 {
-            count = 1;
-        }
+    // If file has content and doesn't end with newline, the last line still counts.
+    if saw_bytes && last_byte != Some(b'\n') {
+        count += 1;
     }
     Ok(count)
 }
@@ -975,6 +974,15 @@ mod tests {
         let mut f = File::create(&path).unwrap();
         write!(f, "no newline").unwrap(); // no trailing \n
         assert_eq!(fast_line_count(&path).unwrap(), 1);
+    }
+
+    #[test]
+    fn fast_line_count_multiline_no_trailing_newline() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("multiline_no_nl.txt");
+        let mut f = File::create(&path).unwrap();
+        write!(f, "line 1\nline 2\nline 3").unwrap();
+        assert_eq!(fast_line_count(&path).unwrap(), 3);
     }
 
     // === Head+tail tests ===

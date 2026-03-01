@@ -212,6 +212,10 @@ pub struct App {
     pub search_action_state: Option<SearchActionState>,
 }
 
+fn shell_quote_single(input: &str) -> String {
+    format!("'{}'", input.replace('\'', "'\"'\"'"))
+}
+
 impl App {
     /// Create a new App rooted at the given path, using the provided config.
     pub fn new(path: &Path, config: AppConfig) -> Result<Self> {
@@ -423,11 +427,14 @@ impl App {
     }
 
     /// Toggle the terminal panel visibility. Spawns PTY on first open.
-    pub fn toggle_terminal(&mut self, event_tx: &mpsc::UnboundedSender<crate::event::Event>) {
+    pub fn toggle_terminal(
+        &mut self,
+        event_tx: &mpsc::UnboundedSender<crate::event::Event>,
+    ) -> bool {
         // Check if terminal is enabled in config
         if !self.config.terminal_enabled() {
             self.set_status_message("Terminal disabled (--no-terminal or config)".to_string());
-            return;
+            return false;
         }
 
         if self.terminal_state.visible {
@@ -437,6 +444,7 @@ impl App {
             if self.focused_panel == FocusedPanel::Terminal {
                 self.focused_panel = FocusedPanel::Tree;
             }
+            false
         } else {
             // Show the terminal panel
             self.terminal_state.visible = true;
@@ -456,11 +464,11 @@ impl App {
                 let shell = self.config.terminal_shell();
 
                 // Calculate terminal dimensions from terminal_area
-                let rows = self.terminal_area.height.saturating_sub(2).max(1);
-                let cols = self.terminal_area.width.saturating_sub(2).max(1);
+                let rows = self.terminal_area.height.saturating_sub(2);
+                let cols = self.terminal_area.width.saturating_sub(2);
                 // Use defaults if area hasn't been set yet
-                let rows = if rows == 0 { 24 } else { rows };
-                let cols = if cols == 0 { 80 } else { cols };
+                let rows = if rows == 0 { 24 } else { rows.max(1) };
+                let cols = if cols == 0 { 80 } else { cols.max(1) };
 
                 let (pty_tx, mut pty_rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
 
@@ -487,12 +495,13 @@ impl App {
                     Err(e) => {
                         self.set_status_message(format!("⚠ Terminal: {}", e));
                         self.terminal_state.visible = false;
-                        return;
+                        return false;
                     }
                 }
             }
 
             self.focused_panel = FocusedPanel::Terminal;
+            true
         }
     }
 
@@ -1571,18 +1580,27 @@ impl App {
             };
 
             // Ensure terminal is visible (spawns PTY if needed)
-            if !self.terminal_state.visible {
-                self.toggle_terminal(event_tx);
+            if !self.terminal_state.visible && !self.toggle_terminal(event_tx) {
+                self.set_status_message("Cannot open terminal".to_string());
+                return;
             }
 
-            // Send cd command to PTY
+            // Send a safely quoted cd command to PTY.
             if let Some(ref pty) = self.terminal_state.pty {
-                let cd_cmd = format!("cd {}\n", parent_dir.to_string_lossy());
-                let _ = pty.write(cd_cmd.as_bytes());
+                let quoted = shell_quote_single(parent_dir.to_string_lossy().as_ref());
+                let cd_cmd = format!("cd -- {}\n", quoted);
+                if pty.write(cd_cmd.as_bytes()).is_ok() {
+                    self.focused_panel = FocusedPanel::Terminal;
+                    self.set_status_message(format!(
+                        "Terminal: cd {}",
+                        parent_dir.to_string_lossy()
+                    ));
+                } else {
+                    self.set_status_message("Failed to send command to terminal".to_string());
+                }
+            } else {
+                self.set_status_message("Terminal is not available".to_string());
             }
-
-            self.focused_panel = FocusedPanel::Terminal;
-            self.set_status_message(format!("Terminal: cd {}", parent_dir.to_string_lossy()));
         }
     }
 
@@ -1837,7 +1855,7 @@ impl App {
         //   fuzzy scoring returns no results.
         // - Filter: would call flatten() which rebuilds flat_items without the
         //   filter, undoing the filtered view.
-        if matches!(self.mode, AppMode::Search | AppMode::Filter) {
+        if matches!(self.mode, AppMode::Search | AppMode::Filter) || self.tree_state.is_filtering {
             return;
         }
         // Capture current state
@@ -2107,6 +2125,12 @@ mod tests {
     }
 
     #[test]
+    fn shell_quote_single_escapes_single_quotes() {
+        assert_eq!(shell_quote_single("plain"), "'plain'");
+        assert_eq!(shell_quote_single("a'b"), "'a'\"'\"'b'");
+    }
+
+    #[test]
     fn select_next_moves_down() {
         let (_dir, mut app) = setup_app();
         assert_eq!(app.tree_state.selected_index, 0);
@@ -2193,6 +2217,18 @@ mod tests {
         assert_eq!(app.mode, AppMode::Normal);
         assert!(app.dialog_state.input.is_empty());
         assert_eq!(app.dialog_state.cursor_position, 0);
+    }
+
+    #[test]
+    fn toggle_terminal_disabled_returns_false() {
+        let (_dir, mut app) = setup_app();
+        app.config.terminal.enabled = Some(false);
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        let opened = app.toggle_terminal(&tx);
+
+        assert!(!opened);
+        assert!(!app.terminal_state.visible);
     }
 
     #[test]
@@ -2683,6 +2719,26 @@ mod tests {
     }
 
     #[test]
+    fn search_action_open_terminal_disabled_does_not_focus_terminal() {
+        let (dir, mut app) = setup_app();
+        app.config.terminal.enabled = Some(false);
+        app.mode = AppMode::SearchAction;
+        app.search_action_state = Some(SearchActionState {
+            path: dir.path().join("file_a.txt"),
+            display: "file_a.txt".to_string(),
+            is_directory: false,
+            is_binary: false,
+        });
+
+        let (tx, _rx) = mpsc::unbounded_channel();
+        app.search_action_open_terminal(&tx);
+
+        assert_eq!(app.mode, AppMode::Normal);
+        assert!(!app.terminal_state.visible);
+        assert_ne!(app.focused_panel, FocusedPanel::Terminal);
+    }
+
+    #[test]
     fn build_path_index_finds_files() {
         let (_dir, app) = setup_app();
         let index = app.build_path_index();
@@ -2957,6 +3013,26 @@ mod tests {
             app.tree_state.flat_items.len(),
             filtered_count,
             "filtered view should survive fs events during filter mode"
+        );
+    }
+
+    #[test]
+    fn fs_change_skipped_when_filter_is_active_in_normal_mode() {
+        let (dir, mut app) = setup_app();
+        app.start_filter();
+        app.filter_input_char('f');
+        app.accept_filter();
+        let filtered_count = app.tree_state.flat_items.len();
+        assert_eq!(app.mode, AppMode::Normal);
+        assert!(app.tree_state.is_filtering);
+
+        File::create(dir.path().join("new_file.txt")).unwrap();
+        app.handle_fs_change(vec![dir.path().join("new_file.txt")]);
+
+        assert_eq!(
+            app.tree_state.flat_items.len(),
+            filtered_count,
+            "filtered view should survive fs events after accept_filter"
         );
     }
 

@@ -109,20 +109,27 @@ fn render_input_dialog(
     let cursor_pos = state.cursor_position;
     let max_width = inner.width as usize;
 
-    let (before, cursor_char, after) = if cursor_pos < input.len() {
-        let ch = &input[cursor_pos..cursor_pos + 1];
-        (&input[..cursor_pos], ch, &input[cursor_pos + 1..])
+    let before = input.get(..cursor_pos).unwrap_or(input.as_str());
+    let cursor_suffix = input.get(cursor_pos..).unwrap_or("");
+    let (cursor_char, after) = if cursor_suffix.is_empty() {
+        (" ".to_string(), "")
     } else {
-        (input.as_str(), " ", "")
+        let mut chars = cursor_suffix.chars();
+        let ch = chars.next().unwrap_or(' ');
+        (ch.to_string(), chars.as_str())
     };
 
     // Truncate from left if input is too long
-    let total_len = before.len() + 1 + after.len();
-    let before_display = if total_len > max_width && before.len() > max_width.saturating_sub(2) {
-        let skip = before.len().saturating_sub(max_width.saturating_sub(2));
-        &before[skip..]
-    } else {
+    let before_len = before.chars().count();
+    let total_len = before_len + 1 + after.chars().count();
+    let before_display = if total_len > max_width && before_len > max_width.saturating_sub(2) {
+        let keep = max_width.saturating_sub(2);
         before
+            .chars()
+            .skip(before_len.saturating_sub(keep))
+            .collect::<String>()
+    } else {
+        before.to_string()
     };
 
     let input_style = Style::default().fg(theme.status_fg);
@@ -396,6 +403,25 @@ mod tests {
         let content = buffer_to_string(&buf, area);
         assert!(content.contains("Rename"));
         assert!(content.contains("old_name.txt"));
+    }
+
+    #[test]
+    fn test_input_dialog_renders_unicode_without_panic() {
+        let mode = AppMode::Dialog(DialogKind::CreateFile);
+        let input = "aé한";
+        let state = DialogState {
+            input: input.to_string(),
+            cursor_position: "a".len(),
+        };
+        let tc = test_theme();
+        let widget = DialogWidget::new(&mode, &state, &tc);
+        let area = Rect::new(0, 0, 80, 24);
+        let mut buf = Buffer::empty(area);
+        widget.render(area, &mut buf);
+
+        let content = buffer_to_string(&buf, area);
+        assert!(content.contains("Create New File"));
+        assert!(content.contains(input));
     }
 
     #[test]

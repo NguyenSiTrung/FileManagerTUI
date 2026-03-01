@@ -49,6 +49,21 @@ impl<'a> StatusBarWidget<'a> {
     }
 }
 
+fn char_count(s: &str) -> usize {
+    s.chars().count()
+}
+
+fn take_chars(s: &str, max_chars: usize) -> String {
+    s.chars().take(max_chars).collect()
+}
+
+fn take_last_chars(s: &str, max_chars: usize) -> String {
+    let total = char_count(s);
+    s.chars()
+        .skip(total.saturating_sub(max_chars))
+        .collect::<String>()
+}
+
 impl<'a> Widget for StatusBarWidget<'a> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         if area.height == 0 || area.width == 0 {
@@ -67,8 +82,8 @@ impl<'a> Widget for StatusBarWidget<'a> {
             };
 
             // Pad or truncate message to fill full width
-            let display: String = if msg.len() >= width {
-                msg[..width].to_string()
+            let display: String = if char_count(msg) >= width {
+                take_chars(msg, width)
             } else {
                 format!("{:<width$}", msg, width = width)
             };
@@ -80,43 +95,42 @@ impl<'a> Widget for StatusBarWidget<'a> {
 
         // Normal bar: [path] [file_info] [key_hints]
         let key_hints = " a:new  A:dir  r:ren  d:del ";
-        let hints_len = key_hints.len();
+        let hints_len = char_count(key_hints);
 
         // Reserve space for hints on the right
         let remaining = width.saturating_sub(hints_len);
 
         // Split remaining between path (left) and file_info (center-right)
-        let info_len = self.file_info.len();
+        let info_len = char_count(self.file_info);
         let path_budget = remaining.saturating_sub(info_len).saturating_sub(1); // 1 for separator space
 
-        let path_display = if self.path_str.len() > path_budget {
+        let path_display = if char_count(self.path_str) > path_budget {
             if path_budget > 3 {
-                format!(
-                    "...{}",
-                    &self.path_str[self.path_str.len() - (path_budget - 3)..]
-                )
+                format!("...{}", take_last_chars(self.path_str, path_budget - 3))
             } else {
-                self.path_str[..path_budget].to_string()
+                take_chars(self.path_str, path_budget)
             }
         } else {
             self.path_str.to_string()
         };
 
-        let info_display = if self.file_info.len() > remaining.saturating_sub(path_display.len()) {
-            let budget = remaining.saturating_sub(path_display.len());
-            if budget > 0 {
-                self.file_info[..budget].to_string()
+        let path_display_len = char_count(&path_display);
+        let info_display =
+            if char_count(self.file_info) > remaining.saturating_sub(path_display_len) {
+                let budget = remaining.saturating_sub(path_display_len);
+                if budget > 0 {
+                    take_chars(self.file_info, budget)
+                } else {
+                    String::new()
+                }
             } else {
-                String::new()
-            }
-        } else {
-            self.file_info.to_string()
-        };
+                self.file_info.to_string()
+            };
 
         // Calculate gap between path and info to push info toward center-right
         let gap = remaining
-            .saturating_sub(path_display.len())
-            .saturating_sub(info_display.len());
+            .saturating_sub(char_count(&path_display))
+            .saturating_sub(char_count(&info_display));
 
         let path_style = Style::default().fg(self.theme.status_fg);
         let info_style = Style::default().fg(self.theme.info_fg);
@@ -132,7 +146,7 @@ impl<'a> Widget for StatusBarWidget<'a> {
 
         // Add clipboard info if present
         let clipboard_display = self.clipboard_info.unwrap_or("");
-        let clipboard_len = clipboard_display.len();
+        let clipboard_len = char_count(clipboard_display);
         if clipboard_len > 0 {
             let clipboard_style = Style::default()
                 .fg(self.theme.accent_fg)
@@ -151,7 +165,7 @@ impl<'a> Widget for StatusBarWidget<'a> {
         }
 
         // Pad to fill remaining width if needed, then add hints
-        let used: usize = spans.iter().map(|s| s.content.len()).sum();
+        let used: usize = spans.iter().map(|s| s.content.chars().count()).sum();
         let pad = width.saturating_sub(used).saturating_sub(hints_len);
         if pad > 0 {
             spans.push(Span::raw(" ".repeat(pad)));
@@ -264,5 +278,36 @@ mod tests {
             .map(|x| buf.cell((x, 0)).unwrap().symbol().to_string())
             .collect();
         assert!(content.contains("2 items"));
+    }
+
+    #[test]
+    fn test_status_message_unicode_narrow_width_no_panic() {
+        let tc = test_theme();
+        let widget = StatusBarWidget::new("/path", "info", &tc)
+            .status_message("Đường dẫn: 한글/emoji 👩‍💻", false);
+
+        let area = Rect::new(0, 0, 12, 1);
+        let mut buf = Buffer::empty(area);
+        widget.render(area, &mut buf);
+
+        let content: String = (0..12)
+            .map(|x| buf.cell((x, 0)).unwrap().symbol().to_string())
+            .collect();
+        assert!(!content.is_empty());
+    }
+
+    #[test]
+    fn test_normal_bar_unicode_path_narrow_width_no_panic() {
+        let tc = test_theme();
+        let widget = StatusBarWidget::new("/tmp/한글/emoji👩‍💻/file.txt", "∞ KB | File", &tc);
+
+        let area = Rect::new(0, 0, 24, 1);
+        let mut buf = Buffer::empty(area);
+        widget.render(area, &mut buf);
+
+        let content: String = (0..24)
+            .map(|x| buf.cell((x, 0)).unwrap().symbol().to_string())
+            .collect();
+        assert!(!content.is_empty());
     }
 }

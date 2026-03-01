@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::{Error, ErrorKind};
 use std::path::{Path, PathBuf};
 
 use crate::error::Result;
@@ -59,7 +60,19 @@ pub fn delete_recursive_with_progress(
     let mut deleted = 0;
     let mut errors = Vec::new();
 
-    if !path.is_dir() {
+    if cancel.load(Ordering::Relaxed) {
+        return (deleted, errors);
+    }
+
+    let root_meta = match fs::symlink_metadata(path) {
+        Ok(meta) => meta,
+        Err(e) => {
+            errors.push(format!("{}: {}", path.display(), e));
+            return (deleted, errors);
+        }
+    };
+
+    if root_meta.file_type().is_symlink() || !root_meta.is_dir() {
         // Simple file delete
         let name = path
             .file_name()
@@ -82,6 +95,9 @@ pub fn delete_recursive_with_progress(
     visited.visit(path);
 
     while let Some(dir) = stack.pop() {
+        if cancel.load(Ordering::Relaxed) {
+            return (deleted, errors);
+        }
         dirs.push(dir.clone());
         let entries = match fs::read_dir(&dir) {
             Ok(e) => e,
@@ -99,7 +115,17 @@ pub fn delete_recursive_with_progress(
                 }
             };
             let entry_path = entry.path();
-            if entry_path.is_dir() {
+            let meta = match fs::symlink_metadata(&entry_path) {
+                Ok(m) => m,
+                Err(e) => {
+                    errors.push(format!("{}: {}", entry_path.display(), e));
+                    continue;
+                }
+            };
+            if meta.file_type().is_symlink() {
+                // Never recurse into symlinks; treat them as leaf delete targets.
+                files.push(entry_path);
+            } else if meta.is_dir() {
                 // Skip symlink loops
                 if visited.visit(&entry_path) {
                     stack.push(entry_path);
@@ -191,8 +217,18 @@ pub fn copy_recursive(src: &Path, dest_dir: &Path) -> Result<PathBuf> {
         .file_name()
         .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "no filename"))?;
     let dest = resolve_collision(&dest_dir.join(name));
+    let src_meta = fs::symlink_metadata(src)?;
 
-    if src.is_dir() {
+    if src_meta.file_type().is_symlink() {
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            format!("Refusing to copy symlink source: {}", src.display()),
+        )
+        .into());
+    }
+
+    if src_meta.is_dir() {
+        ensure_not_descendant(src, &dest)?;
         copy_dir_recursive(src, &dest)?;
     } else {
         fs::copy(src, &dest)?;
@@ -207,11 +243,53 @@ fn copy_dir_recursive(src: &Path, dest: &Path) -> Result<()> {
         let entry = entry?;
         let src_path = entry.path();
         let dest_path = dest.join(entry.file_name());
-        if src_path.is_dir() {
+        let meta = fs::symlink_metadata(&src_path)?;
+        if meta.file_type().is_symlink() {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                format!("Refusing to copy symlink entry: {}", src_path.display()),
+            )
+            .into());
+        }
+        if meta.is_dir() {
             copy_dir_recursive(&src_path, &dest_path)?;
         } else {
             fs::copy(&src_path, &dest_path)?;
         }
+    }
+    Ok(())
+}
+
+fn normalize_for_prefix_check(path: &Path) -> std::io::Result<PathBuf> {
+    if path.exists() {
+        return fs::canonicalize(path);
+    }
+    let parent = path.parent().ok_or_else(|| {
+        Error::new(
+            ErrorKind::InvalidInput,
+            format!("Path has no parent: {}", path.display()),
+        )
+    })?;
+    let parent_canonical = fs::canonicalize(parent)?;
+    Ok(match path.file_name() {
+        Some(name) => parent_canonical.join(name),
+        None => parent_canonical,
+    })
+}
+
+fn ensure_not_descendant(src_dir: &Path, dest_path: &Path) -> Result<()> {
+    let src_canonical = fs::canonicalize(src_dir)?;
+    let dest_normalized = normalize_for_prefix_check(dest_path)?;
+    if dest_normalized.starts_with(&src_canonical) {
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            format!(
+                "Refusing to copy/move directory '{}' into itself ('{}')",
+                src_dir.display(),
+                dest_path.display()
+            ),
+        )
+        .into());
     }
     Ok(())
 }
@@ -226,13 +304,27 @@ pub fn move_item(src: &Path, dest_dir: &Path) -> Result<PathBuf> {
         .file_name()
         .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "no filename"))?;
     let dest = resolve_collision(&dest_dir.join(name));
+    let src_meta = fs::symlink_metadata(src)?;
+    let src_is_dir = src_meta.is_dir();
+
+    if src_meta.file_type().is_symlink() {
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            format!("Refusing to move symlink source: {}", src.display()),
+        )
+        .into());
+    }
+
+    if src_is_dir {
+        ensure_not_descendant(src, &dest)?;
+    }
 
     // Try rename first (same filesystem, instant)
     match fs::rename(src, &dest) {
         Ok(()) => Ok(dest),
         Err(_) => {
             // Fallback: copy then delete (cross-device)
-            if src.is_dir() {
+            if src_is_dir {
                 copy_dir_recursive(src, &dest)?;
                 fs::remove_dir_all(src)?;
             } else {
@@ -247,6 +339,8 @@ pub fn move_item(src: &Path, dest_dir: &Path) -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
+    use std::os::unix::fs as unix_fs;
     use tempfile::TempDir;
 
     #[test]
@@ -396,6 +490,35 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_copy_directory_into_descendant_rejected() {
+        let tmp = TempDir::new().unwrap();
+        let src_dir = tmp.path().join("src");
+        fs::create_dir(&src_dir).unwrap();
+        fs::create_dir(src_dir.join("nested")).unwrap();
+        fs::write(src_dir.join("a.txt"), "aaa").unwrap();
+
+        let result = copy_recursive(&src_dir, &src_dir);
+        assert!(result.is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_copy_symlink_source_rejected() {
+        let tmp = TempDir::new().unwrap();
+        let real_dir = tmp.path().join("real");
+        fs::create_dir(&real_dir).unwrap();
+        fs::write(real_dir.join("a.txt"), "aaa").unwrap();
+
+        let link = tmp.path().join("link_to_real");
+        unix_fs::symlink(&real_dir, &link).unwrap();
+        let dest_dir = tmp.path().join("dest");
+        fs::create_dir(&dest_dir).unwrap();
+
+        let result = copy_recursive(&link, &dest_dir);
+        assert!(result.is_err());
+    }
+
     // === move_item tests ===
 
     #[test]
@@ -426,6 +549,18 @@ mod tests {
         assert_eq!(result, dest_dir.join("move_dir"));
         assert!(result.join("inner.txt").exists());
         assert!(!src_dir.exists());
+    }
+
+    #[test]
+    fn test_move_directory_into_descendant_rejected() {
+        let tmp = TempDir::new().unwrap();
+        let src_dir = tmp.path().join("move_dir");
+        fs::create_dir(&src_dir).unwrap();
+        fs::create_dir(src_dir.join("child")).unwrap();
+        fs::write(src_dir.join("inner.txt"), "data").unwrap();
+
+        let result = move_item(&src_dir, &src_dir);
+        assert!(result.is_err());
     }
 
     #[test]
@@ -533,5 +668,30 @@ mod tests {
         assert_eq!(deleted, 0);
         // Directory and files still exist
         assert!(dir.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_delete_recursive_does_not_follow_symlink_dirs() {
+        let tmp = TempDir::new().unwrap();
+        let outside = tmp.path().join("outside");
+        fs::create_dir(&outside).unwrap();
+        let outside_file = outside.join("keep_me.txt");
+        fs::write(&outside_file, "safe").unwrap();
+
+        let root = tmp.path().join("root");
+        fs::create_dir(&root).unwrap();
+        unix_fs::symlink(&outside, root.join("outside_link")).unwrap();
+
+        let cancel = std::sync::atomic::AtomicBool::new(false);
+        let progress: DeleteProgressFn = Box::new(|_, _| {});
+        let (_deleted, errors) = delete_recursive_with_progress(&root, &progress, &cancel);
+
+        assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+        assert!(!root.exists(), "root directory should be removed");
+        assert!(
+            outside_file.exists(),
+            "outside target must remain after deleting symlinked root"
+        );
     }
 }
