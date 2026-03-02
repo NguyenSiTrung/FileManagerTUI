@@ -210,6 +210,8 @@ pub struct App {
     pub editor_state: Option<EditorState>,
     /// State for the search action menu overlay.
     pub search_action_state: Option<SearchActionState>,
+    /// Event sender for spawning async operations from non-handler contexts.
+    pub event_tx: Option<mpsc::UnboundedSender<crate::event::Event>>,
 }
 
 fn shell_quote_single(input: &str) -> String {
@@ -258,6 +260,7 @@ impl App {
             terminal_area: Rect::default(),
             editor_state: None,
             search_action_state: None,
+            event_tx: None,
         })
     }
 
@@ -1132,21 +1135,48 @@ impl App {
             0
         };
 
-        // Only preview files, not directories
+        // Directory preview: use async scan if event_tx is available
         if item.node_type == NodeType::Directory {
             let path = item.path.clone();
-            let (lines, total) = preview_content::load_directory_summary(&path);
-            self.preview_state = PreviewState {
-                current_path: Some(path),
-                content_lines: lines,
-                scroll_offset: preserved_scroll,
-                view_mode: ViewMode::default(),
-                line_wrap: false,
-                total_lines: total,
-                is_large_file: false,
-                head_lines: self.config.head_lines(),
-                tail_lines: self.config.tail_lines(),
-            };
+
+            if let Some(tx) = &self.event_tx {
+                // Show immediate placeholder
+                let dir_name = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| path.to_string_lossy().to_string());
+                let placeholder = format!("📁 Directory: {}\n\n  Scanning...", dir_name);
+                self.preview_state = PreviewState {
+                    current_path: Some(path.clone()),
+                    content_lines: placeholder
+                        .lines()
+                        .map(|l| ratatui::text::Line::raw(l.to_string()))
+                        .collect(),
+                    scroll_offset: preserved_scroll,
+                    view_mode: ViewMode::default(),
+                    line_wrap: false,
+                    total_lines: 3,
+                    is_large_file: false,
+                    head_lines: self.config.head_lines(),
+                    tail_lines: self.config.tail_lines(),
+                };
+                let tx_clone = tx.clone();
+                self.spawn_async_dir_summary(&path, &tx_clone);
+            } else {
+                // Fallback: sync load (for tests without event_tx)
+                let (lines, total) = preview_content::load_directory_summary(&path);
+                self.preview_state = PreviewState {
+                    current_path: Some(path),
+                    content_lines: lines,
+                    scroll_offset: preserved_scroll,
+                    view_mode: ViewMode::default(),
+                    line_wrap: false,
+                    total_lines: total,
+                    is_large_file: false,
+                    head_lines: self.config.head_lines(),
+                    tail_lines: self.config.tail_lines(),
+                };
+            }
             self.clamp_preview_scroll();
             return;
         }

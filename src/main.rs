@@ -138,6 +138,7 @@ async fn main() -> error::Result<()> {
     let mut tui = Tui::new(app.config.mouse_enabled())?;
     let mut events = EventHandler::new(Duration::from_millis(16));
     let event_tx = events.sender();
+    app.event_tx = Some(event_tx.clone());
 
     // Initialize filesystem watcher (using merged config)
     let _watcher = if !app.config.watcher_enabled() {
