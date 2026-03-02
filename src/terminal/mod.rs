@@ -126,10 +126,12 @@ impl TerminalState {
     /// Returns None if no selection is active.
     pub fn extract_selected_text(&self) -> Option<String> {
         let (start, end) = self.selection.normalized()?;
-        self.emulator.extract_text(start.line, start.col, end.line, end.col)
+        self.emulator
+            .extract_text(start.line, start.col, end.line, end.col)
     }
 
     /// Clear the terminal selection.
+    #[allow(dead_code)]
     pub fn clear_selection(&mut self) {
         self.selection.clear();
     }

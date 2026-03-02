@@ -180,6 +180,7 @@ impl TerminalEmulator {
     }
 
     /// Get number of scrollback lines.
+    #[allow(dead_code)]
     pub fn scrollback_len(&self) -> usize {
         self.scrollback.len()
     }
@@ -227,11 +228,7 @@ impl TerminalEmulator {
 
         for line_idx in start_line..=end_line.min(total - 1) {
             let cols = self.line_cols(line_idx);
-            let from = if line_idx == start_line {
-                start_col
-            } else {
-                0
-            };
+            let from = if line_idx == start_line { start_col } else { 0 };
             let to = if line_idx == end_line {
                 end_col.min(cols.saturating_sub(1))
             } else {

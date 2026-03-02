@@ -2367,6 +2367,36 @@ impl App {
         self.preview_state.total_lines = total;
         self.preview_state.is_shallow_preview = true;
     }
+
+    /// Copy the current terminal selection to the system clipboard.
+    ///
+    /// Shows a status message with the result (success/failure/no-selection).
+    pub fn copy_terminal_selection(&mut self) {
+        match self.terminal_state.extract_selected_text() {
+            Some(text) if !text.is_empty() => {
+                let line_count = text.lines().count();
+                let byte_count = text.len();
+                match copy_to_system_clipboard(&text) {
+                    Ok(()) => {
+                        self.set_status_message(format!(
+                            "📋 Copied {} bytes ({} line{})",
+                            byte_count,
+                            line_count,
+                            if line_count == 1 { "" } else { "s" }
+                        ));
+                        // Clear selection after successful copy
+                        self.terminal_state.selection.clear();
+                    }
+                    Err(err) => {
+                        self.set_status_message(format!("⚠ Clipboard error: {}", err));
+                    }
+                }
+            }
+            _ => {
+                self.set_status_message("No terminal text selected — drag to select".to_string());
+            }
+        }
+    }
 }
 
 /// Format a byte size into a human-readable string.

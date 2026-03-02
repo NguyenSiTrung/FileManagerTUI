@@ -2,22 +2,22 @@
 
 ## Phase 1: Terminal Selection State Foundations
 
-- [ ] Task 1: Extend terminal state with selection data structures
-  - [ ] Add terminal selection anchor/endpoint fields to `TerminalState`
-  - [ ] Add helpers for clear/set/normalize selection ranges
-  - [ ] Ensure defaults and debug formatting include new fields safely
+- [x] Task 1: Extend terminal state with selection data structures
+  - [x] Add terminal selection anchor/endpoint fields to `TerminalState`
+  - [x] Add helpers for clear/set/normalize selection ranges
+  - [x] Ensure defaults and debug formatting include new fields safely
 
-- [ ] Task 2: Add selection text extraction utilities
-  - [ ] Add utility to read viewport/scrollback lines from terminal emulator
-  - [ ] Implement normalized multi-line selection extraction
-  - [ ] Trim/normalize line endings for clipboard copy compatibility
+- [x] Task 2: Add selection text extraction utilities
+  - [x] Add utility to read viewport/scrollback lines from terminal emulator
+  - [x] Implement normalized multi-line selection extraction
+  - [x] Trim/normalize line endings for clipboard copy compatibility
 
-- [ ] Task 3: Add unit tests for selection normalization and extraction
-  - [ ] Forward drag vs backward drag normalization
-  - [ ] Single-cell, single-line, and multi-line extraction
-  - [ ] Empty/invalid range handling
+- [x] Task 3: Add unit tests for selection normalization and extraction
+  - [x] Forward drag vs backward drag normalization
+  - [x] Single-cell, single-line, and multi-line extraction
+  - [x] Empty/invalid range handling
 
-- [ ] Task 4: Conductor - User Manual Verification 'Phase 1' (Protocol in workflow.md)
+- [x] Task 4: Conductor - User Manual Verification 'Phase 1' (Protocol in workflow.md)
 
 ## Phase 2: Mouse Event Routing for Terminal Panel
 

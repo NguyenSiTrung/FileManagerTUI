@@ -33,6 +33,8 @@ pub fn handle_mouse_event(
         MouseEventKind::Down(MouseButton::Left) => {
             // Determine which panel was clicked
             if is_in_rect(col, row, app.tree_area) {
+                // Clear any terminal selection when clicking elsewhere
+                app.terminal_state.selection.clear();
                 // Switch focus to tree
                 app.focused_panel = FocusedPanel::Tree;
 
@@ -71,11 +73,33 @@ pub fn handle_mouse_event(
                     }
                 }
             } else if is_in_rect(col, row, app.preview_area) {
+                // Clear any terminal selection when clicking elsewhere
+                app.terminal_state.selection.clear();
                 // Switch focus to preview
                 app.focused_panel = FocusedPanel::Preview;
             } else if app.terminal_state.visible && is_in_rect(col, row, app.terminal_area) {
-                // Switch focus to terminal
+                // Switch focus to terminal and start/clear selection
                 app.focused_panel = FocusedPanel::Terminal;
+                if let Some(coord) = mouse_to_terminal_coord(app, col, row) {
+                    // Click sets anchor (clears any previous selection by overwriting)
+                    app.terminal_state.selection.set_anchor(coord);
+                }
+            }
+        }
+        MouseEventKind::Drag(MouseButton::Left) => {
+            // Update terminal selection endpoint during drag
+            if app.terminal_state.visible && app.terminal_state.selection.anchor.is_some() {
+                if let Some(coord) = mouse_to_terminal_coord(app, col, row) {
+                    app.terminal_state.selection.set_endpoint(coord);
+                }
+            }
+        }
+        MouseEventKind::Up(MouseButton::Left) => {
+            // If anchor == endpoint after click-release (no drag), clear selection
+            if let Some((start, end)) = app.terminal_state.selection.normalized() {
+                if start == end {
+                    app.terminal_state.selection.clear();
+                }
             }
         }
         MouseEventKind::ScrollUp => {
@@ -85,6 +109,16 @@ pub fn handle_mouse_event(
             } else if is_in_rect(col, row, app.preview_area) {
                 app.focused_panel = FocusedPanel::Preview;
                 app.preview_scroll_up();
+            } else if app.terminal_state.visible && is_in_rect(col, row, app.terminal_area) {
+                // Scroll up in terminal scrollback
+                let max = app
+                    .terminal_state
+                    .emulator
+                    .total_lines()
+                    .saturating_sub(app.terminal_state.emulator.visible_rows());
+                if app.terminal_state.scroll_offset < max {
+                    app.terminal_state.scroll_offset += 1;
+                }
             }
         }
         MouseEventKind::ScrollDown => {
@@ -101,6 +135,46 @@ pub fn handle_mouse_event(
         }
         _ => {}
     }
+}
+
+/// Convert mouse screen coordinates to terminal-local absolute coordinates.
+/// Returns None if the position is outside the terminal inner area.
+fn mouse_to_terminal_coord(
+    app: &App,
+    mouse_col: u16,
+    mouse_row: u16,
+) -> Option<crate::terminal::TerminalCoord> {
+    let area = app.terminal_area;
+    // Account for border offset (1 pixel on each side)
+    let inner_x = area.x + 1;
+    let inner_y = area.y + 1;
+    let inner_w = area.width.saturating_sub(2);
+    let inner_h = area.height.saturating_sub(2);
+
+    if mouse_col < inner_x
+        || mouse_row < inner_y
+        || mouse_col >= inner_x + inner_w
+        || mouse_row >= inner_y + inner_h
+    {
+        return None;
+    }
+
+    let local_col = (mouse_col - inner_x) as usize;
+    let local_row = (mouse_row - inner_y) as usize;
+
+    // Convert viewport row to absolute line, accounting for scroll offset.
+    // scroll_offset=0 means we're at the bottom (live view).
+    // The viewport shows lines from (total - visible_rows - scroll_offset) to
+    // (total - 1 - scroll_offset).
+    let total = app.terminal_state.emulator.total_lines();
+    let visible = app.terminal_state.emulator.visible_rows();
+    let first_visible_abs = total.saturating_sub(visible + app.terminal_state.scroll_offset);
+    let abs_line = first_visible_abs + local_row;
+
+    Some(crate::terminal::TerminalCoord {
+        line: abs_line,
+        col: local_col,
+    })
 }
 
 /// Handle mouse events when in editor mode.
@@ -801,9 +875,21 @@ fn handle_preview_keys(app: &mut App, key: KeyEvent, event_tx: &mpsc::UnboundedS
 /// All non-reserved keys are forwarded to the PTY as raw bytes.
 fn handle_terminal_keys(app: &mut App, key: KeyEvent) {
     match key.code {
-        // Esc returns focus to tree
+        // Esc: if selection active, clear it first; otherwise return focus to tree
         KeyCode::Esc => {
-            app.focused_panel = FocusedPanel::Tree;
+            if app.terminal_state.selection.is_active() {
+                app.terminal_state.selection.clear();
+            } else {
+                app.focused_panel = FocusedPanel::Tree;
+            }
+            return;
+        }
+        // Copy terminal selection to system clipboard: Ctrl+Shift+C
+        KeyCode::Char('C')
+            if key.modifiers.contains(KeyModifiers::CONTROL)
+                && key.modifiers.contains(KeyModifiers::SHIFT) =>
+        {
+            app.copy_terminal_selection();
             return;
         }
         // Note: Tab is NOT intercepted here — it is forwarded to the PTY
@@ -847,7 +933,8 @@ fn handle_terminal_keys(app: &mut App, key: KeyEvent) {
         _ => {}
     }
 
-    // Reset scroll offset on any input (auto-scroll to bottom)
+    // Any non-scroll key input clears selection and resets scroll
+    app.terminal_state.selection.clear();
     app.terminal_state.scroll_offset = 0;
 
     // Convert KeyEvent to bytes and send to PTY
@@ -3078,5 +3165,179 @@ mod tests {
         assert_eq!(app.focused_panel, FocusedPanel::Tree);
         handle_key(&mut app, make_key(KeyCode::Tab));
         assert_eq!(app.focused_panel, FocusedPanel::Preview);
+    }
+
+    // === Terminal mouse selection tests ===
+
+    #[test]
+    fn terminal_click_sets_selection_anchor() {
+        let (_dir, mut app) = setup_app();
+        app.terminal_state.visible = true;
+        // Set terminal area with border
+        app.terminal_area = ratatui::layout::Rect::new(0, 20, 80, 10);
+
+        let tx = make_event_tx();
+        // Click inside terminal inner area (accounting for border)
+        let mouse = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 5,
+            row: 22, // inner_y starts at 21 (20+1)
+            modifiers: KeyModifiers::NONE,
+        };
+        handle_mouse_event(&mut app, mouse, &tx);
+
+        assert_eq!(app.focused_panel, FocusedPanel::Terminal);
+        assert!(app.terminal_state.selection.anchor.is_some());
+    }
+
+    #[test]
+    fn terminal_drag_updates_selection_endpoint() {
+        let (_dir, mut app) = setup_app();
+        app.terminal_state.visible = true;
+        app.terminal_area = ratatui::layout::Rect::new(0, 20, 80, 10);
+
+        let tx = make_event_tx();
+        // Click to set anchor
+        let down = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 5,
+            row: 22,
+            modifiers: KeyModifiers::NONE,
+        };
+        handle_mouse_event(&mut app, down, &tx);
+
+        // Drag to update endpoint
+        let drag = MouseEvent {
+            kind: MouseEventKind::Drag(MouseButton::Left),
+            column: 20,
+            row: 24,
+            modifiers: KeyModifiers::NONE,
+        };
+        handle_mouse_event(&mut app, drag, &tx);
+
+        let (start, end) = app.terminal_state.selection.normalized().unwrap();
+        // Anchor and endpoint should differ
+        assert!(start != end || start.col != end.col);
+    }
+
+    #[test]
+    fn terminal_click_without_drag_clears_selection() {
+        let (_dir, mut app) = setup_app();
+        app.terminal_state.visible = true;
+        app.terminal_area = ratatui::layout::Rect::new(0, 20, 80, 10);
+
+        let tx = make_event_tx();
+        // Click down
+        let down = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 5,
+            row: 22,
+            modifiers: KeyModifiers::NONE,
+        };
+        handle_mouse_event(&mut app, down, &tx);
+        // Selection should be set after down
+        assert!(app.terminal_state.selection.is_active());
+
+        // Release without drag (anchor == endpoint)
+        let up = MouseEvent {
+            kind: MouseEventKind::Up(MouseButton::Left),
+            column: 5,
+            row: 22,
+            modifiers: KeyModifiers::NONE,
+        };
+        handle_mouse_event(&mut app, up, &tx);
+        // Selection should be cleared (click without drag)
+        assert!(!app.terminal_state.selection.is_active());
+    }
+
+    #[test]
+    fn tree_click_clears_terminal_selection() {
+        let (_dir, mut app) = setup_app();
+        app.terminal_state.visible = true;
+        app.terminal_area = ratatui::layout::Rect::new(0, 20, 80, 10);
+        app.tree_area = ratatui::layout::Rect::new(0, 0, 40, 20);
+
+        // Set up a fake selection
+        app.terminal_state
+            .selection
+            .set_anchor(crate::terminal::TerminalCoord { line: 0, col: 0 });
+        app.terminal_state
+            .selection
+            .set_endpoint(crate::terminal::TerminalCoord { line: 2, col: 5 });
+        assert!(app.terminal_state.selection.is_active());
+
+        let tx = make_event_tx();
+        // Click on tree area
+        let click = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 5,
+            row: 2,
+            modifiers: KeyModifiers::NONE,
+        };
+        handle_mouse_event(&mut app, click, &tx);
+        assert!(!app.terminal_state.selection.is_active());
+    }
+
+    #[test]
+    fn esc_clears_terminal_selection_before_leaving() {
+        let (_dir, mut app) = setup_app();
+        app.terminal_state.visible = true;
+        app.focused_panel = FocusedPanel::Terminal;
+
+        // Set up selection
+        app.terminal_state
+            .selection
+            .set_anchor(crate::terminal::TerminalCoord { line: 0, col: 0 });
+        app.terminal_state
+            .selection
+            .set_endpoint(crate::terminal::TerminalCoord { line: 1, col: 5 });
+
+        // First Esc should clear selection, keep terminal focus
+        handle_key(&mut app, make_key(KeyCode::Esc));
+        assert!(!app.terminal_state.selection.is_active());
+        assert_eq!(app.focused_panel, FocusedPanel::Terminal);
+
+        // Second Esc should leave terminal
+        handle_key(&mut app, make_key(KeyCode::Esc));
+        assert_eq!(app.focused_panel, FocusedPanel::Tree);
+    }
+
+    #[test]
+    fn ctrl_shift_c_in_terminal_triggers_copy() {
+        let (_dir, mut app) = setup_app();
+        app.terminal_state.visible = true;
+        app.focused_panel = FocusedPanel::Terminal;
+
+        // No selection — should show hint
+        handle_key(
+            &mut app,
+            make_key_with_modifiers(
+                KeyCode::Char('C'),
+                KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+            ),
+        );
+        assert!(app.status_message.is_some());
+        let (msg, _) = app.status_message.as_ref().unwrap();
+        assert!(msg.contains("No terminal text selected"));
+    }
+
+    #[test]
+    fn typing_in_terminal_clears_selection() {
+        let (_dir, mut app) = setup_app();
+        app.terminal_state.visible = true;
+        app.focused_panel = FocusedPanel::Terminal;
+
+        // Set up selection
+        app.terminal_state
+            .selection
+            .set_anchor(crate::terminal::TerminalCoord { line: 0, col: 0 });
+        app.terminal_state
+            .selection
+            .set_endpoint(crate::terminal::TerminalCoord { line: 1, col: 5 });
+        assert!(app.terminal_state.selection.is_active());
+
+        // Type a character — should clear selection
+        handle_key(&mut app, make_key(KeyCode::Char('a')));
+        assert!(!app.terminal_state.selection.is_active());
     }
 }
