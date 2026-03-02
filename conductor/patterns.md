@@ -113,4 +113,10 @@ This file is the project's institutional knowledge - learnings extracted from co
 - `detect_file_type` must handle directory case before checking binary — directories are never binary (from: search-action_20260228, archived 2026-03-01)
 - Action filtering at both handler level (guards on key matches) and widget level (dynamic action list) for context-aware menus (from: search-action_20260228, archived 2026-03-01)
 
-Last refreshed: 2026-03-01 (search action menu patterns)
+- Backward newline scanning for tail-lines: skip trailing `\n`, then find N newline boundaries in 64KB chunks — O(N) memory regardless of file size (from: large-file-scalability_20260302, 2026-03-02)
+- Check file size (cheap metadata) before `fast_line_count()` (reads file) when guarding editor — avoid unnecessary I/O (from: large-file-scalability_20260302, 2026-03-02)
+- Adding new `NodeType` variants requires updating ALL exhaustive matches: tree widget, ui.rs status bar, handler.rs (from: large-file-scalability_20260302, 2026-03-02)
+- Store `event_tx: Option<mpsc::UnboundedSender<Event>>` on App to enable async ops from non-handler contexts (from: large-file-scalability_20260302, 2026-03-02)
+- Keep sync fallback when `event_tx` is None for test contexts that don't have a runtime event loop (from: large-file-scalability_20260302, 2026-03-02)
+
+Last refreshed: 2026-03-02 (large file scalability patterns)

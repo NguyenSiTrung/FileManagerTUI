@@ -1,0 +1,19 @@
+{
+  "track_id": "large-file-scalability_20260302",
+  "type": "bug",
+  "status": "new",
+  "priority": "high",
+  "depends_on": [],
+  "estimated_hours": null,
+  "created_at": "2026-03-02T00:00:00Z",
+  "updated_at": "2026-03-02T00:00:00Z",
+  "description": "Fix UI blocking when handling folders with 1M+ files, previewing large files (>10MB), and editing files with 100K+ lines",
+  "beads_epic": "FileManagerTUI-uo8",
+  "beads_tasks": {
+    "phase1": "FileManagerTUI-uo8.1",
+    "phase2": "FileManagerTUI-uo8.2",
+    "phase3": "FileManagerTUI-uo8.3",
+    "phase4": "FileManagerTUI-uo8.4",
+    "phase5": "FileManagerTUI-uo8.5"
+  }
+}
