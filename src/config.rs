@@ -79,7 +79,7 @@ pub struct TreeConfig {
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default)]
 pub struct WatcherConfig {
-    /// Enable filesystem watcher (inotify backend). Defaults to true.
+    /// Enable filesystem watcher (inotify backend). Defaults to false.
     pub enabled: Option<bool>,
     /// Debounce interval in milliseconds.
     pub debounce_ms: Option<u64>,
@@ -412,7 +412,7 @@ impl AppConfig {
 
     /// Whether the watcher is enabled.
     pub fn watcher_enabled(&self) -> bool {
-        self.watcher.enabled.unwrap_or(true)
+        self.watcher.enabled.unwrap_or(false)
     }
 
     /// Whether the watcher should automatically apply FS changes (auto-refresh).
@@ -524,7 +524,7 @@ mod tests {
         assert_eq!(cfg.head_lines(), 50);
         assert_eq!(cfg.tail_lines(), 20);
         assert_eq!(cfg.syntax_theme_name(), "base16-ocean.dark");
-        assert_eq!(cfg.watcher_enabled(), true);
+        assert_eq!(cfg.watcher_enabled(), false);
         assert_eq!(cfg.watcher_auto_refresh(), false);
         assert_eq!(cfg.debounce_ms(), 300);
         assert_eq!(cfg.sort_by(), "name");
