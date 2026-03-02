@@ -1,12 +1,13 @@
 {
-    "last_refresh": "2026-03-02T17:29:47+07:00",
+    "last_refresh": "2026-03-02T22:10:01+07:00",
     "changes": [
-        "product.md: Updated Feature #2 (File Preview) — added shallow directory summaries, on-demand deep scan (D key), cancel-on-navigate, configurable preview_timeout_ms",
-        "patterns.md: Elevated 4 new patterns from shallow-dir-preview_20260302 (shallow-first UX, tokio::time::timeout, cancel-on-navigate, is_shallow_preview flag)",
-        "Beads: Closed 18 orphaned tasks from help-settings_20260302 epic (FileManagerTUI-jwv.*) — track was archived but Beads tasks remained open",
-        "tracks.md: Clean — no active tracks, 17 archived tracks total",
+        "product.md: Updated Feature #2 — added theme-aware syntax highlighting defaults (InspiredGitHub for light, base16-ocean.dark for dark), semantic ThemeColors for consistent contrast",
+        "product.md: Updated Feature #7 — added live syntax theme reload on scheme change in settings",
+        "patterns.md: Already up-to-date — light-preview-contrast patterns were elevated in previous archive",
+        "tracks.md: Clean — no active tracks, 18 archived tracks total",
         "tech-stack.md: Up-to-date — no new crates or module changes",
-        "workflow.md: Up-to-date — no CI/workflow changes"
+        "workflow.md: Up-to-date — no CI/workflow changes",
+        "Beads: 10 open backlog tasks remain (bugs + future features) — left as-is, not tied to any active track"
     ],
-    "drift_source": "shallow-dir-preview_20260302 completed+archived since last refresh, plus install script fix, 't' key terminal toggle, CI clippy fix"
+    "drift_source": "light-preview-contrast_20260302 archived since last refresh"
 }
