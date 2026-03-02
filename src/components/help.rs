@@ -244,6 +244,10 @@ const PREVIEW_KEYS: &[KeyEntry] = &[
         key: "e",
         description: "Enter edit mode",
     },
+    KeyEntry {
+        key: "D",
+        description: "Trigger deep scan (dirs only)",
+    },
 ];
 
 const EDITOR_KEYS: &[KeyEntry] = &[

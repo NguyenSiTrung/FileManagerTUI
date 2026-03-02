@@ -60,7 +60,7 @@
   - Call existing `spawn_async_dir_summary` (full recursive) with cancel token + timeout
   - Add state field `is_shallow_preview: bool` to `PreviewState` to track scan type
 
-- [ ] Task 2: Deep scan progressive UI updates
+- [x] Task 2: Deep scan progressive UI updates
   - Replace "[Press D for deep scan]" hint with "⏳ Deep scanning..." during scan
   - Show progressive file/dir/size counts as `DirSummaryUpdate` events arrive
   - On completion, show full recursive counts + total size
