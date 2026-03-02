@@ -263,9 +263,9 @@ pub fn render(app: &mut App, frame: &mut Frame) {
 
     // Show watcher status indicator
     let watcher_indicator = if app.watcher_active {
-        "👁".to_string()
+        "👁 Auto".to_string()
     } else {
-        "⏸".to_string()
+        "⏸ Manual".to_string()
     };
     status_widget = status_widget.watcher_status(&watcher_indicator);
 

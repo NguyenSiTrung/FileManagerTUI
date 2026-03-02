@@ -77,10 +77,15 @@ pub struct TreeConfig {
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default)]
 pub struct WatcherConfig {
-    /// Enable filesystem watcher for auto-refresh.
+    /// Enable filesystem watcher (inotify backend). Defaults to true.
     pub enabled: Option<bool>,
     /// Debounce interval in milliseconds.
     pub debounce_ms: Option<u64>,
+    /// Automatically apply filesystem changes to the tree (auto-refresh).
+    /// When false (default), the watcher runs but changes only apply on
+    /// manual refresh (F5 / Ctrl+R toggle). Set to true to restore the old
+    /// interval-driven auto-refresh behaviour.
+    pub auto_refresh: Option<bool>,
 }
 
 /// Embedded terminal settings.
@@ -286,6 +291,7 @@ impl AppConfig {
             watcher: WatcherConfig {
                 enabled: other.watcher.enabled.or(self.watcher.enabled),
                 debounce_ms: other.watcher.debounce_ms.or(self.watcher.debounce_ms),
+                auto_refresh: other.watcher.auto_refresh.or(self.watcher.auto_refresh),
             },
             terminal: TerminalConfig {
                 enabled: other.terminal.enabled.or(self.terminal.enabled),
@@ -394,6 +400,12 @@ impl AppConfig {
         self.watcher.enabled.unwrap_or(true)
     }
 
+    /// Whether the watcher should automatically apply FS changes (auto-refresh).
+    /// Defaults to false — manual refresh only.
+    pub fn watcher_auto_refresh(&self) -> bool {
+        self.watcher.auto_refresh.unwrap_or(false)
+    }
+
     /// Watcher debounce interval in milliseconds.
     pub fn debounce_ms(&self) -> u64 {
         self.watcher.debounce_ms.unwrap_or(DEFAULT_DEBOUNCE_MS)
@@ -498,6 +510,7 @@ mod tests {
         assert_eq!(cfg.tail_lines(), 20);
         assert_eq!(cfg.syntax_theme_name(), "base16-ocean.dark");
         assert_eq!(cfg.watcher_enabled(), true);
+        assert_eq!(cfg.watcher_auto_refresh(), false);
         assert_eq!(cfg.debounce_ms(), 300);
         assert_eq!(cfg.sort_by(), "name");
         assert_eq!(cfg.dirs_first(), true);
@@ -530,6 +543,7 @@ use_icons = false
 [watcher]
 enabled = false
 debounce_ms = 500
+auto_refresh = true
 
 [theme]
 scheme = "light"
@@ -545,6 +559,7 @@ scheme = "light"
         assert_eq!(cfg.syntax_theme_name(), "Solarized (dark)");
         assert_eq!(cfg.watcher_enabled(), false);
         assert_eq!(cfg.debounce_ms(), 500);
+        assert_eq!(cfg.watcher_auto_refresh(), true);
         assert_eq!(cfg.sort_by(), "size");
         assert_eq!(cfg.dirs_first(), false);
         assert_eq!(cfg.use_icons(), false);
@@ -615,6 +630,7 @@ show_hidden = true
             watcher: WatcherConfig {
                 enabled: Some(false),
                 debounce_ms: Some(500),
+                auto_refresh: None,
             },
             ..Default::default()
         };

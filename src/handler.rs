@@ -1210,7 +1210,9 @@ mod tests {
         fs::create_dir(dir.path().join("beta")).unwrap();
         File::create(dir.path().join("file_a.txt")).unwrap();
         File::create(dir.path().join(".hidden")).unwrap();
-        let app = App::new(dir.path(), crate::config::AppConfig::default()).unwrap();
+        let mut app = App::new(dir.path(), crate::config::AppConfig::default()).unwrap();
+        // Enable watcher for tests that assert watcher_active state.
+        app.watcher_active = true;
         (dir, app)
     }
 

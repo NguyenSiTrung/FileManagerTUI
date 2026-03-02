@@ -236,6 +236,7 @@ impl App {
         let syntax_set = SyntaxSet::load_defaults_newlines();
         let syntax_theme = preview_content::load_theme(Some(config.syntax_theme_name()));
         let theme_colors = theme::resolve_theme(&config.theme);
+        let watcher_auto_refresh = config.watcher_auto_refresh();
         Ok(Self {
             config,
             theme_colors,
@@ -254,7 +255,7 @@ impl App {
             last_undo: None,
             search_state: SearchState::default(),
             fuzzy_matcher: SkimMatcherV2::default(),
-            watcher_active: true,
+            watcher_active: watcher_auto_refresh,
             help_state: HelpState::default(),
             tree_area: Rect::default(),
             preview_area: Rect::default(),
@@ -1941,6 +1942,11 @@ impl App {
     /// Skipped when in Search or Filter mode to avoid destroying the search
     /// cache or overwriting the filtered flat_items view.
     pub fn handle_fs_change(&mut self, paths: Vec<PathBuf>) {
+        // In manual-refresh mode (watcher_active == false), silently drop
+        // incoming FS events — the user will trigger refresh via F5.
+        if !self.watcher_active {
+            return;
+        }
         // Don't process filesystem changes while search/filter is active:
         // - Search: would invalidate_search_cache(), clearing cached_paths so
         //   fuzzy scoring returns no results.
@@ -2061,15 +2067,15 @@ impl App {
         self.set_status_message("🔄 Tree refreshed".to_string());
     }
 
-    /// Toggle the filesystem watcher active state.
+    /// Toggle the filesystem watcher active state (auto-refresh on/off).
     ///
-    /// Returns the new state (true = active, false = paused).
+    /// Returns the new state (true = auto-refresh, false = manual refresh).
     pub fn toggle_watcher(&mut self) -> bool {
         self.watcher_active = !self.watcher_active;
         if self.watcher_active {
-            self.set_status_message("👁 Watcher resumed".to_string());
+            self.set_status_message("👁 Auto-refresh ON (Ctrl+R to disable)".to_string());
         } else {
-            self.set_status_message("⏸ Watcher paused".to_string());
+            self.set_status_message("⏸ Manual refresh — press F5 to update".to_string());
         }
         self.watcher_active
     }
@@ -2248,7 +2254,9 @@ mod tests {
         File::create(dir.path().join("file_a.txt")).unwrap();
         File::create(dir.path().join("file_b.rs")).unwrap();
         File::create(dir.path().join(".hidden")).unwrap();
-        let app = App::new(dir.path(), crate::config::AppConfig::default()).unwrap();
+        let mut app = App::new(dir.path(), crate::config::AppConfig::default()).unwrap();
+        // Enable auto-refresh for testing handle_fs_change directly.
+        app.watcher_active = true;
         (dir, app)
     }
 
@@ -3232,7 +3240,8 @@ mod tests {
     #[test]
     fn toggle_watcher_flips_state() {
         let (_dir, mut app) = setup_app();
-        assert!(app.watcher_active); // default on
+        // setup_app forces watcher_active = true for test convenience
+        assert!(app.watcher_active);
         let result = app.toggle_watcher();
         assert!(!result);
         assert!(!app.watcher_active);
@@ -3244,12 +3253,14 @@ mod tests {
     #[test]
     fn toggle_watcher_sets_status_message() {
         let (_dir, mut app) = setup_app();
+        // Start active (set by setup_app); toggle off → manual message
         app.toggle_watcher();
         let (msg, _) = app.status_message.as_ref().unwrap();
-        assert!(msg.contains("paused") || msg.contains("⏸"));
+        assert!(msg.contains("Manual") || msg.contains("⏸"));
+        // Toggle back on → auto-refresh message
         app.toggle_watcher();
         let (msg, _) = app.status_message.as_ref().unwrap();
-        assert!(msg.contains("resumed") || msg.contains("👁"));
+        assert!(msg.contains("Auto") || msg.contains("👁"));
     }
 
     #[test]

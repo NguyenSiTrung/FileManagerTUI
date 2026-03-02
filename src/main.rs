@@ -106,6 +106,7 @@ impl Cli {
             watcher: WatcherConfig {
                 enabled: if self.no_watcher { Some(false) } else { None },
                 debounce_ms: None,
+                auto_refresh: None,
             },
             terminal: crate::config::TerminalConfig {
                 enabled: if self.no_terminal { Some(false) } else { None },
