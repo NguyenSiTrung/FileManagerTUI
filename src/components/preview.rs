@@ -7,12 +7,14 @@ use ratatui::{
 };
 
 use crate::app::PreviewState;
+use crate::terminal::TerminalSelection;
 use crate::theme::ThemeColors;
 
 /// Preview widget that renders file content in the preview panel.
 #[allow(dead_code)]
 pub struct PreviewWidget<'a> {
     preview_state: &'a PreviewState,
+    selection: Option<&'a TerminalSelection>,
     theme: &'a ThemeColors,
     block: Option<Block<'a>>,
 }
@@ -22,9 +24,15 @@ impl<'a> PreviewWidget<'a> {
     pub fn new(preview_state: &'a PreviewState, theme: &'a ThemeColors) -> Self {
         Self {
             preview_state,
+            selection: None,
             theme,
             block: None,
         }
+    }
+
+    pub fn selection(mut self, selection: &'a TerminalSelection) -> Self {
+        self.selection = Some(selection);
+        self
     }
 
     #[allow(dead_code)]
@@ -74,12 +82,59 @@ impl<'a> Widget for PreviewWidget<'a> {
             let y = inner.y + i as u16;
             buf.set_line(inner.x, y, line, inner.width);
         }
+
+        let Some(selection) = self.selection else {
+            return;
+        };
+        let Some((sel_start, sel_end)) = selection.normalized() else {
+            return;
+        };
+        if start >= end || inner.width == 0 {
+            return;
+        }
+
+        let first_visible = start;
+        let last_visible = end - 1;
+        if sel_end.line < first_visible || sel_start.line > last_visible {
+            return;
+        }
+
+        let highlight_style = Style::default()
+            .bg(self.theme.editor_selection_bg)
+            .fg(self.theme.preview_fg);
+        let first_line = sel_start.line.max(first_visible);
+        let last_line = sel_end.line.min(last_visible);
+        let max_col = inner.width.saturating_sub(1) as usize;
+
+        for abs_line in first_line..=last_line {
+            let row = inner.y + (abs_line - first_visible) as u16;
+            let start_col = if abs_line == sel_start.line {
+                sel_start.col
+            } else {
+                0
+            };
+            let end_col = if abs_line == sel_end.line {
+                sel_end.col
+            } else {
+                max_col
+            };
+            if start_col > end_col || start_col > max_col {
+                continue;
+            }
+
+            for col in start_col.min(max_col)..=end_col.min(max_col) {
+                if let Some(cell) = buf.cell_mut((inner.x + col as u16, row)) {
+                    cell.set_style(highlight_style);
+                }
+            }
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::terminal::{TerminalCoord, TerminalSelection};
     use crate::theme;
     use ratatui::{buffer::Buffer, layout::Rect, widgets::Borders};
 
@@ -203,5 +258,28 @@ mod tests {
         let area = Rect::new(0, 0, 0, 0);
         let mut buf = Buffer::empty(area);
         widget.render(area, &mut buf);
+    }
+
+    #[test]
+    fn test_preview_selection_highlight() {
+        let mut state = PreviewState::default();
+        state.content_lines = vec![Line::from("hello world"), Line::from("line two")];
+        state.total_lines = 2;
+
+        let mut selection = TerminalSelection::default();
+        selection.set_anchor(TerminalCoord { line: 0, col: 6 });
+        selection.set_endpoint(TerminalCoord { line: 0, col: 10 });
+
+        let tc = test_theme();
+        let widget = PreviewWidget::new(&state, &tc).selection(&selection);
+        let area = Rect::new(0, 0, 20, 4);
+        let mut buf = Buffer::empty(area);
+        widget.render(area, &mut buf);
+
+        let selected = buf.cell((6, 0)).unwrap();
+        assert_eq!(selected.bg, tc.editor_selection_bg);
+
+        let unselected = buf.cell((0, 0)).unwrap();
+        assert_ne!(unselected.bg, tc.editor_selection_bg);
     }
 }

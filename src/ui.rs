@@ -167,7 +167,9 @@ pub fn render(app: &mut App, frame: &mut Frame) {
             .borders(Borders::ALL)
             .border_style(preview_border_style);
 
-        let preview_widget = PreviewWidget::new(&app.preview_state, &theme).block(preview_block);
+        let preview_widget = PreviewWidget::new(&app.preview_state, &theme)
+            .selection(&app.preview_selection)
+            .block(preview_block);
         frame.render_widget(preview_widget, preview_area);
     }
 

@@ -180,6 +180,8 @@ After selecting a file in the fuzzy finder, an action menu appears:
 | `Ctrl+D` | Half page down |
 | `Ctrl+U` | Half page up |
 | `Ctrl+W` | Toggle line wrap |
+| `Ctrl+Shift+C` / `Ctrl+C` (when selected) | Copy selected preview text |
+| `Ctrl+Insert` | Copy selected preview text |
 | `Ctrl+T` | Cycle view mode (head/tail/full for large files) |
 | `+` / `-` | Adjust head/tail lines |
 | `e` | Enter edit mode |
@@ -238,7 +240,9 @@ After selecting a file in the fuzzy finder, an action menu appears:
 |--------|----------|
 | Left click (tree) | Select item |
 | Left click (selected dir) | Expand/collapse |
-| Left click (preview) | Switch focus to preview |
+| Left click (preview) | Focus preview and start text selection |
+| Left drag (preview) | Extend text selection |
+| Right click (preview) | Copy selected preview text |
 | Scroll wheel | Navigate tree / scroll preview |
 
 ## Configuration

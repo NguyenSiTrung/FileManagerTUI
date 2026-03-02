@@ -237,6 +237,18 @@ const PREVIEW_KEYS: &[KeyEntry] = &[
         description: "Toggle line wrap",
     },
     KeyEntry {
+        key: "Mouse drag",
+        description: "Select preview text",
+    },
+    KeyEntry {
+        key: "Ctrl+Shift+C / Ctrl+C",
+        description: "Copy selected preview text",
+    },
+    KeyEntry {
+        key: "Right click",
+        description: "Copy selected preview text",
+    },
+    KeyEntry {
         key: "+ / -",
         description: "Adjust head/tail lines",
     },

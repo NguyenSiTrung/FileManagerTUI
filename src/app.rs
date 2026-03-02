@@ -18,7 +18,7 @@ use crate::error::Result;
 use crate::fs::clipboard::{ClipboardOp, ClipboardState};
 use crate::fs::tree::{NodeType, TreeState};
 use crate::preview_content;
-use crate::terminal::TerminalState;
+use crate::terminal::{TerminalSelection, TerminalState};
 use crate::theme::{self, ThemeColors};
 
 /// The kind of dialog being displayed.
@@ -207,6 +207,8 @@ pub struct App {
     pub tree_area: Rect,
     /// Last rendered preview panel area (for mouse click mapping).
     pub preview_area: Rect,
+    /// Current mouse text selection in preview panel (View mode).
+    pub preview_selection: TerminalSelection,
     /// Embedded terminal state (PTY + emulator).
     pub terminal_state: TerminalState,
     /// Last rendered terminal panel area (for mouse click mapping).
@@ -271,6 +273,7 @@ impl App {
             help_state: HelpState::default(),
             tree_area: Rect::default(),
             preview_area: Rect::default(),
+            preview_selection: TerminalSelection::default(),
             terminal_state: TerminalState::default(),
             terminal_area: Rect::default(),
             editor_state: None,
@@ -1252,6 +1255,8 @@ impl App {
             }
             0
         };
+        // Preview content is about to be replaced; clear stale selection.
+        self.preview_selection.clear();
 
         // Directory preview: use async scan if event_tx is available
         if item.node_type == NodeType::Directory {
@@ -1461,6 +1466,7 @@ impl App {
             self.preview_state.content_lines = lines;
             self.preview_state.total_lines = total;
             self.preview_state.scroll_offset = 0;
+            self.preview_selection.clear();
         }
     }
 
@@ -2345,6 +2351,7 @@ impl App {
             .collect();
         self.preview_state.total_lines = self.preview_state.content_lines.len();
         self.preview_state.is_shallow_preview = false;
+        self.preview_selection.clear();
     }
 
     /// Handle a shallow directory summary completion.
@@ -2366,6 +2373,66 @@ impl App {
         self.preview_state.content_lines = lines;
         self.preview_state.total_lines = total;
         self.preview_state.is_shallow_preview = true;
+        self.preview_selection.clear();
+    }
+
+    fn extract_preview_selected_text(&self) -> Option<String> {
+        let (start, end) = self.preview_selection.normalized()?;
+        let line_count = self.preview_state.content_lines.len();
+        if line_count == 0 || start.line >= line_count || end.line >= line_count {
+            return None;
+        }
+
+        if start.line == end.line {
+            let text = preview_line_text(&self.preview_state.content_lines[start.line]);
+            return Some(slice_line_by_cols(
+                &text,
+                start.col,
+                end.col.saturating_add(1),
+            ));
+        }
+
+        let mut parts: Vec<String> = Vec::with_capacity(end.line - start.line + 1);
+        for line_idx in start.line..=end.line {
+            let text = preview_line_text(&self.preview_state.content_lines[line_idx]);
+            if line_idx == start.line {
+                parts.push(slice_line_by_cols(&text, start.col, usize::MAX));
+            } else if line_idx == end.line {
+                parts.push(slice_line_by_cols(&text, 0, end.col.saturating_add(1)));
+            } else {
+                parts.push(text);
+            }
+        }
+        Some(parts.join("\n"))
+    }
+
+    /// Copy the current preview selection to the system clipboard.
+    ///
+    /// Shows a status message with the result (success/failure/no-selection).
+    pub fn copy_preview_selection(&mut self) {
+        match self.extract_preview_selected_text() {
+            Some(text) if !text.is_empty() => {
+                let line_count = text.lines().count();
+                let byte_count = text.len();
+                match copy_to_system_clipboard(&text) {
+                    Ok(()) => {
+                        self.set_status_message(format!(
+                            "📋 Copied {} bytes ({} line{})",
+                            byte_count,
+                            line_count,
+                            if line_count == 1 { "" } else { "s" }
+                        ));
+                        self.preview_selection.clear();
+                    }
+                    Err(err) => {
+                        self.set_status_message(format!("⚠ Clipboard error: {}", err));
+                    }
+                }
+            }
+            _ => {
+                self.set_status_message("No preview text selected — drag to select".to_string());
+            }
+        }
     }
 
     /// Copy the current terminal selection to the system clipboard.
@@ -2397,6 +2464,23 @@ impl App {
             }
         }
     }
+}
+
+fn preview_line_text(line: &Line<'static>) -> String {
+    line.spans
+        .iter()
+        .map(|span| span.content.as_ref())
+        .collect::<String>()
+}
+
+fn slice_line_by_cols(line: &str, start_col: usize, end_col_exclusive: usize) -> String {
+    if end_col_exclusive <= start_col {
+        return String::new();
+    }
+    line.chars()
+        .skip(start_col)
+        .take(end_col_exclusive.saturating_sub(start_col))
+        .collect()
 }
 
 /// Format a byte size into a human-readable string.
@@ -2809,6 +2893,35 @@ mod tests {
         assert_eq!(app.preview_state.view_mode, ViewMode::HeadAndTail);
         assert!(!app.preview_state.line_wrap);
         assert_eq!(app.preview_state.total_lines, 0);
+    }
+
+    #[test]
+    fn extract_preview_selected_text_single_line() {
+        let (_dir, mut app) = setup_app();
+        app.preview_state.content_lines = vec![Line::from("hello world")];
+        app.preview_state.total_lines = 1;
+        app.preview_selection
+            .set_anchor(crate::terminal::TerminalCoord { line: 0, col: 6 });
+        app.preview_selection
+            .set_endpoint(crate::terminal::TerminalCoord { line: 0, col: 10 });
+
+        let extracted = app.extract_preview_selected_text();
+        assert_eq!(extracted.as_deref(), Some("world"));
+    }
+
+    #[test]
+    fn extract_preview_selected_text_multi_line() {
+        let (_dir, mut app) = setup_app();
+        app.preview_state.content_lines =
+            vec![Line::from("alpha"), Line::from("beta"), Line::from("gamma")];
+        app.preview_state.total_lines = 3;
+        app.preview_selection
+            .set_anchor(crate::terminal::TerminalCoord { line: 0, col: 2 });
+        app.preview_selection
+            .set_endpoint(crate::terminal::TerminalCoord { line: 2, col: 2 });
+
+        let extracted = app.extract_preview_selected_text();
+        assert_eq!(extracted.as_deref(), Some("pha\nbeta\ngam"));
     }
 
     #[test]

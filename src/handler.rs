@@ -35,6 +35,7 @@ pub fn handle_mouse_event(
             if is_in_rect(col, row, app.tree_area) {
                 // Clear any terminal selection when clicking elsewhere
                 app.terminal_state.selection.clear();
+                app.preview_selection.clear();
                 // Switch focus to tree
                 app.focused_panel = FocusedPanel::Tree;
 
@@ -77,9 +78,15 @@ pub fn handle_mouse_event(
                 app.terminal_state.selection.clear();
                 // Switch focus to preview
                 app.focused_panel = FocusedPanel::Preview;
+                if let Some(coord) = mouse_to_preview_coord(app, col, row, false) {
+                    app.preview_selection.begin_drag(coord);
+                } else {
+                    app.preview_selection.clear();
+                }
             } else if app.terminal_state.visible && is_in_rect(col, row, app.terminal_area) {
                 // Switch focus to terminal and start/clear selection
                 app.focused_panel = FocusedPanel::Terminal;
+                app.preview_selection.clear();
                 if let Some(coord) = mouse_to_terminal_coord(app, col, row, false) {
                     // Click sets anchor (clears any previous selection by overwriting)
                     app.terminal_state.selection.begin_drag(coord);
@@ -90,6 +97,9 @@ pub fn handle_mouse_event(
             if app.terminal_state.visible && is_in_rect(col, row, app.terminal_area) {
                 app.focused_panel = FocusedPanel::Terminal;
                 app.copy_terminal_selection();
+            } else if is_in_rect(col, row, app.preview_area) {
+                app.focused_panel = FocusedPanel::Preview;
+                app.copy_preview_selection();
             }
         }
         MouseEventKind::Drag(MouseButton::Left) => {
@@ -98,6 +108,10 @@ pub fn handle_mouse_event(
                 if let Some(coord) = mouse_to_terminal_coord(app, col, row, true) {
                     app.terminal_state.selection.set_endpoint(coord);
                 }
+            } else if app.preview_selection.dragging {
+                if let Some(coord) = mouse_to_preview_coord(app, col, row, true) {
+                    app.preview_selection.set_endpoint(coord);
+                }
             }
         }
         MouseEventKind::Moved => {
@@ -105,6 +119,10 @@ pub fn handle_mouse_event(
             if app.terminal_state.visible && app.terminal_state.selection.dragging {
                 if let Some(coord) = mouse_to_terminal_coord(app, col, row, true) {
                     app.terminal_state.selection.set_endpoint(coord);
+                }
+            } else if app.preview_selection.dragging {
+                if let Some(coord) = mouse_to_preview_coord(app, col, row, true) {
+                    app.preview_selection.set_endpoint(coord);
                 }
             }
         }
@@ -115,11 +133,21 @@ pub fn handle_mouse_event(
                     app.terminal_state.selection.set_endpoint(coord);
                 }
                 app.terminal_state.selection.end_drag();
+            } else if app.preview_selection.dragging {
+                if let Some(coord) = mouse_to_preview_coord(app, col, row, true) {
+                    app.preview_selection.set_endpoint(coord);
+                }
+                app.preview_selection.end_drag();
             }
             // If anchor == endpoint after click-release (no drag), clear selection
             if let Some((start, end)) = app.terminal_state.selection.normalized() {
                 if start == end {
                     app.terminal_state.selection.clear();
+                }
+            }
+            if let Some((start, end)) = app.preview_selection.normalized() {
+                if start == end {
+                    app.preview_selection.clear();
                 }
             }
         }
@@ -206,6 +234,59 @@ fn mouse_to_terminal_coord(
     let visible = app.terminal_state.emulator.visible_rows();
     let first_visible_abs = total.saturating_sub(visible + app.terminal_state.scroll_offset);
     let abs_line = first_visible_abs + local_row;
+
+    Some(crate::terminal::TerminalCoord {
+        line: abs_line,
+        col: local_col,
+    })
+}
+
+/// Convert mouse screen coordinates to preview-local absolute coordinates.
+/// Returns None if the position is outside the preview inner area or preview is empty.
+fn mouse_to_preview_coord(
+    app: &App,
+    mouse_col: u16,
+    mouse_row: u16,
+    clamp_to_inner: bool,
+) -> Option<crate::terminal::TerminalCoord> {
+    let area = app.preview_area;
+    let inner_x = area.x + 1;
+    let inner_y = area.y + 1;
+    let inner_w = area.width.saturating_sub(2);
+    let inner_h = area.height.saturating_sub(2);
+
+    if inner_w == 0 || inner_h == 0 || app.preview_state.content_lines.is_empty() {
+        return None;
+    }
+
+    let (effective_col, effective_row) = if clamp_to_inner {
+        let max_x = inner_x + inner_w - 1;
+        let max_y = inner_y + inner_h - 1;
+        (
+            mouse_col.clamp(inner_x, max_x),
+            mouse_row.clamp(inner_y, max_y),
+        )
+    } else {
+        if mouse_col < inner_x
+            || mouse_row < inner_y
+            || mouse_col >= inner_x + inner_w
+            || mouse_row >= inner_y + inner_h
+        {
+            return None;
+        }
+        (mouse_col, mouse_row)
+    };
+
+    let local_col = (effective_col - inner_x) as usize;
+    let local_row = (effective_row - inner_y) as usize;
+    let visible_height = inner_h as usize;
+    let max_start = app
+        .preview_state
+        .content_lines
+        .len()
+        .saturating_sub(visible_height);
+    let start = app.preview_state.scroll_offset.min(max_start);
+    let abs_line = (start + local_row).min(app.preview_state.content_lines.len() - 1);
 
     Some(crate::terminal::TerminalCoord {
         line: abs_line,
@@ -696,6 +777,33 @@ fn handle_normal_mode(app: &mut App, key: KeyEvent, event_tx: &mpsc::UnboundedSe
 
     // Global keys (work regardless of focus for tree/preview panels)
     match key.code {
+        // Copy preview selection when preview is focused.
+        // Supports Ctrl+Shift+C, Ctrl+C (when selection exists), Cmd+C, and Ctrl+Insert.
+        KeyCode::Char('C')
+            if app.focused_panel == FocusedPanel::Preview
+                && (key.modifiers.contains(KeyModifiers::CONTROL)
+                    || key.modifiers.contains(KeyModifiers::SUPER)) =>
+        {
+            app.copy_preview_selection();
+            return;
+        }
+        KeyCode::Char('c')
+            if app.focused_panel == FocusedPanel::Preview
+                && ((key.modifiers.contains(KeyModifiers::CONTROL)
+                    && (key.modifiers.contains(KeyModifiers::SHIFT)
+                        || app.preview_selection.is_active()))
+                    || key.modifiers.contains(KeyModifiers::SUPER)) =>
+        {
+            app.copy_preview_selection();
+            return;
+        }
+        KeyCode::Insert
+            if app.focused_panel == FocusedPanel::Preview
+                && key.modifiers.contains(KeyModifiers::CONTROL) =>
+        {
+            app.copy_preview_selection();
+            return;
+        }
         KeyCode::Char('q') => {
             app.quit();
             return;
@@ -2272,6 +2380,28 @@ mod tests {
     }
 
     #[test]
+    fn ctrl_c_with_selection_in_preview_triggers_copy() {
+        let (_dir, mut app) = setup_app();
+        app.focused_panel = FocusedPanel::Preview;
+        app.preview_state.content_lines = vec![ratatui::text::Line::raw("hello preview")];
+        app.preview_state.total_lines = 1;
+        app.preview_selection
+            .set_anchor(crate::terminal::TerminalCoord { line: 0, col: 0 });
+        app.preview_selection
+            .set_endpoint(crate::terminal::TerminalCoord { line: 0, col: 4 });
+
+        handle_key(
+            &mut app,
+            make_key_with_modifiers(KeyCode::Char('c'), KeyModifiers::CONTROL),
+        );
+
+        assert!(!app.should_quit);
+        assert!(app.status_message.is_some());
+        let (msg, _) = app.status_message.as_ref().unwrap();
+        assert!(msg.contains("Copied"));
+    }
+
+    #[test]
     fn preview_j_scrolls_down() {
         let (_dir, mut app) = setup_app();
         app.focused_panel = FocusedPanel::Preview;
@@ -3115,6 +3245,44 @@ mod tests {
     }
 
     #[test]
+    fn mouse_drag_in_preview_updates_selection() {
+        let (_dir, mut app) = setup_app();
+        app.preview_area = ratatui::layout::Rect::new(40, 0, 60, 20);
+        app.preview_state.content_lines = vec![
+            ratatui::text::Line::raw("line 1"),
+            ratatui::text::Line::raw("line 2"),
+        ];
+        app.preview_state.total_lines = 2;
+
+        let tx = make_event_tx();
+        let down = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 42,
+            row: 2,
+            modifiers: KeyModifiers::NONE,
+        };
+        handle_mouse_event(&mut app, down, &tx);
+
+        let drag = MouseEvent {
+            kind: MouseEventKind::Drag(MouseButton::Left),
+            column: 47,
+            row: 2,
+            modifiers: KeyModifiers::NONE,
+        };
+        handle_mouse_event(&mut app, drag, &tx);
+
+        let up = MouseEvent {
+            kind: MouseEventKind::Up(MouseButton::Left),
+            column: 47,
+            row: 2,
+            modifiers: KeyModifiers::NONE,
+        };
+        handle_mouse_event(&mut app, up, &tx);
+
+        assert!(app.preview_selection.is_active());
+    }
+
+    #[test]
     fn mouse_ignored_in_dialog_mode() {
         let (_dir, mut app) = setup_app();
         app.tree_area = ratatui::layout::Rect::new(0, 0, 40, 20);
@@ -3561,6 +3729,32 @@ mod tests {
             kind: MouseEventKind::Down(MouseButton::Right),
             column: 5,
             row: 22,
+            modifiers: KeyModifiers::NONE,
+        };
+        handle_mouse_event(&mut app, right_click, &tx);
+
+        assert!(app.status_message.is_some());
+        let (msg, _) = app.status_message.as_ref().unwrap();
+        assert!(msg.contains("Copied"));
+    }
+
+    #[test]
+    fn preview_right_click_copies_selection() {
+        let (_dir, mut app) = setup_app();
+        app.preview_area = ratatui::layout::Rect::new(40, 0, 60, 20);
+        app.focused_panel = FocusedPanel::Preview;
+        app.preview_state.content_lines = vec![ratatui::text::Line::raw("hello preview")];
+        app.preview_state.total_lines = 1;
+        app.preview_selection
+            .set_anchor(crate::terminal::TerminalCoord { line: 0, col: 0 });
+        app.preview_selection
+            .set_endpoint(crate::terminal::TerminalCoord { line: 0, col: 4 });
+
+        let tx = make_event_tx();
+        let right_click = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Right),
+            column: 45,
+            row: 2,
             modifiers: KeyModifiers::NONE,
         };
         handle_mouse_event(&mut app, right_click, &tx);
