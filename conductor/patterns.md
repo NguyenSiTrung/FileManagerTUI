@@ -119,4 +119,11 @@ This file is the project's institutional knowledge - learnings extracted from co
 - Store `event_tx: Option<mpsc::UnboundedSender<Event>>` on App to enable async ops from non-handler contexts (from: large-file-scalability_20260302, 2026-03-02)
 - Keep sync fallback when `event_tx` is None for test contexts that don't have a runtime event loop (from: large-file-scalability_20260302, 2026-03-02)
 
-Last refreshed: 2026-03-02 (large file scalability patterns)
+- Tab-aware overlay architecture: pass full state struct to widget rather than individual fields — allows conditional rendering per tab without changing constructor signature (from: help-settings_20260302, archived 2026-03-02)
+- Lazy initialization for expensive state: use `Option<State>` and initialize on first demand (e.g., first tab switch) to avoid unnecessary work (from: help-settings_20260302, archived 2026-03-02)
+- Live config application: apply changes to running `AppConfig` immediately then serialize to disk; match on `(section, key)` tuples for clean dispatch; handle side effects (re-sort, re-flatten, re-resolve theme) explicitly (from: help-settings_20260302, archived 2026-03-02)
+- TOML merge strategy: read existing file → parse to `toml::Table` → merge modified entries → write back; preserves comments and hand-edited values (from: help-settings_20260302, archived 2026-03-02)
+- Entry line index computation for auto-scroll: iterate through all entries counting section headers and separators for variable-height lists (from: help-settings_20260302, archived 2026-03-02)
+- Type bridge pattern (`SettingValueKind`): intermediate enum bridging heterogeneous config field types to a uniform UI/editing API — enables generic toggle/cycle/edit without knowing specific field type (from: help-settings_20260302, archived 2026-03-02)
+
+Last refreshed: 2026-03-02 (help-settings patterns elevated)
