@@ -43,3 +43,8 @@
 ---
 
 <!-- Archived: shallow-dir-preview_20260302 (2026-03-02) → conductor/archive/ -->
+
+---
+
+## [ ] Track: Light Theme Preview Panel Contrast
+*Link: [./conductor/tracks/light-preview-contrast_20260302/](./conductor/tracks/light-preview-contrast_20260302/)*
