@@ -245,7 +245,8 @@ impl App {
         tree_state.flatten();
 
         let syntax_set = SyntaxSet::load_defaults_newlines();
-        let syntax_theme = preview_content::load_theme(Some(config.syntax_theme_name()));
+        let syntax_theme =
+            preview_content::load_theme(Some(config.syntax_theme_name(config.theme_scheme())));
         let theme_colors = theme::resolve_theme(&config.theme);
         let watcher_auto_refresh = config.watcher_auto_refresh();
         Ok(Self {
@@ -908,10 +909,12 @@ impl App {
         self.active_dir_scan = Some(dir_path.to_path_buf());
         let path = dir_path.to_path_buf();
         let tx = event_tx.clone();
+        let theme_colors = self.theme_colors.clone();
 
         tokio::spawn(async move {
             let result = tokio::task::spawn_blocking(move || {
-                let (lines, total) = crate::preview_content::load_directory_summary_shallow(&path);
+                let (lines, total) =
+                    crate::preview_content::load_directory_summary_shallow(&path, &theme_colors);
                 let _ = tx.send(crate::event::Event::ShallowDirSummary { path, lines, total });
             })
             .await;
@@ -1288,7 +1291,8 @@ impl App {
                 self.spawn_async_dir_summary_shallow(&path, &tx_clone);
             } else {
                 // Fallback: sync load (for tests without event_tx)
-                let (lines, total) = preview_content::load_directory_summary_shallow(&path);
+                let (lines, total) =
+                    preview_content::load_directory_summary_shallow(&path, &self.theme_colors);
                 self.preview_state = PreviewState {
                     current_path: Some(path),
                     content_lines: lines,
@@ -1315,8 +1319,12 @@ impl App {
 
         // Check for notebook files
         if path.extension().and_then(|e| e.to_str()) == Some("ipynb") {
-            let (lines, total) =
-                preview_content::load_notebook_content(&path, &self.syntax_set, &self.syntax_theme);
+            let (lines, total) = preview_content::load_notebook_content(
+                &path,
+                &self.syntax_set,
+                &self.syntax_theme,
+                &self.theme_colors,
+            );
             self.preview_state = PreviewState {
                 current_path: Some(path),
                 content_lines: lines,
@@ -1335,7 +1343,7 @@ impl App {
 
         // Check if binary file
         if preview_content::is_binary_file(&path) {
-            let (lines, total) = preview_content::load_binary_metadata(&path);
+            let (lines, total) = preview_content::load_binary_metadata(&path, &self.theme_colors);
             self.preview_state = PreviewState {
                 current_path: Some(path),
                 content_lines: lines,
@@ -1365,6 +1373,7 @@ impl App {
                 &path,
                 &self.syntax_set,
                 &self.syntax_theme,
+                &self.theme_colors,
                 head,
                 tail,
                 ViewMode::HeadAndTail,
@@ -1386,6 +1395,7 @@ impl App {
                 &path,
                 &self.syntax_set,
                 &self.syntax_theme,
+                &self.theme_colors,
             );
             self.preview_state = PreviewState {
                 current_path: Some(path),
@@ -1443,6 +1453,7 @@ impl App {
                 &path,
                 &self.syntax_set,
                 &self.syntax_theme,
+                &self.theme_colors,
                 self.preview_state.head_lines,
                 self.preview_state.tail_lines,
                 self.preview_state.view_mode,

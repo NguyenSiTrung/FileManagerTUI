@@ -9,6 +9,7 @@ use syntect::highlighting::{Theme, ThemeSet};
 use syntect::parsing::SyntaxSet;
 
 use crate::app::ViewMode;
+use crate::theme::ThemeColors;
 
 /// Line count adjustment step for +/- keys.
 pub const LINE_COUNT_STEP: usize = 10;
@@ -92,6 +93,7 @@ pub fn load_highlighted_content(
     path: &Path,
     ss: &SyntaxSet,
     theme: &Theme,
+    colors: &ThemeColors,
 ) -> (Vec<Line<'static>>, usize) {
     let content = match fs::read(path) {
         Ok(bytes) => match String::from_utf8(bytes) {
@@ -106,7 +108,7 @@ pub fn load_highlighted_content(
             return (
                 vec![Line::from(Span::styled(
                     msg,
-                    Style::default().fg(Color::Red),
+                    Style::default().fg(colors.error_fg),
                 ))],
                 1,
             );
@@ -130,7 +132,10 @@ pub fn load_highlighted_content(
 
         // Line number
         let num = format!("{:>width$} │ ", i + 1, width = line_num_width);
-        spans.push(Span::styled(num, Style::default().fg(Color::DarkGray)));
+        spans.push(Span::styled(
+            num,
+            Style::default().fg(colors.preview_line_nr_fg),
+        ));
 
         // Highlighted content
         match highlighter.highlight_line(line_str, ss) {
@@ -151,7 +156,7 @@ pub fn load_highlighted_content(
     if result_lines.is_empty() {
         result_lines.push(Line::from(Span::styled(
             "(empty file)",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(colors.dim_fg),
         )));
     }
 
@@ -278,6 +283,7 @@ pub fn load_head_tail_content(
     path: &Path,
     ss: &SyntaxSet,
     theme: &Theme,
+    colors: &ThemeColors,
     head_lines: usize,
     tail_lines: usize,
     view_mode: ViewMode,
@@ -288,7 +294,7 @@ pub fn load_head_tail_content(
             return (
                 vec![Line::from(Span::styled(
                     format!("Error counting lines: {}", e),
-                    Style::default().fg(Color::Red),
+                    Style::default().fg(colors.error_fg),
                 ))],
                 1,
             );
@@ -312,7 +318,7 @@ pub fn load_head_tail_content(
                     return (
                         vec![Line::from(Span::styled(
                             format!("Error reading file: {}", e),
-                            Style::default().fg(Color::Red),
+                            Style::default().fg(colors.error_fg),
                         ))],
                         1,
                     );
@@ -324,7 +330,7 @@ pub fn load_head_tail_content(
                     return (
                         vec![Line::from(Span::styled(
                             format!("Error reading file: {}", e),
-                            Style::default().fg(Color::Red),
+                            Style::default().fg(colors.error_fg),
                         ))],
                         1,
                     );
@@ -343,6 +349,7 @@ pub fn load_head_tail_content(
                     line_num_width,
                     &mut highlighter,
                     ss,
+                    colors,
                 ));
             }
 
@@ -353,7 +360,7 @@ pub fn load_head_tail_content(
                 result_lines.push(Line::from(Span::styled(
                     sep,
                     Style::default()
-                        .fg(Color::Yellow)
+                        .fg(colors.warning_fg)
                         .add_modifier(Modifier::DIM),
                 )));
             }
@@ -366,6 +373,7 @@ pub fn load_head_tail_content(
                     line_num_width,
                     &mut highlighter,
                     ss,
+                    colors,
                 ));
             }
         }
@@ -376,7 +384,7 @@ pub fn load_head_tail_content(
                     return (
                         vec![Line::from(Span::styled(
                             format!("Error reading file: {}", e),
-                            Style::default().fg(Color::Red),
+                            Style::default().fg(colors.error_fg),
                         ))],
                         1,
                     );
@@ -389,6 +397,7 @@ pub fn load_head_tail_content(
                     line_num_width,
                     &mut highlighter,
                     ss,
+                    colors,
                 ));
             }
         }
@@ -399,7 +408,7 @@ pub fn load_head_tail_content(
                     return (
                         vec![Line::from(Span::styled(
                             format!("Error reading file: {}", e),
-                            Style::default().fg(Color::Red),
+                            Style::default().fg(colors.error_fg),
                         ))],
                         1,
                     );
@@ -413,6 +422,7 @@ pub fn load_head_tail_content(
                     line_num_width,
                     &mut highlighter,
                     ss,
+                    colors,
                 ));
             }
         }
@@ -429,11 +439,15 @@ fn highlight_single_line(
     line_num_width: usize,
     highlighter: &mut syntect::easy::HighlightLines,
     ss: &SyntaxSet,
+    colors: &ThemeColors,
 ) -> Line<'static> {
     let mut spans: Vec<Span<'static>> = Vec::new();
 
     let num = format!("{:>width$} │ ", line_num, width = line_num_width);
-    spans.push(Span::styled(num, Style::default().fg(Color::DarkGray)));
+    spans.push(Span::styled(
+        num,
+        Style::default().fg(colors.preview_line_nr_fg),
+    ));
 
     match highlighter.highlight_line(line_str, ss) {
         Ok(ranges) => {
@@ -527,14 +541,14 @@ fn format_permissions(mode: u32) -> String {
 }
 
 /// Generate metadata display lines for a binary file.
-pub fn load_binary_metadata(path: &Path) -> (Vec<Line<'static>>, usize) {
+pub fn load_binary_metadata(path: &Path, colors: &ThemeColors) -> (Vec<Line<'static>>, usize) {
     let meta = match fs::metadata(path) {
         Ok(m) => m,
         Err(e) => {
             return (
                 vec![Line::from(Span::styled(
                     format!("Error reading metadata: {}", e),
-                    Style::default().fg(Color::Red),
+                    Style::default().fg(colors.error_fg),
                 ))],
                 1,
             );
@@ -542,10 +556,10 @@ pub fn load_binary_metadata(path: &Path) -> (Vec<Line<'static>>, usize) {
     };
 
     let label_style = Style::default()
-        .fg(Color::Cyan)
+        .fg(colors.info_fg)
         .add_modifier(Modifier::BOLD);
-    let value_style = Style::default().fg(Color::White);
-    let dim_style = Style::default().fg(Color::DarkGray);
+    let value_style = Style::default().fg(colors.preview_fg);
+    let dim_style = Style::default().fg(colors.dim_fg);
 
     let file_name = path
         .file_name()
@@ -651,11 +665,11 @@ fn is_leap_year(year: u64) -> bool {
 /// Shows: directory name, file count, subdirectory count, total size.
 /// Caps recursive walk to avoid hanging on huge trees.
 #[allow(dead_code)]
-pub fn load_directory_summary(path: &Path) -> (Vec<Line<'static>>, usize) {
+pub fn load_directory_summary(path: &Path, colors: &ThemeColors) -> (Vec<Line<'static>>, usize) {
     let label_style = Style::default()
-        .fg(Color::Cyan)
+        .fg(colors.info_fg)
         .add_modifier(Modifier::BOLD);
-    let value_style = Style::default().fg(Color::White);
+    let value_style = Style::default().fg(colors.preview_fg);
 
     let dir_name = path
         .file_name()
@@ -730,7 +744,7 @@ pub fn load_directory_summary(path: &Path) -> (Vec<Line<'static>>, usize) {
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
             format!("  (scan capped at {} entries)", MAX_ENTRIES),
-            Style::default().fg(Color::Yellow),
+            Style::default().fg(colors.warning_fg),
         )));
     }
 
@@ -747,13 +761,16 @@ const SHALLOW_LISTING_LIMIT: usize = 20;
 /// - directory name, immediate file count, immediate subdirectory count
 /// - first N child item names as a quick listing
 /// - hint for deep scan
-pub fn load_directory_summary_shallow(path: &Path) -> (Vec<Line<'static>>, usize) {
+pub fn load_directory_summary_shallow(
+    path: &Path,
+    colors: &ThemeColors,
+) -> (Vec<Line<'static>>, usize) {
     let label_style = Style::default()
-        .fg(Color::Cyan)
+        .fg(colors.info_fg)
         .add_modifier(Modifier::BOLD);
-    let value_style = Style::default().fg(Color::White);
-    let dim_style = Style::default().fg(Color::DarkGray);
-    let hint_style = Style::default().fg(Color::Yellow);
+    let value_style = Style::default().fg(colors.preview_fg);
+    let dim_style = Style::default().fg(colors.dim_fg);
+    let hint_style = Style::default().fg(colors.warning_fg);
 
     let dir_name = path
         .file_name()
@@ -770,7 +787,7 @@ pub fn load_directory_summary_shallow(path: &Path) -> (Vec<Line<'static>>, usize
             return (
                 vec![Line::from(Span::styled(
                     format!("  Error reading directory: {}", e),
-                    Style::default().fg(Color::Red),
+                    Style::default().fg(colors.error_fg),
                 ))],
                 1,
             );
@@ -856,6 +873,7 @@ pub fn load_notebook_content(
     path: &Path,
     ss: &SyntaxSet,
     theme: &Theme,
+    colors: &ThemeColors,
 ) -> (Vec<Line<'static>>, usize) {
     let content = match fs::read_to_string(path) {
         Ok(s) => s,
@@ -863,7 +881,7 @@ pub fn load_notebook_content(
             return (
                 vec![Line::from(Span::styled(
                     format!("Error reading notebook: {}", e),
-                    Style::default().fg(Color::Red),
+                    Style::default().fg(colors.error_fg),
                 ))],
                 1,
             );
@@ -876,7 +894,7 @@ pub fn load_notebook_content(
             return (
                 vec![Line::from(Span::styled(
                     format!("Error parsing notebook JSON: {}", e),
-                    Style::default().fg(Color::Red),
+                    Style::default().fg(colors.error_fg),
                 ))],
                 1,
             );
@@ -889,7 +907,7 @@ pub fn load_notebook_content(
             return (
                 vec![Line::from(Span::styled(
                     "Invalid notebook: no cells array found",
-                    Style::default().fg(Color::Red),
+                    Style::default().fg(colors.error_fg),
                 ))],
                 1,
             );
@@ -905,12 +923,12 @@ pub fn load_notebook_content(
     let kernel_syntax_name = detect_syntax_name(Path::new(&kernel_ext));
 
     let header_style = Style::default()
-        .fg(Color::Yellow)
+        .fg(colors.warning_fg)
         .add_modifier(Modifier::BOLD);
     let output_prefix_style = Style::default()
-        .fg(Color::Green)
+        .fg(colors.success_fg)
         .add_modifier(Modifier::BOLD);
-    let dim_style = Style::default().fg(Color::DarkGray);
+    let dim_style = Style::default().fg(colors.dim_fg);
 
     let mut lines: Vec<Line<'static>> = Vec::new();
 
@@ -1004,7 +1022,7 @@ pub fn load_notebook_content(
                                         let clean = strip_ansi(s);
                                         lines.push(Line::from(Span::styled(
                                             clean,
-                                            Style::default().fg(Color::Red),
+                                            Style::default().fg(colors.error_fg),
                                         )));
                                     }
                                 }
@@ -1023,7 +1041,7 @@ pub fn load_notebook_content(
     if lines.is_empty() {
         lines.push(Line::from(Span::styled(
             "(empty notebook)",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(colors.dim_fg),
         )));
     }
 
@@ -1072,6 +1090,10 @@ mod tests {
     use std::fs::File;
     use std::io::Write;
     use tempfile::TempDir;
+
+    fn test_colors() -> crate::theme::ThemeColors {
+        crate::theme::dark_theme()
+    }
 
     #[test]
     fn detect_syntax_by_extension() {
@@ -1153,7 +1175,7 @@ mod tests {
 
         let ss = SyntaxSet::load_defaults_newlines();
         let theme = load_theme(None);
-        let (lines, total) = load_highlighted_content(&path, &ss, &theme);
+        let (lines, total) = load_highlighted_content(&path, &ss, &theme, &test_colors());
         assert_eq!(total, 3);
         assert_eq!(lines.len(), 3);
     }
@@ -1166,7 +1188,7 @@ mod tests {
 
         let ss = SyntaxSet::load_defaults_newlines();
         let theme = load_theme(None);
-        let (lines, total) = load_highlighted_content(&path, &ss, &theme);
+        let (lines, total) = load_highlighted_content(&path, &ss, &theme, &test_colors());
         assert_eq!(total, 1);
         assert!(!lines.is_empty());
     }
@@ -1175,7 +1197,8 @@ mod tests {
     fn highlight_nonexistent_file() {
         let ss = SyntaxSet::load_defaults_newlines();
         let theme = load_theme(None);
-        let (lines, total) = load_highlighted_content(Path::new("/nonexistent"), &ss, &theme);
+        let (lines, total) =
+            load_highlighted_content(Path::new("/nonexistent"), &ss, &theme, &test_colors());
         assert_eq!(total, 1);
         // Should contain error message
         let text: String = lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
@@ -1233,7 +1256,15 @@ mod tests {
         }
         let ss = SyntaxSet::load_defaults_newlines();
         let theme = load_theme(None);
-        let (lines, _) = load_head_tail_content(&path, &ss, &theme, 10, 5, ViewMode::HeadAndTail);
+        let (lines, _) = load_head_tail_content(
+            &path,
+            &ss,
+            &theme,
+            &test_colors(),
+            10,
+            5,
+            ViewMode::HeadAndTail,
+        );
         // Should have 10 head + 1 separator + 5 tail = 16 lines
         assert_eq!(lines.len(), 16);
     }
@@ -1248,7 +1279,15 @@ mod tests {
         }
         let ss = SyntaxSet::load_defaults_newlines();
         let theme = load_theme(None);
-        let (lines, _) = load_head_tail_content(&path, &ss, &theme, 10, 5, ViewMode::HeadOnly);
+        let (lines, _) = load_head_tail_content(
+            &path,
+            &ss,
+            &theme,
+            &test_colors(),
+            10,
+            5,
+            ViewMode::HeadOnly,
+        );
         assert_eq!(lines.len(), 10);
     }
 
@@ -1262,7 +1301,15 @@ mod tests {
         }
         let ss = SyntaxSet::load_defaults_newlines();
         let theme = load_theme(None);
-        let (lines, _) = load_head_tail_content(&path, &ss, &theme, 10, 5, ViewMode::TailOnly);
+        let (lines, _) = load_head_tail_content(
+            &path,
+            &ss,
+            &theme,
+            &test_colors(),
+            10,
+            5,
+            ViewMode::TailOnly,
+        );
         assert_eq!(lines.len(), 5);
     }
 
@@ -1322,7 +1369,7 @@ mod tests {
         let mut f = File::create(&path).unwrap();
         f.write_all(&[0u8; 1024]).unwrap();
 
-        let (lines, total) = load_binary_metadata(&path);
+        let (lines, total) = load_binary_metadata(&path, &test_colors());
         assert!(total >= 7); // blank, file, size, modified, permissions, blank, message
         let all_text: String = lines
             .iter()
@@ -1335,7 +1382,7 @@ mod tests {
 
     #[test]
     fn binary_metadata_nonexistent_file() {
-        let (lines, total) = load_binary_metadata(Path::new("/nonexistent/file"));
+        let (lines, total) = load_binary_metadata(Path::new("/nonexistent/file"), &test_colors());
         assert_eq!(total, 1);
         let text: String = lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(text.contains("Error"));
@@ -1386,7 +1433,7 @@ mod tests {
         writeln!(f, "hello world").unwrap();
         File::create(dir.path().join("file2.txt")).unwrap();
 
-        let (lines, total) = load_directory_summary(dir.path());
+        let (lines, total) = load_directory_summary(dir.path(), &test_colors());
         assert!(total >= 5);
         let all_text: String = lines
             .iter()
@@ -1401,7 +1448,7 @@ mod tests {
     #[test]
     fn directory_summary_empty_dir() {
         let dir = TempDir::new().unwrap();
-        let (lines, total) = load_directory_summary(dir.path());
+        let (lines, total) = load_directory_summary(dir.path(), &test_colors());
         assert!(total >= 5);
         let all_text: String = lines
             .iter()
@@ -1418,7 +1465,7 @@ mod tests {
         fs::create_dir_all(dir.path().join("a/b")).unwrap();
         File::create(dir.path().join("a/b/deep.txt")).unwrap();
 
-        let (lines, _) = load_directory_summary(dir.path());
+        let (lines, _) = load_directory_summary(dir.path(), &test_colors());
         let all_text: String = lines
             .iter()
             .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
@@ -1433,7 +1480,7 @@ mod tests {
     #[test]
     fn shallow_summary_empty_dir() {
         let dir = TempDir::new().unwrap();
-        let (lines, total) = load_directory_summary_shallow(dir.path());
+        let (lines, total) = load_directory_summary_shallow(dir.path(), &test_colors());
         assert!(total >= 3);
         let all_text: String = lines
             .iter()
@@ -1450,7 +1497,7 @@ mod tests {
         File::create(dir.path().join("file.txt")).unwrap();
         File::create(dir.path().join("file2.txt")).unwrap();
 
-        let (lines, _) = load_directory_summary_shallow(dir.path());
+        let (lines, _) = load_directory_summary_shallow(dir.path(), &test_colors());
         let all_text: String = lines
             .iter()
             .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
@@ -1468,7 +1515,7 @@ mod tests {
         fs::create_dir_all(dir.path().join("a/b")).unwrap();
         File::create(dir.path().join("a/b/deep.txt")).unwrap();
 
-        let (lines, _) = load_directory_summary_shallow(dir.path());
+        let (lines, _) = load_directory_summary_shallow(dir.path(), &test_colors());
         let all_text: String = lines
             .iter()
             .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
@@ -1487,7 +1534,7 @@ mod tests {
             File::create(dir.path().join(format!("file_{:02}.txt", i))).unwrap();
         }
 
-        let (lines, _) = load_directory_summary_shallow(dir.path());
+        let (lines, _) = load_directory_summary_shallow(dir.path(), &test_colors());
         let all_text: String = lines
             .iter()
             .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
@@ -1501,7 +1548,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         File::create(dir.path().join("a.txt")).unwrap();
 
-        let (lines, _) = load_directory_summary_shallow(dir.path());
+        let (lines, _) = load_directory_summary_shallow(dir.path(), &test_colors());
         let all_text: String = lines
             .iter()
             .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
@@ -1543,7 +1590,7 @@ mod tests {
 
         let ss = SyntaxSet::load_defaults_newlines();
         let theme = load_theme(None);
-        let (lines, total) = load_notebook_content(&path, &ss, &theme);
+        let (lines, total) = load_notebook_content(&path, &ss, &theme, &test_colors());
         assert!(total > 0);
         let all_text: String = lines
             .iter()
@@ -1583,7 +1630,7 @@ mod tests {
 
         let ss = SyntaxSet::load_defaults_newlines();
         let theme = load_theme(None);
-        let (lines, _) = load_notebook_content(&path, &ss, &theme);
+        let (lines, _) = load_notebook_content(&path, &ss, &theme, &test_colors());
         let all_text: String = lines
             .iter()
             .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
@@ -1601,7 +1648,7 @@ mod tests {
 
         let ss = SyntaxSet::load_defaults_newlines();
         let theme = load_theme(None);
-        let (lines, total) = load_notebook_content(&path, &ss, &theme);
+        let (lines, total) = load_notebook_content(&path, &ss, &theme, &test_colors());
         assert_eq!(total, 1);
         let text: String = lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(text.contains("Error"));
@@ -1616,7 +1663,7 @@ mod tests {
 
         let ss = SyntaxSet::load_defaults_newlines();
         let theme = load_theme(None);
-        let (lines, total) = load_notebook_content(&path, &ss, &theme);
+        let (lines, total) = load_notebook_content(&path, &ss, &theme, &test_colors());
         assert_eq!(total, 1);
         let text: String = lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(text.contains("no cells"));
@@ -1641,7 +1688,7 @@ mod tests {
 
         let ss = SyntaxSet::load_defaults_newlines();
         let theme = load_theme(None);
-        let (lines, total) = load_highlighted_content(&path, &ss, &theme);
+        let (lines, total) = load_highlighted_content(&path, &ss, &theme, &test_colors());
         assert_eq!(total, 1);
         let text: String = lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(text.contains("empty file"));
@@ -1652,7 +1699,8 @@ mod tests {
         let ss = SyntaxSet::load_defaults_newlines();
         let theme = load_theme(None);
         // Non-existent path simulates permission denied scenario
-        let (lines, total) = load_highlighted_content(Path::new("/nonexistent/file"), &ss, &theme);
+        let (lines, total) =
+            load_highlighted_content(Path::new("/nonexistent/file"), &ss, &theme, &test_colors());
         assert_eq!(total, 1);
         let text: String = lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(text.contains("Error"));
@@ -1683,7 +1731,7 @@ mod tests {
 
         let ss = SyntaxSet::load_defaults_newlines();
         let theme = load_theme(None);
-        let (lines, total) = load_notebook_content(&path, &ss, &theme);
+        let (lines, total) = load_notebook_content(&path, &ss, &theme, &test_colors());
         assert!(total > 0);
         let all_text: String = lines
             .iter()
@@ -1785,8 +1833,15 @@ mod tests {
 
         let ss = SyntaxSet::load_defaults_newlines();
         let theme = load_theme(None);
-        let (lines, total) =
-            load_head_tail_content(&path, &ss, &theme, 10, 5, ViewMode::HeadAndTail);
+        let (lines, total) = load_head_tail_content(
+            &path,
+            &ss,
+            &theme,
+            &test_colors(),
+            10,
+            5,
+            ViewMode::HeadAndTail,
+        );
         // 10 head + 1 separator + 5 tail = 16
         assert_eq!(total, 16);
         let all_text: String = lines

@@ -233,8 +233,17 @@ impl SettingsState {
                 section: "preview",
                 key: "syntax_theme",
                 description: "Syntax highlighting theme name",
-                current_value: SettingValueKind::Str(config.syntax_theme_name().to_string()),
-                default_value: SettingValueKind::Str("base16-ocean.dark".to_string()),
+                current_value: SettingValueKind::Str(
+                    config.syntax_theme_name(config.theme_scheme()).to_string(),
+                ),
+                default_value: SettingValueKind::Str(
+                    if config.theme_scheme().eq_ignore_ascii_case("light") {
+                        "InspiredGitHub"
+                    } else {
+                        "base16-ocean.dark"
+                    }
+                    .to_string(),
+                ),
                 modified_value: None,
             },
             SettingEntry {

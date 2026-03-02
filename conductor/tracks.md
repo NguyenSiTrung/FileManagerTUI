@@ -46,5 +46,5 @@
 
 ---
 
-## [ ] Track: Light Theme Preview Panel Contrast
+## [x] Track: Light Theme Preview Panel Contrast
 *Link: [./conductor/tracks/light-preview-contrast_20260302/](./conductor/tracks/light-preview-contrast_20260302/)*

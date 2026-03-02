@@ -130,5 +130,6 @@ This file is the project's institutional knowledge - learnings extracted from co
 - Wrap async directory scans with `tokio::time::timeout` using configurable `preview_timeout_ms` — abort and show partial results on timeout rather than blocking indefinitely (from: shallow-dir-preview_20260302, archived 2026-03-02)
 - Cancel-on-navigate: store `Arc<AtomicBool>` cancel token on App, signal it in `update_preview()` before launching new scan — prevents stale background scans from wasting resources (from: shallow-dir-preview_20260302, archived 2026-03-02)
 - Use `is_shallow_preview` flag on preview state for conditional UI hints (e.g., "[D] Deep scan") — avoids showing deep-scan prompt when results are already full (from: shallow-dir-preview_20260302, archived 2026-03-02)
+- Theme changes in Settings must update both color palette (`theme_colors`) and syntect theme (`syntax_theme`); set `last_previewed_index = None` to force preview repaint on next render (from: light-preview-contrast_20260302, 2026-03-02)
 
-Last refreshed: 2026-03-02 (shallow-dir-preview patterns elevated)
+Last refreshed: 2026-03-02 (light-preview-contrast patterns elevated)

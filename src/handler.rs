@@ -1558,7 +1558,17 @@ fn apply_settings_live(app: &mut App) {
             }
             ("preview", "syntax_theme") => {
                 if let SettingValueKind::Str(s) = value {
-                    app.config.preview.syntax_theme = Some(s.clone());
+                    if s.trim().is_empty() {
+                        app.config.preview.syntax_theme = None;
+                    } else {
+                        app.config.preview.syntax_theme = Some(s.clone());
+                    }
+                    let syntax_theme_name = app
+                        .config
+                        .syntax_theme_name(app.config.theme_scheme())
+                        .to_string();
+                    app.syntax_theme = crate::preview_content::load_theme(Some(&syntax_theme_name));
+                    app.last_previewed_index = None;
                 }
             }
             ("tree", "sort_by") => {
@@ -1617,6 +1627,9 @@ fn apply_settings_live(app: &mut App) {
                 if let SettingValueKind::Enum(s, _) = value {
                     app.config.theme.scheme = Some(s.clone());
                     app.theme_colors = crate::theme::resolve_theme(&app.config.theme);
+                    let syntax_theme_name = app.config.syntax_theme_name(s).to_string();
+                    app.syntax_theme = crate::preview_content::load_theme(Some(&syntax_theme_name));
+                    app.last_previewed_index = None;
                 }
             }
             _ => {}

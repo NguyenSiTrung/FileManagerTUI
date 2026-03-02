@@ -396,11 +396,17 @@ impl AppConfig {
     }
 
     /// Syntax highlighting theme name.
-    pub fn syntax_theme_name(&self) -> &str {
-        self.preview
-            .syntax_theme
-            .as_deref()
-            .unwrap_or("base16-ocean.dark")
+    ///
+    /// If user-configured in `[preview].syntax_theme`, that value always wins.
+    /// Otherwise, the default depends on the active theme scheme.
+    pub fn syntax_theme_name(&self, theme_scheme: &str) -> &str {
+        self.preview.syntax_theme.as_deref().unwrap_or_else(|| {
+            if theme_scheme.eq_ignore_ascii_case("light") {
+                "InspiredGitHub"
+            } else {
+                "base16-ocean.dark"
+            }
+        })
     }
 
     /// Preview timeout in milliseconds for directory scans.
@@ -523,7 +529,10 @@ mod tests {
         assert_eq!(cfg.max_full_preview_bytes(), 1_048_576);
         assert_eq!(cfg.head_lines(), 50);
         assert_eq!(cfg.tail_lines(), 20);
-        assert_eq!(cfg.syntax_theme_name(), "base16-ocean.dark");
+        assert_eq!(
+            cfg.syntax_theme_name(cfg.theme_scheme()),
+            "base16-ocean.dark"
+        );
         assert_eq!(cfg.watcher_enabled(), false);
         assert_eq!(cfg.watcher_auto_refresh(), false);
         assert_eq!(cfg.debounce_ms(), 300);
@@ -571,7 +580,10 @@ scheme = "light"
         assert_eq!(cfg.max_full_preview_bytes(), 2_000_000);
         assert_eq!(cfg.head_lines(), 100);
         assert_eq!(cfg.tail_lines(), 40);
-        assert_eq!(cfg.syntax_theme_name(), "Solarized (dark)");
+        assert_eq!(
+            cfg.syntax_theme_name(cfg.theme_scheme()),
+            "Solarized (dark)"
+        );
         assert_eq!(cfg.watcher_enabled(), false);
         assert_eq!(cfg.debounce_ms(), 500);
         assert_eq!(cfg.watcher_auto_refresh(), true);
@@ -600,6 +612,59 @@ show_hidden = true
         let cfg: AppConfig = toml::from_str("").expect("parse failed");
         assert_eq!(cfg.show_hidden(), false);
         assert_eq!(cfg.confirm_delete(), true);
+    }
+
+    #[test]
+    fn test_syntax_theme_defaults_by_scheme() {
+        let dark_cfg = AppConfig {
+            theme: ThemeConfig {
+                scheme: Some("dark".to_string()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert_eq!(
+            dark_cfg.syntax_theme_name(dark_cfg.theme_scheme()),
+            "base16-ocean.dark"
+        );
+
+        let light_cfg = AppConfig {
+            theme: ThemeConfig {
+                scheme: Some("light".to_string()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert_eq!(
+            light_cfg.syntax_theme_name(light_cfg.theme_scheme()),
+            "InspiredGitHub"
+        );
+
+        let unset_cfg = AppConfig::default();
+        assert_eq!(
+            unset_cfg.syntax_theme_name(unset_cfg.theme_scheme()),
+            "base16-ocean.dark"
+        );
+    }
+
+    #[test]
+    fn test_syntax_theme_user_override_wins() {
+        let cfg = AppConfig {
+            theme: ThemeConfig {
+                scheme: Some("light".to_string()),
+                ..Default::default()
+            },
+            preview: PreviewConfig {
+                syntax_theme: Some("Solarized (dark)".to_string()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        assert_eq!(
+            cfg.syntax_theme_name(cfg.theme_scheme()),
+            "Solarized (dark)"
+        );
     }
 
     #[test]
