@@ -212,6 +212,8 @@ pub struct App {
     pub search_action_state: Option<SearchActionState>,
     /// Event sender for spawning async operations from non-handler contexts.
     pub event_tx: Option<mpsc::UnboundedSender<crate::event::Event>>,
+    /// Path of the directory currently being scanned asynchronously (dedup guard).
+    pub active_dir_scan: Option<PathBuf>,
 }
 
 fn shell_quote_single(input: &str) -> String {
@@ -261,6 +263,7 @@ impl App {
             editor_state: None,
             search_action_state: None,
             event_tx: None,
+            active_dir_scan: None,
         })
     }
 
@@ -739,6 +742,7 @@ impl App {
         dir_path: &Path,
         event_tx: &mpsc::UnboundedSender<crate::event::Event>,
     ) {
+        self.active_dir_scan = Some(dir_path.to_path_buf());
         let path = dir_path.to_path_buf();
         let tx = event_tx.clone();
 
@@ -1140,26 +1144,34 @@ impl App {
             let path = item.path.clone();
 
             if let Some(tx) = &self.event_tx {
-                // Show immediate placeholder
-                let dir_name = path
-                    .file_name()
-                    .map(|n| n.to_string_lossy().to_string())
-                    .unwrap_or_else(|| path.to_string_lossy().to_string());
-                let placeholder = format!("📁 Directory: {}\n\n  Scanning...", dir_name);
-                self.preview_state = PreviewState {
-                    current_path: Some(path.clone()),
-                    content_lines: placeholder
-                        .lines()
-                        .map(|l| ratatui::text::Line::raw(l.to_string()))
-                        .collect(),
-                    scroll_offset: preserved_scroll,
-                    view_mode: ViewMode::default(),
-                    line_wrap: false,
-                    total_lines: 3,
-                    is_large_file: false,
-                    head_lines: self.config.head_lines(),
-                    tail_lines: self.config.tail_lines(),
-                };
+                // Skip spawning if we're already scanning this exact directory
+                if self.active_dir_scan.as_ref() == Some(&path) {
+                    return;
+                }
+
+                // On re-scan of the same directory (e.g. after FS watcher event),
+                // keep existing preview content to avoid flickering "Scanning..."
+                if !same_path {
+                    let dir_name = path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_else(|| path.to_string_lossy().to_string());
+                    let placeholder = format!("📁 Directory: {}\n\n  Scanning...", dir_name);
+                    self.preview_state = PreviewState {
+                        current_path: Some(path.clone()),
+                        content_lines: placeholder
+                            .lines()
+                            .map(|l| ratatui::text::Line::raw(l.to_string()))
+                            .collect(),
+                        scroll_offset: preserved_scroll,
+                        view_mode: ViewMode::default(),
+                        line_wrap: false,
+                        total_lines: 3,
+                        is_large_file: false,
+                        head_lines: self.config.head_lines(),
+                        tail_lines: self.config.tail_lines(),
+                    };
+                }
                 let tx_clone = tx.clone();
                 self.spawn_async_dir_summary(&path, &tx_clone);
             } else {
@@ -2008,8 +2020,37 @@ impl App {
 
         // Invalidate caches
         self.invalidate_search_cache();
-        // Force preview refresh
-        self.last_previewed_index = None;
+
+        // Refresh preview only when it is actually stale:
+        // - selected item changed (path moved/deleted/fallback selection)
+        // - selected file was part of the incoming fs change set
+        //
+        // Avoid forcing directory preview refresh on every watcher event,
+        // which can re-trigger async scans and cause visible flicker.
+        let should_refresh_preview = match (
+            selected_path.as_ref(),
+            self.tree_state
+                .flat_items
+                .get(self.tree_state.selected_index),
+        ) {
+            (Some(previous_path), Some(current_item)) => {
+                if &current_item.path != previous_path {
+                    true
+                } else if current_item.node_type == NodeType::File {
+                    paths
+                        .iter()
+                        .any(|p| p == &current_item.path || p == &self.tree_state.root.path)
+                } else {
+                    false
+                }
+            }
+            // No previous/current selection to compare -> refresh defensively.
+            _ => true,
+        };
+
+        if should_refresh_preview {
+            self.last_previewed_index = None;
+        }
     }
 
     /// Force a full tree refresh from root, preserving state.
@@ -2110,7 +2151,14 @@ impl App {
     ) {
         // Only update if the preview is showing this directory
         if self.preview_state.current_path.as_deref() != Some(path) {
+            if done {
+                self.active_dir_scan = None;
+            }
             return;
+        }
+
+        if done {
+            self.active_dir_scan = None;
         }
 
         let status = if done { "Complete" } else { "Scanning..." };
@@ -3059,6 +3107,45 @@ mod tests {
         File::create(dir.path().join("cache_buster.txt")).unwrap();
         app.handle_fs_change(vec![dir.path().join("cache_buster.txt")]);
         assert!(app.search_state.cached_paths.is_none());
+    }
+
+    #[test]
+    fn handle_fs_change_keeps_directory_preview_valid() {
+        let (dir, mut app) = setup_app();
+        // Select alpha directory
+        app.tree_state.selected_index = 1;
+        app.update_preview();
+        assert_eq!(app.last_previewed_index, Some(1));
+
+        // Trigger watcher refresh from a root-level file change
+        File::create(dir.path().join("new_file.txt")).unwrap();
+        app.handle_fs_change(vec![dir.path().join("new_file.txt")]);
+
+        // Directory preview should remain valid to avoid restart/flicker loops
+        assert_eq!(
+            app.last_previewed_index,
+            Some(app.tree_state.selected_index),
+            "directory preview should not be invalidated on unrelated fs events"
+        );
+    }
+
+    #[test]
+    fn handle_fs_change_invalidates_preview_for_selected_file_change() {
+        let (dir, mut app) = setup_app();
+        let file_path = dir.path().join("file_a.txt");
+        // Select file_a.txt
+        app.tree_state.selected_index = 3;
+        app.update_preview();
+        assert_eq!(app.last_previewed_index, Some(3));
+
+        // Simulate watcher event for the selected file
+        std::fs::write(&file_path, "updated content\n").unwrap();
+        app.handle_fs_change(vec![file_path]);
+
+        assert_eq!(
+            app.last_previewed_index, None,
+            "selected file preview should be invalidated when that file changes"
+        );
     }
 
     #[test]
