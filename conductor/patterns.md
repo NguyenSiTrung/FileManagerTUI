@@ -130,6 +130,10 @@ This file is the project's institutional knowledge - learnings extracted from co
 - Wrap async directory scans with `tokio::time::timeout` using configurable `preview_timeout_ms` — abort and show partial results on timeout rather than blocking indefinitely (from: shallow-dir-preview_20260302, archived 2026-03-02)
 - Cancel-on-navigate: store `Arc<AtomicBool>` cancel token on App, signal it in `update_preview()` before launching new scan — prevents stale background scans from wasting resources (from: shallow-dir-preview_20260302, archived 2026-03-02)
 - Use `is_shallow_preview` flag on preview state for conditional UI hints (e.g., "[D] Deep scan") — avoids showing deep-scan prompt when results are already full (from: shallow-dir-preview_20260302, archived 2026-03-02)
-- Theme changes in Settings must update both color palette (`theme_colors`) and syntect theme (`syntax_theme`); set `last_previewed_index = None` to force preview repaint on next render (from: light-preview-contrast_20260302, 2026-03-02)
+- Theme changes in Settings must update both color palette (`theme_colors`) and syntect theme (`syntax_theme`); set `last_previewed_index = None` to force preview repaint on next render (from: light-preview-contrast_20260302, archived 2026-03-02)
+- Use `config.syntax_theme_name(config.theme_scheme())` as the single source of truth for preview syntax theme resolution (from: light-preview-contrast_20260302, archived 2026-03-02)
+- Keep preview rendering APIs explicit by passing both syntect `Theme` (syntax colors) and UI `ThemeColors` (semantic panel colors) (from: light-preview-contrast_20260302, archived 2026-03-02)
+- Bulk regex refactors across function calls can accidentally touch function declarations; re-run targeted signature validation with `rg` immediately after (from: light-preview-contrast_20260302, archived 2026-03-02)
+- `spawn_async_dir_summary_shallow` needs cloned `ThemeColors` moved into `spawn_blocking` for directory preview styling consistency (from: light-preview-contrast_20260302, archived 2026-03-02)
 
 Last refreshed: 2026-03-02 (light-preview-contrast patterns elevated)
