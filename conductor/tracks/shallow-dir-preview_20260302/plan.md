@@ -22,7 +22,7 @@
 
 ## Phase 2: Scan Cancellation
 
-- [ ] Task 1: Add cancel token to async directory scans
+- [x] Task 1: Add cancel token to async directory scans
   - Add `Arc<AtomicBool>` field `dir_scan_cancel` to `App` struct
   - Pass cancel token to both shallow and deep scan tasks
   - Check cancel token every iteration in scan loops; abort if set

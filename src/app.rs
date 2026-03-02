@@ -1189,6 +1189,11 @@ impl App {
         let preserved_scroll = if same_path {
             self.preview_state.scroll_offset
         } else {
+            // Cancel any in-flight directory scan when navigating away
+            if self.active_dir_scan.is_some() {
+                self.dir_scan_cancel.store(true, Ordering::SeqCst);
+                self.active_dir_scan = None;
+            }
             0
         };
 
