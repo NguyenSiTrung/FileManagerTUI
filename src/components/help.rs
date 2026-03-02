@@ -637,21 +637,39 @@ impl<'a> Widget for HelpOverlay<'a> {
 
         // Draw scroll indicator if content overflows
         if content_lines.len() > content_height {
-            let total = content_lines.len();
-            let visible_end = (scroll + content_height).min(total);
-            let pct = if total > 0 {
-                (visible_end * 100) / total
-            } else {
-                100
+            let indicator = match self.state.active_tab {
+                HelpTab::Settings => {
+                    // Show selected entry index / total entries
+                    if let Some(ref settings) = self.state.settings_state {
+                        let current = settings.selected_index + 1;
+                        let total = settings.entries.len();
+                        format!(" {}/{} ", current, total)
+                    } else {
+                        String::new()
+                    }
+                }
+                HelpTab::Keybindings => {
+                    // Show scroll position as percentage
+                    let total = content_lines.len();
+                    let visible_end = (scroll + content_height).min(total);
+                    let pct = if total > 0 {
+                        (visible_end * 100) / total
+                    } else {
+                        100
+                    };
+                    format!(" {}% ", pct)
+                }
             };
-            let indicator = format!(" {}% ({}/{}) ", pct, visible_end, total);
-            let ind_span = Span::styled(indicator, Style::default().fg(self.theme.dim_fg));
-            let ind_x = overlay_area.x
-                + overlay_area
-                    .width
-                    .saturating_sub(ind_span.width() as u16 + 1);
-            let ind_y = overlay_area.y + overlay_area.height - 1;
-            buf.set_span(ind_x, ind_y, &ind_span, ind_span.width() as u16);
+            if !indicator.is_empty() {
+                let ind_span =
+                    Span::styled(indicator, Style::default().fg(self.theme.dim_fg));
+                let ind_x = overlay_area.x
+                    + overlay_area
+                        .width
+                        .saturating_sub(ind_span.width() as u16 + 1);
+                let ind_y = overlay_area.y + overlay_area.height - 1;
+                buf.set_span(ind_x, ind_y, &ind_span, ind_span.width() as u16);
+            }
         }
     }
 }
