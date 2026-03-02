@@ -43,7 +43,7 @@
   - Add to settings panel entries in `app.rs`
   - Test config loading with and without the new field
 
-- [ ] Task 2: Implement timeout mechanism for async scans
+- [x] Task 2: Implement timeout mechanism for async scans
   - Use `tokio::time::timeout` wrapping the scan task
   - On timeout: send `DirSummaryUpdate` with `done: true` and partial results
   - Show "⚠ Scan timed out (directory too large)" message in preview

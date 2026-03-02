@@ -634,7 +634,7 @@ fn handle_normal_mode(app: &mut App, key: KeyEvent, event_tx: &mpsc::UnboundedSe
     // Dispatch based on focused panel
     match app.focused_panel {
         FocusedPanel::Tree => handle_tree_keys(app, key, event_tx),
-        FocusedPanel::Preview => handle_preview_keys(app, key),
+        FocusedPanel::Preview => handle_preview_keys(app, key, event_tx),
         FocusedPanel::Terminal => {} // Already handled above
     }
 }
@@ -741,11 +741,32 @@ fn handle_tree_keys(app: &mut App, key: KeyEvent, event_tx: &mpsc::UnboundedSend
     }
 }
 
-fn handle_preview_keys(app: &mut App, key: KeyEvent) {
+fn handle_preview_keys(app: &mut App, key: KeyEvent, event_tx: &mpsc::UnboundedSender<Event>) {
     match key.code {
         // Enter edit mode
         KeyCode::Char('e') => {
             app.enter_edit_mode();
+        }
+        // Deep scan trigger (only when showing shallow preview)
+        KeyCode::Char('D') => {
+            if app.preview_state.is_shallow_preview {
+                if let Some(ref path) = app.preview_state.current_path.clone() {
+                    app.preview_state.is_shallow_preview = false;
+                    // Show scanning placeholder
+                    let dir_name = path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_else(|| path.to_string_lossy().to_string());
+                    let placeholder = format!("📁 Directory: {}\n\n  Deep scanning...", dir_name);
+                    app.preview_state.content_lines = placeholder
+                        .lines()
+                        .map(|l| ratatui::text::Line::raw(l.to_string()))
+                        .collect();
+                    app.preview_state.total_lines = app.preview_state.content_lines.len();
+                    app.spawn_async_dir_summary(path, event_tx);
+                    app.set_status_message("Deep scan started...".to_string());
+                }
+            }
         }
         // Line-by-line scroll
         KeyCode::Char('j') | KeyCode::Down => app.preview_scroll_down(),
