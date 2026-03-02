@@ -609,7 +609,18 @@ impl<'a> Widget for HelpOverlay<'a> {
 
         // Build and render content lines
         let content_lines = self.build_content_lines();
-        let scroll = self.state.scroll_offset;
+        // Use the correct scroll offset for the active tab:
+        // - Keybindings: uses HelpState.scroll_offset
+        // - Settings: uses SettingsState.scroll_offset (auto-managed by update_scroll)
+        let scroll = match self.state.active_tab {
+            HelpTab::Settings => self
+                .state
+                .settings_state
+                .as_ref()
+                .map(|s| s.scroll_offset)
+                .unwrap_or(0),
+            HelpTab::Keybindings => self.state.scroll_offset,
+        };
 
         for (i, line) in content_lines
             .iter()
