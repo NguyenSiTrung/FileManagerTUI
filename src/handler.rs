@@ -1023,10 +1023,7 @@ fn handle_help_mode(app: &mut App, key: KeyEvent) {
         // Tab switching: Tab, Shift+Tab, Left, Right
         KeyCode::Tab | KeyCode::BackTab | KeyCode::Left | KeyCode::Right
             if app.help_state.active_tab == HelpTab::Keybindings
-                || !matches!(
-                    key.code,
-                    KeyCode::Left | KeyCode::Right
-                ) =>
+                || !matches!(key.code, KeyCode::Left | KeyCode::Right) =>
         {
             let new_tab = app.help_state.active_tab.toggle();
             app.help_state.active_tab = new_tab;
@@ -1034,8 +1031,7 @@ fn handle_help_mode(app: &mut App, key: KeyEvent) {
 
             // Lazily initialize settings state
             if new_tab == HelpTab::Settings && app.help_state.settings_state.is_none() {
-                app.help_state.settings_state =
-                    Some(SettingsState::from_config(&app.config));
+                app.help_state.settings_state = Some(SettingsState::from_config(&app.config));
             }
         }
         // Scroll keys
@@ -1091,7 +1087,11 @@ fn handle_help_mode(app: &mut App, key: KeyEvent) {
         KeyCode::Enter | KeyCode::Char(' ') if app.help_state.active_tab == HelpTab::Settings => {
             if let Some(ref mut settings) = app.help_state.settings_state {
                 if let Some(entry) = settings.entries.get(settings.selected_index) {
-                    match &entry.modified_value.as_ref().unwrap_or(&entry.current_value) {
+                    match &entry
+                        .modified_value
+                        .as_ref()
+                        .unwrap_or(&entry.current_value)
+                    {
                         crate::components::settings::SettingValueKind::Bool(_) => {
                             settings.toggle_bool();
                         }
@@ -1107,9 +1107,7 @@ fn handle_help_mode(app: &mut App, key: KeyEvent) {
             }
         }
         // Reset to default
-        KeyCode::Backspace | KeyCode::Delete
-            if app.help_state.active_tab == HelpTab::Settings =>
-        {
+        KeyCode::Backspace | KeyCode::Delete if app.help_state.active_tab == HelpTab::Settings => {
             if let Some(ref mut settings) = app.help_state.settings_state {
                 settings.reset_to_default();
             }
@@ -1129,8 +1127,7 @@ fn handle_help_mode(app: &mut App, key: KeyEvent) {
         }
         // Open config file in editor
         KeyCode::Char('o') if app.help_state.active_tab == HelpTab::Settings => {
-            let config_path = dirs::config_dir()
-                .map(|d| d.join("fm-tui").join("config.toml"));
+            let config_path = dirs::config_dir().map(|d| d.join("fm-tui").join("config.toml"));
             if let Some(path) = config_path {
                 if path.exists() {
                     app.mode = AppMode::Normal;
@@ -1336,8 +1333,7 @@ fn handle_save_settings_dialog(app: &mut App, key: KeyEvent) {
     match key.code {
         KeyCode::Char('g') | KeyCode::Char('G') => {
             // Save to global config
-            let path = dirs::config_dir()
-                .map(|d| d.join("fm-tui").join("config.toml"));
+            let path = dirs::config_dir().map(|d| d.join("fm-tui").join("config.toml"));
             if let Some(path) = path {
                 save_settings_to_file(app, &path);
             } else {
@@ -1379,9 +1375,7 @@ fn save_settings_to_file(app: &mut App, path: &std::path::Path) {
         String::new()
     };
 
-    let mut doc: toml::Table = existing_content
-        .parse::<toml::Table>()
-        .unwrap_or_default();
+    let mut doc: toml::Table = existing_content.parse::<toml::Table>().unwrap_or_default();
 
     for entry in &settings.entries {
         let value = match &entry.modified_value {
@@ -1406,9 +1400,8 @@ fn save_settings_to_file(app: &mut App, path: &std::path::Path) {
     }
 
     // Serialize the table to a TOML string
-    let toml_string = toml::to_string_pretty(&doc).unwrap_or_else(|e| {
-        format!("# Failed to serialize: {}\n", e)
-    });
+    let toml_string =
+        toml::to_string_pretty(&doc).unwrap_or_else(|e| format!("# Failed to serialize: {}\n", e));
 
     // Ensure parent directory exists
     if let Some(parent) = path.parent() {
@@ -1432,10 +1425,7 @@ fn save_settings_to_file(app: &mut App, path: &std::path::Path) {
                 settings.clear_modifications();
             }
 
-            app.set_status_message(format!(
-                "✓ Settings saved to {}",
-                path.display()
-            ));
+            app.set_status_message(format!("✓ Settings saved to {}", path.display()));
             app.mode = AppMode::Help;
         }
         Err(e) => {

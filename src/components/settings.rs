@@ -70,7 +70,7 @@ impl SettingEntry {
 }
 
 /// State for the settings panel within the help overlay.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct SettingsState {
     /// All setting entries, ordered by section.
     pub entries: Vec<SettingEntry>,
@@ -82,18 +82,6 @@ pub struct SettingsState {
     pub editing: bool,
     /// Buffer for inline text editing.
     pub edit_buffer: String,
-}
-
-impl Default for SettingsState {
-    fn default() -> Self {
-        Self {
-            entries: Vec::new(),
-            selected_index: 0,
-            scroll_offset: 0,
-            editing: false,
-            edit_buffer: String::new(),
-        }
-    }
 }
 
 impl SettingsState {
@@ -228,9 +216,7 @@ impl SettingsState {
                 section: "preview",
                 key: "tab_width",
                 description: "Tab rendering width",
-                current_value: SettingValueKind::UInt(
-                    config.preview.tab_width.unwrap_or(4) as u64,
-                ),
+                current_value: SettingValueKind::UInt(config.preview.tab_width.unwrap_or(4) as u64),
                 default_value: SettingValueKind::UInt(4),
                 modified_value: None,
             },
@@ -379,6 +365,7 @@ impl SettingsState {
     }
 
     /// Get the distinct section names in order of appearance.
+    #[cfg(test)]
     pub fn sections(&self) -> Vec<&'static str> {
         let mut seen = Vec::new();
         for entry in &self.entries {
@@ -548,8 +535,7 @@ impl SettingsState {
                     // Parse failed — discard
                 }
                 SettingValueKind::Str(_) => {
-                    entry.modified_value =
-                        Some(SettingValueKind::Str(self.edit_buffer.clone()));
+                    entry.modified_value = Some(SettingValueKind::Str(self.edit_buffer.clone()));
                     return true;
                 }
                 _ => {}
@@ -618,9 +604,8 @@ impl<'a> SettingsWidget<'a> {
         let mut lines: Vec<Line<'static>> = Vec::new();
 
         let mut current_section = "";
-        let mut entry_idx: usize = 0;
 
-        for entry in &self.state.entries {
+        for (entry_idx, entry) in self.state.entries.iter().enumerate() {
             // Section header
             if entry.section != current_section {
                 if !current_section.is_empty() {
@@ -633,10 +618,7 @@ impl<'a> SettingsWidget<'a> {
                             .fg(self.theme.accent_fg)
                             .add_modifier(Modifier::BOLD),
                     ),
-                    Span::styled(
-                        "─".repeat(40),
-                        Style::default().fg(self.theme.dim_fg),
-                    ),
+                    Span::styled("─".repeat(40), Style::default().fg(self.theme.dim_fg)),
                 ]));
                 current_section = entry.section;
             }
@@ -655,12 +637,7 @@ impl<'a> SettingsWidget<'a> {
 
             let key_width = 24;
             let val_width = 16;
-            let key_padded = format!(
-                "  {}{:<kw$}",
-                modified_marker,
-                entry.key,
-                kw = key_width
-            );
+            let key_padded = format!("  {}{:<kw$}", modified_marker, entry.key, kw = key_width);
             let val_padded = format!("{:<vw$}", value_str, vw = val_width);
 
             let base_style = if is_selected {
@@ -707,8 +684,6 @@ impl<'a> SettingsWidget<'a> {
                 format!("      └ {}", entry.description),
                 base_style.fg(self.theme.dim_fg),
             )]));
-
-            entry_idx += 1;
         }
 
         // Footer
@@ -781,7 +756,11 @@ mod tests {
         let config = AppConfig::default();
         let state = SettingsState::from_config(&config);
         // Should have entries for all config sections
-        assert!(state.entries.len() > 20, "Expected 20+ entries, got {}", state.entries.len());
+        assert!(
+            state.entries.len() > 20,
+            "Expected 20+ entries, got {}",
+            state.entries.len()
+        );
     }
 
     #[test]
@@ -803,16 +782,28 @@ mod tests {
         let state = SettingsState::from_config(&config);
 
         // Check show_hidden default
-        let show_hidden = state.entries.iter().find(|e| e.key == "show_hidden").unwrap();
+        let show_hidden = state
+            .entries
+            .iter()
+            .find(|e| e.key == "show_hidden")
+            .unwrap();
         assert_eq!(show_hidden.default_value, SettingValueKind::Bool(false));
         assert_eq!(show_hidden.current_value, SettingValueKind::Bool(false));
 
         // Check confirm_delete default
-        let confirm = state.entries.iter().find(|e| e.key == "confirm_delete").unwrap();
+        let confirm = state
+            .entries
+            .iter()
+            .find(|e| e.key == "confirm_delete")
+            .unwrap();
         assert_eq!(confirm.default_value, SettingValueKind::Bool(true));
 
         // Check head_lines default
-        let head = state.entries.iter().find(|e| e.key == "head_lines").unwrap();
+        let head = state
+            .entries
+            .iter()
+            .find(|e| e.key == "head_lines")
+            .unwrap();
         assert_eq!(head.default_value, SettingValueKind::UInt(50));
     }
 

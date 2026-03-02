@@ -661,8 +661,7 @@ impl<'a> Widget for HelpOverlay<'a> {
                 }
             };
             if !indicator.is_empty() {
-                let ind_span =
-                    Span::styled(indicator, Style::default().fg(self.theme.dim_fg));
+                let ind_span = Span::styled(indicator, Style::default().fg(self.theme.dim_fg));
                 let ind_x = overlay_area.x
                     + overlay_area
                         .width
@@ -737,4 +736,3 @@ mod tests {
         assert!(overlay.total_lines_for_tab() > 0);
     }
 }
-
