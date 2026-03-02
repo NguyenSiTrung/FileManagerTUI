@@ -820,6 +820,35 @@ impl App {
         });
     }
 
+    /// Spawn a shallow (depth-1) async directory summary scan.
+    ///
+    /// Only counts immediate children — no recursive walk. Sends a single
+    /// `ShallowDirSummary` event with the rendered lines on completion.
+    pub fn spawn_async_dir_summary_shallow(
+        &mut self,
+        dir_path: &Path,
+        event_tx: &mpsc::UnboundedSender<crate::event::Event>,
+    ) {
+        self.active_dir_scan = Some(dir_path.to_path_buf());
+        let path = dir_path.to_path_buf();
+        let tx = event_tx.clone();
+
+        tokio::spawn(async move {
+            let result = tokio::task::spawn_blocking(move || {
+                let (lines, total) =
+                    crate::preview_content::load_directory_summary_shallow(&path);
+                let _ = tx.send(crate::event::Event::ShallowDirSummary {
+                    path,
+                    lines,
+                    total,
+                });
+            })
+            .await;
+
+            let _ = result;
+        });
+    }
+
     /// Handle an async operation completion.
     pub fn handle_operation_complete(&mut self, result: crate::event::OperationResult) {
         self.close_dialog();
@@ -1180,7 +1209,7 @@ impl App {
                     };
                 }
                 let tx_clone = tx.clone();
-                self.spawn_async_dir_summary(&path, &tx_clone);
+                self.spawn_async_dir_summary_shallow(&path, &tx_clone);
             } else {
                 // Fallback: sync load (for tests without event_tx)
                 let (lines, total) = preview_content::load_directory_summary_shallow(&path);
@@ -2190,6 +2219,27 @@ impl App {
             .map(|l| ratatui::text::Line::raw(l.to_string()))
             .collect();
         self.preview_state.total_lines = self.preview_state.content_lines.len();
+    }
+
+    /// Handle a shallow directory summary completion.
+    ///
+    /// Replaces the preview panel content with the pre-rendered shallow summary lines.
+    pub fn handle_shallow_dir_summary(
+        &mut self,
+        path: &std::path::Path,
+        lines: Vec<ratatui::text::Line<'static>>,
+        total: usize,
+    ) {
+        // Only update if the preview is showing this directory
+        if self.preview_state.current_path.as_deref() != Some(path) {
+            self.active_dir_scan = None;
+            return;
+        }
+
+        self.active_dir_scan = None;
+        self.preview_state.content_lines = lines;
+        self.preview_state.total_lines = total;
+        self.preview_state.is_shallow_preview = true;
     }
 }
 

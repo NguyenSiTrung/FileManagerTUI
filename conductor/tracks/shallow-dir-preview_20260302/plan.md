@@ -8,7 +8,7 @@
   - Show "(direct)" label to indicate shallow counts
   - Add unit tests for shallow summary (empty dir, small dir, large dir)
 
-- [ ] Task 2: Update sync fallback in `app.rs` to use shallow summary
+- [x] Task 2: Update sync fallback in `app.rs` to use shallow summary
   - Replace `load_directory_summary` call with `load_directory_summary_shallow` in `update_preview` sync path
   - Ensure existing tests still pass with new summary format
 

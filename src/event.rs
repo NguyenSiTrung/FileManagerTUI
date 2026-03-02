@@ -75,6 +75,12 @@ pub enum Event {
         size: u64,
         done: bool,
     },
+    /// Shallow (depth-1) directory summary completed.
+    ShallowDirSummary {
+        path: PathBuf,
+        lines: Vec<ratatui::text::Line<'static>>,
+        total: usize,
+    },
 }
 
 /// Async event handler that polls crossterm events and forwards them via a channel.
