@@ -737,6 +737,127 @@ pub fn load_directory_summary(path: &Path) -> (Vec<Line<'static>>, usize) {
     (lines, total)
 }
 
+/// Maximum number of child items to list in the shallow directory preview.
+const SHALLOW_LISTING_LIMIT: usize = 20;
+
+/// Generate a shallow (depth-1) summary display for a directory.
+///
+/// Only counts immediate children — no recursive walk. Shows:
+/// - directory name, immediate file count, immediate subdirectory count
+/// - first N child item names as a quick listing
+/// - hint for deep scan
+pub fn load_directory_summary_shallow(path: &Path) -> (Vec<Line<'static>>, usize) {
+    let label_style = Style::default()
+        .fg(Color::Cyan)
+        .add_modifier(Modifier::BOLD);
+    let value_style = Style::default().fg(Color::White);
+    let dim_style = Style::default().fg(Color::DarkGray);
+    let hint_style = Style::default().fg(Color::Yellow);
+
+    let dir_name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.to_string_lossy().to_string());
+
+    let mut file_count: u64 = 0;
+    let mut dir_count: u64 = 0;
+    let mut child_names: Vec<(String, bool)> = Vec::new(); // (name, is_dir)
+
+    let entries = match fs::read_dir(path) {
+        Ok(e) => e,
+        Err(e) => {
+            return (
+                vec![Line::from(Span::styled(
+                    format!("  Error reading directory: {}", e),
+                    Style::default().fg(Color::Red),
+                ))],
+                1,
+            );
+        }
+    };
+
+    for entry in entries.flatten() {
+        let is_dir = entry
+            .metadata()
+            .map(|m| m.is_dir())
+            .unwrap_or(false);
+        let name = entry.file_name().to_string_lossy().to_string();
+
+        if is_dir {
+            dir_count += 1;
+        } else {
+            file_count += 1;
+        }
+
+        if child_names.len() < SHALLOW_LISTING_LIMIT {
+            child_names.push((name, is_dir));
+        }
+    }
+
+    // Sort child names: directories first, then alphabetically
+    child_names.sort_by(|a, b| {
+        b.1.cmp(&a.1).then_with(|| a.0.to_lowercase().cmp(&b.0.to_lowercase()))
+    });
+
+    let mut lines = vec![
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  📁 Directory: ", label_style),
+            Span::styled(dir_name, value_style),
+        ]),
+        Line::from(vec![
+            Span::styled("  Files: ", label_style),
+            Span::styled(
+                format!("{} (direct)", file_count),
+                value_style,
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("  Subdirectories: ", label_style),
+            Span::styled(
+                format!("{} (direct)", dir_count),
+                value_style,
+            ),
+        ]),
+        Line::from(""),
+    ];
+
+    // Child listing
+    let total_children = file_count + dir_count;
+    if total_children > 0 {
+        lines.push(Line::from(Span::styled(
+            "  Contents:",
+            label_style,
+        )));
+
+        for (name, is_dir) in &child_names {
+            let icon = if *is_dir { "📂 " } else { "  📄 " };
+            lines.push(Line::from(Span::styled(
+                format!("    {}{}", icon, name),
+                dim_style,
+            )));
+        }
+
+        let remaining = total_children as usize - child_names.len();
+        if remaining > 0 {
+            lines.push(Line::from(Span::styled(
+                format!("    ... and {} more", remaining),
+                dim_style,
+            )));
+        }
+    }
+
+    // Deep scan hint
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "  [Press D for deep scan]",
+        hint_style,
+    )));
+
+    let total = lines.len();
+    (lines, total)
+}
+
 /// Load and render a Jupyter notebook (.ipynb) file.
 ///
 /// Parses the JSON structure and renders cells with headers, source code
@@ -1315,6 +1436,87 @@ mod tests {
         // Should count nested file and both subdirs
         assert!(all_text.contains("1")); // 1 file
         assert!(all_text.contains("2")); // 2 subdirs (a, b)
+    }
+
+    // === Shallow directory summary tests ===
+
+    #[test]
+    fn shallow_summary_empty_dir() {
+        let dir = TempDir::new().unwrap();
+        let (lines, total) = load_directory_summary_shallow(dir.path());
+        assert!(total >= 3);
+        let all_text: String = lines
+            .iter()
+            .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
+            .collect();
+        assert!(all_text.contains("0 (direct)"));
+        assert!(all_text.contains("[Press D for deep scan]"));
+    }
+
+    #[test]
+    fn shallow_summary_basic() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir(dir.path().join("subdir")).unwrap();
+        File::create(dir.path().join("file.txt")).unwrap();
+        File::create(dir.path().join("file2.txt")).unwrap();
+
+        let (lines, _) = load_directory_summary_shallow(dir.path());
+        let all_text: String = lines
+            .iter()
+            .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
+            .collect();
+        assert!(all_text.contains("2 (direct)")); // 2 files
+        assert!(all_text.contains("1 (direct)")); // 1 subdir
+        assert!(all_text.contains("Contents:"));
+        assert!(all_text.contains("file.txt"));
+        assert!(all_text.contains("subdir"));
+    }
+
+    #[test]
+    fn shallow_summary_does_not_recurse() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join("a/b")).unwrap();
+        File::create(dir.path().join("a/b/deep.txt")).unwrap();
+
+        let (lines, _) = load_directory_summary_shallow(dir.path());
+        let all_text: String = lines
+            .iter()
+            .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
+            .collect();
+        // Should only see 1 subdir (a), NOT 2 (a + b)
+        // Should see 0 files (deep.txt is nested)
+        assert!(all_text.contains("0 (direct)")); // 0 direct files
+        assert!(all_text.contains("1 (direct)")); // 1 direct subdir
+        assert!(!all_text.contains("deep.txt"));
+    }
+
+    #[test]
+    fn shallow_summary_child_listing_limit() {
+        let dir = TempDir::new().unwrap();
+        for i in 0..25 {
+            File::create(dir.path().join(format!("file_{:02}.txt", i))).unwrap();
+        }
+
+        let (lines, _) = load_directory_summary_shallow(dir.path());
+        let all_text: String = lines
+            .iter()
+            .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
+            .collect();
+        assert!(all_text.contains("25 (direct)"));
+        assert!(all_text.contains("... and 5 more"));
+    }
+
+    #[test]
+    fn shallow_summary_has_deep_scan_hint() {
+        let dir = TempDir::new().unwrap();
+        File::create(dir.path().join("a.txt")).unwrap();
+
+        let (lines, _) = load_directory_summary_shallow(dir.path());
+        let all_text: String = lines
+            .iter()
+            .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
+            .collect();
+        assert!(all_text.contains("[Press D for deep scan]"));
     }
 
     // === Notebook rendering tests ===
