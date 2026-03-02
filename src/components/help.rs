@@ -638,7 +638,13 @@ impl<'a> Widget for HelpOverlay<'a> {
         // Draw scroll indicator if content overflows
         if content_lines.len() > content_height {
             let total = content_lines.len();
-            let indicator = format!(" {}/{} ", (scroll + 1).min(total), total);
+            let visible_end = (scroll + content_height).min(total);
+            let pct = if total > 0 {
+                (visible_end * 100) / total
+            } else {
+                100
+            };
+            let indicator = format!(" {}% ({}/{}) ", pct, visible_end, total);
             let ind_span = Span::styled(indicator, Style::default().fg(self.theme.dim_fg));
             let ind_x = overlay_area.x
                 + overlay_area

@@ -434,12 +434,19 @@ impl SettingsState {
         line
     }
 
-    /// Update scroll offset to keep the selected entry visible.
+    /// Update scroll offset to keep the selected entry visible,
+    /// clamped within valid range.
     /// `visible_height` is the number of visible content lines.
-    pub fn update_scroll(&mut self, visible_height: usize) {
+    /// `total_lines` is the total number of content lines.
+    pub fn update_scroll(&mut self, visible_height: usize, total_lines: usize) {
         if visible_height == 0 {
             return;
         }
+
+        // Clamp scroll to valid range: can't scroll past the content end
+        let max_scroll = total_lines.saturating_sub(visible_height);
+        self.scroll_offset = self.scroll_offset.min(max_scroll);
+
         let entry_start = self.entry_line_index(self.selected_index);
         let entry_end = entry_start + 1; // entry spans 2 lines (0-indexed end)
 
@@ -449,8 +456,11 @@ impl SettingsState {
         }
         // Scroll down if selection is below viewport
         if entry_end >= self.scroll_offset + visible_height {
-            self.scroll_offset = entry_end.saturating_sub(visible_height) + 1;
+            self.scroll_offset = (entry_end + 1).saturating_sub(visible_height);
         }
+
+        // Final clamp
+        self.scroll_offset = self.scroll_offset.min(max_scroll);
     }
 
     /// Toggle a boolean entry at the current selection.

@@ -308,7 +308,12 @@ pub fn render(app: &mut App, frame: &mut Frame) {
             let overlay_height = (area.height as f32 * 0.80).min(50.0) as usize;
             let content_height = overlay_height.saturating_sub(4); // border(2) + tab bar(1) + separator(1)
             if let Some(ref mut settings) = app.help_state.settings_state {
-                settings.update_scroll(content_height);
+                let total_lines = {
+                    use crate::components::settings::SettingsWidget;
+                    let widget = SettingsWidget::new(settings, &theme);
+                    widget.total_lines()
+                };
+                settings.update_scroll(content_height, total_lines);
             }
         }
         let help_widget = HelpOverlay::new(&theme, &app.help_state);

@@ -1042,7 +1042,12 @@ fn handle_help_mode(app: &mut App, key: KeyEvent) {
         KeyCode::Char('j') | KeyCode::Down => {
             if app.help_state.active_tab == HelpTab::Settings {
                 if let Some(ref mut settings) = app.help_state.settings_state {
-                    settings.select_next();
+                    if settings.selected_index < settings.entries.len().saturating_sub(1) {
+                        settings.select_next();
+                    } else {
+                        // Already at last entry: keep scrolling the view
+                        settings.scroll_offset += 1;
+                    }
                 }
             } else if app.help_state.scroll_offset < total.saturating_sub(1) {
                 app.help_state.scroll_offset += 1;
@@ -1051,7 +1056,12 @@ fn handle_help_mode(app: &mut App, key: KeyEvent) {
         KeyCode::Char('k') | KeyCode::Up => {
             if app.help_state.active_tab == HelpTab::Settings {
                 if let Some(ref mut settings) = app.help_state.settings_state {
-                    settings.select_prev();
+                    if settings.selected_index > 0 {
+                        settings.select_prev();
+                    } else {
+                        // Already at first entry: scroll the view up
+                        settings.scroll_offset = settings.scroll_offset.saturating_sub(1);
+                    }
                 }
             } else {
                 app.help_state.scroll_offset = app.help_state.scroll_offset.saturating_sub(1);
@@ -1070,6 +1080,8 @@ fn handle_help_mode(app: &mut App, key: KeyEvent) {
             if app.help_state.active_tab == HelpTab::Settings {
                 if let Some(ref mut settings) = app.help_state.settings_state {
                     settings.select_last();
+                    // Scroll all the way to the bottom of the content
+                    settings.scroll_offset = usize::MAX; // will be clamped
                 }
             } else {
                 app.help_state.scroll_offset = total.saturating_sub(1);
