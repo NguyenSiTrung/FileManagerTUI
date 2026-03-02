@@ -97,6 +97,7 @@ impl Cli {
                 line_wrap: None,
                 syntax_theme: None,
                 enabled: if self.no_preview { Some(false) } else { None },
+                preview_timeout_ms: None,
             },
             tree: TreeConfig {
                 sort_by: None,

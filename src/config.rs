@@ -59,6 +59,8 @@ pub struct PreviewConfig {
     pub syntax_theme: Option<String>,
     /// Whether the preview panel is enabled.
     pub enabled: Option<bool>,
+    /// Timeout in milliseconds for directory scans (default: 2000ms).
+    pub preview_timeout_ms: Option<u64>,
 }
 
 /// Tree panel settings.
@@ -176,6 +178,8 @@ pub const MAX_SNAPSHOT_MAX_ENTRIES: u32 = 5_000_000;
 pub const DEFAULT_MAX_EDITOR_BYTES: u64 = 10 * 1024 * 1024;
 /// Default max line count for editor.
 pub const DEFAULT_MAX_EDITOR_LINES: usize = 100_000;
+/// Default preview timeout in milliseconds.
+pub const DEFAULT_PREVIEW_TIMEOUT_MS: u64 = 2000;
 
 // ── Config file locator ──────────────────────────────────────────────────────
 
@@ -282,6 +286,10 @@ impl AppConfig {
                     .clone()
                     .or(self.preview.syntax_theme),
                 enabled: other.preview.enabled.or(self.preview.enabled),
+                preview_timeout_ms: other
+                    .preview
+                    .preview_timeout_ms
+                    .or(self.preview.preview_timeout_ms),
             },
             tree: TreeConfig {
                 sort_by: other.tree.sort_by.clone().or(self.tree.sort_by),
@@ -393,6 +401,13 @@ impl AppConfig {
             .syntax_theme
             .as_deref()
             .unwrap_or("base16-ocean.dark")
+    }
+
+    /// Preview timeout in milliseconds for directory scans.
+    pub fn preview_timeout_ms(&self) -> u64 {
+        self.preview
+            .preview_timeout_ms
+            .unwrap_or(DEFAULT_PREVIEW_TIMEOUT_MS)
     }
 
     /// Whether the watcher is enabled.

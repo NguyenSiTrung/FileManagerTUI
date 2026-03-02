@@ -28,7 +28,7 @@
   - Check cancel token every iteration in scan loops; abort if set
   - Add unit test for cancel token behavior
 
-- [ ] Task 2: Cancel-on-navigate in `update_preview`
+- [x] Task 2: Cancel-on-navigate in `update_preview`
   - At the start of `update_preview`, if `active_dir_scan` is set and path changed, set cancel token
   - Reset cancel token before spawning new scan
   - Test: verify old scan is cancelled when navigating to new item
