@@ -35,3 +35,8 @@
 ---
 
 <!-- Archived: large-file-scalability_20260302 (2026-03-02) → conductor/archive/ -->
+
+---
+
+## [ ] Track: Settings Panel in Help Overlay
+*Link: [./conductor/tracks/help-settings_20260302/](./conductor/tracks/help-settings_20260302/)*
