@@ -137,6 +137,44 @@ impl TerminalEmulator {
             .collect()
     }
 
+    /// Render lines at a given scroll offset.
+    /// scroll_offset=0 shows the live grid (same as render_lines()).
+    /// scroll_offset>0 shows older content from scrollback+grid.
+    pub fn render_lines_at_offset(&self, scroll_offset: usize) -> Vec<Line<'static>> {
+        if scroll_offset == 0 {
+            return self.render_lines();
+        }
+
+        let total = self.total_lines();
+        let first = total.saturating_sub(self.rows + scroll_offset);
+        let mut result = Vec::with_capacity(self.rows);
+
+        for abs_line in first..first + self.rows {
+            if abs_line >= total {
+                // Empty line past the end
+                result.push(Line::from(""));
+                continue;
+            }
+            let row = if abs_line < self.scrollback.len() {
+                &self.scrollback[abs_line]
+            } else {
+                &self.grid[abs_line - self.scrollback.len()]
+            };
+            let spans: Vec<Span<'static>> = row
+                .iter()
+                .map(|cell| {
+                    let style = Style::default()
+                        .fg(cell.fg)
+                        .bg(cell.bg)
+                        .add_modifier(cell.modifiers);
+                    Span::styled(cell.ch.to_string(), style)
+                })
+                .collect();
+            result.push(Line::from(spans));
+        }
+        result
+    }
+
     /// Total lines including scrollback.
     #[allow(dead_code)]
     pub fn total_lines(&self) -> usize {

@@ -111,9 +111,10 @@ impl std::fmt::Debug for TerminalState {
 }
 
 impl TerminalState {
-    /// Get rendered lines from the emulator for display.
+    /// Get rendered lines from the emulator for display,
+    /// accounting for the current scroll offset.
     pub fn render_lines(&self, _theme: &ThemeColors) -> Vec<Line<'static>> {
-        self.emulator.render_lines()
+        self.emulator.render_lines_at_offset(self.scroll_offset)
     }
 
     /// Total number of lines (visible screen + scrollback).

@@ -885,7 +885,8 @@ fn handle_terminal_keys(app: &mut App, key: KeyEvent) {
             return;
         }
         // Copy terminal selection to system clipboard: Ctrl+Shift+C
-        KeyCode::Char('C')
+        // crossterm may report this as Char('C') or Char('c') depending on terminal
+        KeyCode::Char('C') | KeyCode::Char('c')
             if key.modifiers.contains(KeyModifiers::CONTROL)
                 && key.modifiers.contains(KeyModifiers::SHIFT) =>
         {
@@ -3308,11 +3309,30 @@ mod tests {
         app.terminal_state.visible = true;
         app.focused_panel = FocusedPanel::Terminal;
 
-        // No selection — should show hint
+        // No selection — should show hint (uppercase C variant)
         handle_key(
             &mut app,
             make_key_with_modifiers(
                 KeyCode::Char('C'),
+                KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+            ),
+        );
+        assert!(app.status_message.is_some());
+        let (msg, _) = app.status_message.as_ref().unwrap();
+        assert!(msg.contains("No terminal text selected"));
+    }
+
+    #[test]
+    fn ctrl_shift_c_lowercase_in_terminal_triggers_copy() {
+        let (_dir, mut app) = setup_app();
+        app.terminal_state.visible = true;
+        app.focused_panel = FocusedPanel::Terminal;
+
+        // Some terminals send lowercase 'c' with shift modifier
+        handle_key(
+            &mut app,
+            make_key_with_modifiers(
+                KeyCode::Char('c'),
                 KeyModifiers::CONTROL | KeyModifiers::SHIFT,
             ),
         );
