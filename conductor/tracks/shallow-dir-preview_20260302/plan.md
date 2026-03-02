@@ -2,7 +2,7 @@
 
 ## Phase 1: Shallow Directory Summary (Core)
 
-- [ ] Task 1: Create `load_directory_summary_shallow` in `preview_content.rs`
+- [x] Task 1: Create `load_directory_summary_shallow` in `preview_content.rs`
   - Add new function that only counts immediate children (depth 1, single `read_dir`)
   - Return: dir name, file count, subdir count, first 20 child names as listing
   - Show "(direct)" label to indicate shallow counts

@@ -89,6 +89,9 @@ pub struct PreviewState {
     pub head_lines: usize,
     /// Number of tail lines to show in head+tail mode.
     pub tail_lines: usize,
+    /// Whether the current directory preview is a shallow (depth-1) scan.
+    /// When true, the user can press D to trigger a deep scan.
+    pub is_shallow_preview: bool,
 }
 
 /// A single fuzzy search result.
@@ -1171,6 +1174,7 @@ impl App {
                         line_wrap: false,
                         total_lines: 3,
                         is_large_file: false,
+                        is_shallow_preview: true,
                         head_lines: self.config.head_lines(),
                         tail_lines: self.config.tail_lines(),
                     };
@@ -1179,7 +1183,7 @@ impl App {
                 self.spawn_async_dir_summary(&path, &tx_clone);
             } else {
                 // Fallback: sync load (for tests without event_tx)
-                let (lines, total) = preview_content::load_directory_summary(&path);
+                let (lines, total) = preview_content::load_directory_summary_shallow(&path);
                 self.preview_state = PreviewState {
                     current_path: Some(path),
                     content_lines: lines,
@@ -1188,6 +1192,7 @@ impl App {
                     line_wrap: false,
                     total_lines: total,
                     is_large_file: false,
+                    is_shallow_preview: true,
                     head_lines: self.config.head_lines(),
                     tail_lines: self.config.tail_lines(),
                 };
@@ -1215,6 +1220,7 @@ impl App {
                 line_wrap: false,
                 total_lines: total,
                 is_large_file: false,
+                is_shallow_preview: false,
                 head_lines: self.config.head_lines(),
                 tail_lines: self.config.tail_lines(),
             };
@@ -1233,6 +1239,7 @@ impl App {
                 line_wrap: false,
                 total_lines: total,
                 is_large_file: false,
+                is_shallow_preview: false,
                 head_lines: self.config.head_lines(),
                 tail_lines: self.config.tail_lines(),
             };
@@ -1265,6 +1272,7 @@ impl App {
                 line_wrap: false,
                 total_lines: total,
                 is_large_file: true,
+                is_shallow_preview: false,
                 head_lines: head,
                 tail_lines: tail,
             };
@@ -1282,6 +1290,7 @@ impl App {
                 line_wrap: false,
                 total_lines: total,
                 is_large_file: false,
+                is_shallow_preview: false,
                 head_lines: head,
                 tail_lines: tail,
             };
