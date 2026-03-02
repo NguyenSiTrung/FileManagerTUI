@@ -42,5 +42,4 @@
 
 ---
 
-## [x] Track: Non-Blocking Directory Preview with Shallow Counting
-*Link: [./conductor/tracks/shallow-dir-preview_20260302/](./conductor/tracks/shallow-dir-preview_20260302/)*
+<!-- Archived: shallow-dir-preview_20260302 (2026-03-02) → conductor/archive/ -->
