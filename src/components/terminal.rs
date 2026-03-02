@@ -189,14 +189,12 @@ mod tests {
         let sb = state.emulator.scrollback_len();
 
         // Select "World" (cols 6-10)
-        state.selection.set_anchor(TerminalCoord {
-            line: sb,
-            col: 6,
-        });
-        state.selection.set_endpoint(TerminalCoord {
-            line: sb,
-            col: 10,
-        });
+        state
+            .selection
+            .set_anchor(TerminalCoord { line: sb, col: 6 });
+        state
+            .selection
+            .set_endpoint(TerminalCoord { line: sb, col: 10 });
 
         let theme = theme::dark_theme();
         let widget = TerminalWidget::new(&state, &theme, false);

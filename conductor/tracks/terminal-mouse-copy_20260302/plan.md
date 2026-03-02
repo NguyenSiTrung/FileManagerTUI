@@ -59,32 +59,32 @@
 
 ## Phase 4: Rendering and UX Polish
 
-- [ ] Task 1: Render terminal selection highlight in `TerminalWidget`
-  - [ ] Apply selection style while drawing selected cells
-  - [ ] Keep cursor rendering readable atop selected content
-  - [ ] Verify style contrast for light and dark themes
+- [x] Task 1: Render terminal selection highlight in `TerminalWidget`
+  - [x] Apply selection style while drawing selected cells
+  - [x] Keep cursor rendering readable atop selected content
+  - [x] Verify style contrast for light and dark themes
 
-- [ ] Task 2: Update help text for discoverability
-  - [ ] Document terminal mouse drag selection
-  - [ ] Document `Ctrl+Shift+C` for terminal copy
-  - [ ] Keep keybinding list aligned with actual behavior
+- [x] Task 2: Update help text for discoverability
+  - [x] Document terminal mouse drag selection
+  - [x] Document `Ctrl+Shift+C` for terminal copy
+  - [x] Keep keybinding list aligned with actual behavior
 
-- [ ] Task 3: Add rendering/help tests
-  - [ ] Selection highlight smoke test in terminal widget tests
-  - [ ] Help overlay includes new terminal copy/selection hints
+- [x] Task 3: Add rendering/help tests
+  - [x] Selection highlight smoke test in terminal widget tests
+  - [x] Help overlay includes new terminal copy/selection hints
 
-- [ ] Task 4: Conductor - User Manual Verification 'Phase 4' (Protocol in workflow.md)
+- [x] Task 4: Conductor - User Manual Verification 'Phase 4' (Protocol in workflow.md)
 
 ## Phase 5: Verification and Hardening
 
-- [ ] Task 1: Run quality gates for this track
-  - [ ] `cargo test`
-  - [ ] `cargo clippy -- -D warnings`
-  - [ ] `cargo fmt --check`
+- [x] Task 1: Run quality gates for this track
+  - [x] `cargo test`
+  - [x] `cargo clippy -- -D warnings`
+  - [x] `cargo fmt --check`
 
-- [ ] Task 2: Perform regression checks on terminal lifecycle
-  - [ ] Toggle terminal on/off with existing shortcuts
-  - [ ] Verify PTY output/input still works after copy interactions
-  - [ ] Verify app exit cleanup still shuts terminal down cleanly
+- [x] Task 2: Perform regression checks on terminal lifecycle
+  - [x] Toggle terminal on/off with existing shortcuts
+  - [x] Verify PTY output/input still works after copy interactions
+  - [x] Verify app exit cleanup still shuts terminal down cleanly
 
-- [ ] Task 3: Conductor - User Manual Verification 'Phase 5' (Protocol in workflow.md)
+- [x] Task 3: Conductor - User Manual Verification 'Phase 5' (Protocol in workflow.md)
