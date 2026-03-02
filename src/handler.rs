@@ -956,7 +956,7 @@ fn handle_search_action_mode(
         }
         // Copy path — always available
         KeyCode::Char('y') => {
-            app.search_action_copy_path();
+            app.search_action_copy_path(event_tx);
         }
         // Rename — always available
         KeyCode::Char('r') => {
@@ -2510,6 +2510,32 @@ mod tests {
         // Press Enter again to navigate
         handle_key(&mut app, make_key(KeyCode::Enter));
         assert_eq!(app.mode, AppMode::Normal);
+    }
+
+    #[test]
+    fn search_action_y_copy_path_is_non_blocking() {
+        let (_dir, mut app) = setup_app();
+
+        handle_key(
+            &mut app,
+            make_key_with_modifiers(KeyCode::Char('p'), KeyModifiers::CONTROL),
+        );
+        for c in "file".chars() {
+            handle_key(&mut app, make_key(KeyCode::Char(c)));
+        }
+        assert!(!app.search_state.results.is_empty());
+
+        handle_key(&mut app, make_key(KeyCode::Enter));
+        assert_eq!(app.mode, AppMode::SearchAction);
+
+        handle_key(&mut app, make_key(KeyCode::Char('y')));
+        assert_eq!(app.mode, AppMode::Normal);
+
+        let (msg, _) = app
+            .status_message
+            .as_ref()
+            .expect("status message should exist");
+        assert!(msg.contains("Copying path to clipboard"));
     }
 
     #[test]

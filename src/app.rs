@@ -1688,20 +1688,49 @@ impl App {
     }
 
     /// Search action: copy the absolute path to the system clipboard.
-    pub fn search_action_copy_path(&mut self) {
+    pub fn search_action_copy_path(
+        &mut self,
+        event_tx: &mpsc::UnboundedSender<crate::event::Event>,
+    ) {
         if let Some(state) = self.search_action_state.take() {
             let path_str = state.path.to_string_lossy().to_string();
-            match copy_to_system_clipboard(&path_str) {
-                Ok(()) => {
-                    self.set_status_message(format!("📋 Path copied: {}", path_str));
-                }
-                Err(msg) => {
-                    self.set_status_message(format!("📋 {}: {}", msg, path_str));
-                }
-            }
             self.mode = AppMode::Normal;
             self.invalidate_search_cache();
             self.last_previewed_index = None;
+            self.set_status_message("📋 Copying path to clipboard...".to_string());
+
+            let tx = event_tx.clone();
+            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                handle.spawn(async move {
+                    use crate::event::Event;
+
+                    let path_for_task = path_str.clone();
+                    let message = match tokio::task::spawn_blocking(move || {
+                        copy_to_system_clipboard(&path_for_task)
+                    })
+                    .await
+                    {
+                        Ok(Ok(())) => format!("📋 Path copied: {}", path_str),
+                        Ok(Err(err)) => format!("📋 {}: {}", err, path_str),
+                        Err(err) => {
+                            format!("📋 Clipboard copy task failed ({}): {}", err, path_str)
+                        }
+                    };
+
+                    let _ = tx.send(Event::ClipboardCopyComplete(message));
+                });
+            } else {
+                std::thread::spawn(move || {
+                    use crate::event::Event;
+
+                    let message = match copy_to_system_clipboard(&path_str) {
+                        Ok(()) => format!("📋 Path copied: {}", path_str),
+                        Err(err) => format!("📋 {}: {}", err, path_str),
+                    };
+
+                    let _ = tx.send(Event::ClipboardCopyComplete(message));
+                });
+            }
         }
     }
 
@@ -2350,42 +2379,94 @@ fn format_size_bytes(bytes: u64) -> String {
     }
 }
 /// Copy text to the system clipboard using platform-native commands.
-/// Tries (in order): xclip, xsel, wl-copy (Linux/BSD), pbcopy (macOS).
+/// Tries (in order): wl-copy, xclip, xsel (Linux/BSD), pbcopy (macOS), clip.exe (Windows).
 /// Returns Ok(()) on success, Err(message) on failure.
 fn copy_to_system_clipboard(text: &str) -> std::result::Result<(), String> {
-    use std::io::Write;
+    use std::io::{ErrorKind, Write};
     use std::process::{Command, Stdio};
 
     // List of clipboard commands to try, with args
     let commands: &[(&str, &[&str])] = &[
+        ("wl-copy", &[]),
         ("xclip", &["-selection", "clipboard"]),
         ("xsel", &["--clipboard", "--input"]),
-        ("wl-copy", &[]),
         ("pbcopy", &[]),
+        ("clip.exe", &[]),
     ];
 
+    let mut found_tool = false;
+    let mut last_error: Option<String> = None;
+
     for (cmd, args) in commands {
-        if let Ok(mut child) = Command::new(cmd)
+        let mut child = match Command::new(cmd)
             .args(*args)
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stderr(Stdio::piped())
             .spawn()
         {
-            if let Some(ref mut stdin) = child.stdin {
-                if stdin.write_all(text.as_bytes()).is_ok() {
-                    drop(child.stdin.take()); // close stdin to signal EOF
-                    if let Ok(status) = child.wait() {
-                        if status.success() {
-                            return Ok(());
-                        }
-                    }
+            Ok(child) => {
+                found_tool = true;
+                child
+            }
+            Err(err) if err.kind() == ErrorKind::NotFound => continue,
+            Err(err) => {
+                last_error = Some(format!("{}: {}", cmd, err));
+                continue;
+            }
+        };
+
+        if let Some(stdin) = child.stdin.as_mut() {
+            if let Err(err) = stdin.write_all(text.as_bytes()) {
+                last_error = Some(format!("{}: failed to write clipboard data ({})", cmd, err));
+                let _ = child.kill();
+                let _ = child.wait();
+                continue;
+            }
+        }
+
+        drop(child.stdin.take()); // close stdin to signal EOF
+
+        match child.wait_with_output() {
+            Ok(output) if output.status.success() => return Ok(()),
+            Ok(output) => {
+                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                if stderr.is_empty() {
+                    last_error = Some(format!("{} exited with status {}", cmd, output.status));
+                } else {
+                    last_error = Some(format!("{}: {}", cmd, stderr));
                 }
+            }
+            Err(err) => {
+                last_error = Some(format!("{}: {}", cmd, err));
             }
         }
     }
 
-    Err("No clipboard tool found (install xclip or xsel)".to_string())
+    if found_tool {
+        #[cfg(any(
+            target_os = "linux",
+            target_os = "freebsd",
+            target_os = "openbsd",
+            target_os = "netbsd"
+        ))]
+        {
+            let has_display = std::env::var_os("DISPLAY").is_some()
+                || std::env::var_os("WAYLAND_DISPLAY").is_some();
+            if !has_display {
+                return Err(
+                    "Clipboard tool found, but no graphical clipboard is available (missing DISPLAY/WAYLAND_DISPLAY in this remote/headless session)".to_string(),
+                );
+            }
+        }
+
+        return Err(match last_error {
+            Some(err) => format!("Clipboard command failed: {}", err),
+            None => "Clipboard command failed".to_string(),
+        });
+    }
+
+    Err("No clipboard tool found (install wl-copy, xclip, or xsel)".to_string())
 }
 
 #[cfg(test)]

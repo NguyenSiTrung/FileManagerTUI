@@ -220,6 +220,9 @@ async fn main() -> error::Result<()> {
             Event::ShallowDirSummary { path, lines, total } => {
                 app.handle_shallow_dir_summary(&path, lines, total);
             }
+            Event::ClipboardCopyComplete(message) => {
+                app.set_status_message(message);
+            }
             Event::WatcherInitFailed(msg) => {
                 app.watcher_active = false;
                 app.set_status_message(format!("⚠ Watcher unavailable: {}", msg));

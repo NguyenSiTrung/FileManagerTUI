@@ -81,6 +81,8 @@ pub enum Event {
         lines: Vec<ratatui::text::Line<'static>>,
         total: usize,
     },
+    /// Async system clipboard copy completed.
+    ClipboardCopyComplete(String),
     /// Filesystem watcher initialization failed.
     WatcherInitFailed(String),
 }
