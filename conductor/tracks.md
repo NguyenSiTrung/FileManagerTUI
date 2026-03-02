@@ -50,5 +50,5 @@
 
 ---
 
-## [ ] Track: Terminal panel mouse actions and copy
+## [~] Track: Terminal panel mouse actions and copy
 *Link: [./conductor/tracks/terminal-mouse-copy_20260302/](./conductor/tracks/terminal-mouse-copy_20260302/)*

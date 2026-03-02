@@ -178,6 +178,83 @@ impl TerminalEmulator {
     pub fn cursor_position(&self) -> (usize, usize) {
         (self.cursor_row, self.cursor_col)
     }
+
+    /// Get number of scrollback lines.
+    pub fn scrollback_len(&self) -> usize {
+        self.scrollback.len()
+    }
+
+    /// Get a reference to a cell at absolute line index and column.
+    /// Absolute line 0..scrollback_len are scrollback, scrollback_len..total_lines are grid.
+    /// Returns None if out of bounds.
+    pub fn cell_at(&self, abs_line: usize, col: usize) -> Option<&Cell> {
+        let sb_len = self.scrollback.len();
+        if abs_line < sb_len {
+            self.scrollback.get(abs_line).and_then(|row| row.get(col))
+        } else {
+            let grid_row = abs_line - sb_len;
+            self.grid.get(grid_row).and_then(|row| row.get(col))
+        }
+    }
+
+    /// Get number of columns in a given absolute line.
+    fn line_cols(&self, abs_line: usize) -> usize {
+        let sb_len = self.scrollback.len();
+        if abs_line < sb_len {
+            self.scrollback.get(abs_line).map_or(0, |r| r.len())
+        } else {
+            let grid_row = abs_line - sb_len;
+            self.grid.get(grid_row).map_or(0, |r| r.len())
+        }
+    }
+
+    /// Extract text from the emulator grid between two coordinates.
+    /// Lines are in absolute space (scrollback + grid).
+    /// Returns None if the range is invalid.
+    pub fn extract_text(
+        &self,
+        start_line: usize,
+        start_col: usize,
+        end_line: usize,
+        end_col: usize,
+    ) -> Option<String> {
+        let total = self.total_lines();
+        if start_line > end_line || start_line >= total {
+            return None;
+        }
+
+        let mut result = String::new();
+
+        for line_idx in start_line..=end_line.min(total - 1) {
+            let cols = self.line_cols(line_idx);
+            let from = if line_idx == start_line {
+                start_col
+            } else {
+                0
+            };
+            let to = if line_idx == end_line {
+                end_col.min(cols.saturating_sub(1))
+            } else {
+                cols.saturating_sub(1)
+            };
+
+            let mut line_text = String::new();
+            for c in from..=to {
+                if let Some(cell) = self.cell_at(line_idx, c) {
+                    line_text.push(cell.ch);
+                }
+            }
+            // Trim trailing spaces from each line
+            let trimmed = line_text.trim_end();
+            result.push_str(trimmed);
+
+            if line_idx < end_line.min(total - 1) {
+                result.push('\n');
+            }
+        }
+
+        Some(result)
+    }
 }
 
 /// Internal performer struct that receives VTE callbacks.
@@ -821,5 +898,92 @@ mod tests {
         // Set RGB foreground: ESC[38;2;255;128;0m
         emu.process(b"\x1b[38;2;255;128;0mX");
         assert_eq!(emu.grid[0][0].fg, Color::Rgb(255, 128, 0));
+    }
+
+    #[test]
+    fn test_scrollback_len() {
+        let mut emu = TerminalEmulator::new(3, 10);
+        assert_eq!(emu.scrollback_len(), 0);
+        // Fill and overflow: 5 lines in 3-row terminal
+        emu.process(b"L1\r\nL2\r\nL3\r\nL4\r\nL5");
+        assert_eq!(emu.scrollback_len(), 2);
+    }
+
+    #[test]
+    fn test_cell_at_grid() {
+        let mut emu = TerminalEmulator::new(3, 10);
+        emu.process(b"Hello");
+        // scrollback_len=0, so line 0 = grid row 0
+        assert_eq!(emu.cell_at(0, 0).unwrap().ch, 'H');
+        assert_eq!(emu.cell_at(0, 4).unwrap().ch, 'o');
+        // Out of bounds
+        assert!(emu.cell_at(0, 100).is_none());
+        assert!(emu.cell_at(100, 0).is_none());
+    }
+
+    #[test]
+    fn test_cell_at_scrollback() {
+        let mut emu = TerminalEmulator::new(3, 10);
+        emu.process(b"L1\r\nL2\r\nL3\r\nL4\r\nL5");
+        // scrollback has L1, L2
+        assert_eq!(emu.cell_at(0, 0).unwrap().ch, 'L');
+        assert_eq!(emu.cell_at(0, 1).unwrap().ch, '1');
+        assert_eq!(emu.cell_at(1, 1).unwrap().ch, '2');
+        // grid starts at abs line 2
+        assert_eq!(emu.cell_at(2, 1).unwrap().ch, '3');
+    }
+
+    #[test]
+    fn test_extract_text_single_cell() {
+        let mut emu = TerminalEmulator::new(3, 10);
+        emu.process(b"Hello");
+        let text = emu.extract_text(0, 0, 0, 0).unwrap();
+        assert_eq!(text, "H");
+    }
+
+    #[test]
+    fn test_extract_text_single_line() {
+        let mut emu = TerminalEmulator::new(3, 10);
+        emu.process(b"Hello");
+        let text = emu.extract_text(0, 0, 0, 4).unwrap();
+        assert_eq!(text, "Hello");
+    }
+
+    #[test]
+    fn test_extract_text_multi_line() {
+        let mut emu = TerminalEmulator::new(5, 10);
+        emu.process(b"AAA\r\nBBB\r\nCCC");
+        let text = emu.extract_text(0, 0, 2, 2).unwrap();
+        assert_eq!(text, "AAA\nBBB\nCCC");
+    }
+
+    #[test]
+    fn test_extract_text_with_scrollback() {
+        let mut emu = TerminalEmulator::new(3, 10);
+        emu.process(b"L1\r\nL2\r\nL3\r\nL4\r\nL5");
+        // L1, L2 in scrollback; L3, L4, L5 in grid
+        // Extract from scrollback line 0 to grid line 0 (abs 2)
+        let text = emu.extract_text(0, 0, 2, 1).unwrap();
+        assert!(text.contains("L1"));
+        assert!(text.contains("L2"));
+        assert!(text.contains("L3"));
+    }
+
+    #[test]
+    fn test_extract_text_invalid_range() {
+        let emu = TerminalEmulator::new(3, 10);
+        // start > end
+        assert!(emu.extract_text(5, 0, 2, 0).is_none());
+        // start out of bounds
+        assert!(emu.extract_text(100, 0, 200, 0).is_none());
+    }
+
+    #[test]
+    fn test_extract_text_trims_trailing_spaces() {
+        let mut emu = TerminalEmulator::new(3, 10);
+        emu.process(b"Hi");
+        // Grid row has "Hi        " (padded to cols=10)
+        let text = emu.extract_text(0, 0, 0, 9).unwrap();
+        assert_eq!(text, "Hi");
     }
 }
