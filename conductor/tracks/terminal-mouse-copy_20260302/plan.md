@@ -21,41 +21,41 @@
 
 ## Phase 2: Mouse Event Routing for Terminal Panel
 
-- [ ] Task 1: Implement terminal mouse event handling path
-  - [ ] Add dedicated terminal mouse handler in `handler.rs`
-  - [ ] Route `Down/Drag/Up` events in terminal area to selection logic
-  - [ ] Preserve current tree/preview routing behavior
+- [x] Task 1: Implement terminal mouse event handling path
+  - [x] Add dedicated terminal mouse handler in `handler.rs`
+  - [x] Route `Down/Drag/Up` events in terminal area to selection logic
+  - [x] Preserve current tree/preview routing behavior
 
-- [ ] Task 2: Integrate scroll and selection interactions
-  - [ ] Keep existing terminal scrollback behavior for wheel events
-  - [ ] Ensure selection coordinates account for terminal border/inner area offsets
-  - [ ] Clear selection on click-without-drag
+- [x] Task 2: Integrate scroll and selection interactions
+  - [x] Keep existing terminal scrollback behavior for wheel events
+  - [x] Ensure selection coordinates account for terminal border/inner area offsets
+  - [x] Clear selection on click-without-drag
 
-- [ ] Task 3: Add mouse routing regression tests
-  - [ ] Terminal click/drag updates selection state
-  - [ ] Tree and preview clicks remain unaffected
-  - [ ] Dialog/Edit mode still bypasses terminal mouse handling
+- [x] Task 3: Add mouse routing regression tests
+  - [x] Terminal click/drag updates selection state
+  - [x] Tree and preview clicks remain unaffected
+  - [x] Dialog/Edit mode still bypasses terminal mouse handling
 
-- [ ] Task 4: Conductor - User Manual Verification 'Phase 2' (Protocol in workflow.md)
+- [x] Task 4: Conductor - User Manual Verification 'Phase 2' (Protocol in workflow.md)
 
 ## Phase 3: Clipboard Copy Action Integration
 
-- [ ] Task 1: Add terminal copy command in App/handler
-  - [ ] Add `App` method to copy terminal selection via system clipboard helper
-  - [ ] Return actionable status text for success/failure/no-selection
-  - [ ] Keep behavior safe when terminal is hidden or PTY exited
+- [x] Task 1: Add terminal copy command in App/handler
+  - [x] Add `App` method to copy terminal selection via system clipboard helper
+  - [x] Return actionable status text for success/failure/no-selection
+  - [x] Keep behavior safe when terminal is hidden or PTY exited
 
-- [ ] Task 2: Wire keybinding for terminal copy
-  - [ ] Handle `Ctrl+Shift+C` in terminal-focused key handling
-  - [ ] Ensure terminal forwarding does not swallow copy shortcut
-  - [ ] Keep `Esc` behavior consistent while clearing selection first
+- [x] Task 2: Wire keybinding for terminal copy
+  - [x] Handle `Ctrl+Shift+C` in terminal-focused key handling
+  - [x] Ensure terminal forwarding does not swallow copy shortcut
+  - [x] Keep `Esc` behavior consistent while clearing selection first
 
-- [ ] Task 3: Add copy behavior tests
-  - [ ] Shortcut triggers copy path when selection exists
-  - [ ] No-selection path shows status hint
-  - [ ] Clipboard error path surfaces failure message
+- [x] Task 3: Add copy behavior tests
+  - [x] Shortcut triggers copy path when selection exists
+  - [x] No-selection path shows status hint
+  - [x] Clipboard error path surfaces failure message
 
-- [ ] Task 4: Conductor - User Manual Verification 'Phase 3' (Protocol in workflow.md)
+- [x] Task 4: Conductor - User Manual Verification 'Phase 3' (Protocol in workflow.md)
 
 ## Phase 4: Rendering and UX Polish
 

@@ -356,7 +356,7 @@ const TERMINAL_KEYS: &[KeyEntry] = &[
     },
     KeyEntry {
         key: "Esc",
-        description: "Leave terminal (focus → tree)",
+        description: "Clear selection / Leave terminal (→ tree)",
     },
     KeyEntry {
         key: "Tab",
@@ -369,6 +369,18 @@ const TERMINAL_KEYS: &[KeyEntry] = &[
     KeyEntry {
         key: "Shift+PgUp/PgDn",
         description: "Fast scroll terminal history",
+    },
+    KeyEntry {
+        key: "Mouse drag",
+        description: "Select terminal text",
+    },
+    KeyEntry {
+        key: "Ctrl+Shift+C",
+        description: "Copy selected text to clipboard",
+    },
+    KeyEntry {
+        key: "Scroll wheel",
+        description: "Scroll terminal history",
     },
 ];
 
