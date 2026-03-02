@@ -38,5 +38,5 @@
 
 ---
 
-## [ ] Track: Settings Panel in Help Overlay
+## [~] Track: Settings Panel in Help Overlay
 *Link: [./conductor/tracks/help-settings_20260302/](./conductor/tracks/help-settings_20260302/)*

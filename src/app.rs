@@ -43,6 +43,8 @@ pub enum DialogKind {
     },
     /// Save confirmation when exiting edit mode with unsaved changes.
     SaveConfirm,
+    /// Save settings dialog: Global / Local / Cancel.
+    SaveSettings,
 }
 
 /// Which panel currently has focus.

@@ -966,24 +966,172 @@ fn handle_filter_mode(app: &mut App, key: KeyEvent) {
 }
 
 fn handle_help_mode(app: &mut App, key: KeyEvent) {
-    let total = HelpOverlay::total_lines();
+    use crate::components::help::HelpTab;
+    use crate::components::settings::SettingsState;
+
+    let theme = app.theme_colors.clone();
+    let total = HelpOverlay::new(&theme, &app.help_state).total_lines_for_tab();
+
+    // If in settings tab and editing, route keys to edit mode
+    if app.help_state.active_tab == HelpTab::Settings {
+        if let Some(ref mut settings) = app.help_state.settings_state {
+            if settings.editing {
+                match key.code {
+                    KeyCode::Enter => {
+                        settings.confirm_edit();
+                    }
+                    KeyCode::Esc => {
+                        settings.cancel_edit();
+                    }
+                    KeyCode::Backspace => {
+                        settings.edit_buffer.pop();
+                    }
+                    KeyCode::Char(c) => {
+                        settings.edit_buffer.push(c);
+                    }
+                    _ => {}
+                }
+                return;
+            }
+        }
+    }
+
     match key.code {
-        KeyCode::Char('?') | KeyCode::Esc => {
+        KeyCode::Char('?') => {
             app.mode = AppMode::Normal;
         }
+        KeyCode::Esc => {
+            if app.help_state.active_tab == HelpTab::Settings {
+                // Check for unsaved changes
+                let has_changes = app
+                    .help_state
+                    .settings_state
+                    .as_ref()
+                    .is_some_and(|s| s.modified_count() > 0);
+                if has_changes {
+                    app.set_status_message(
+                        "Discard unsaved settings changes? Press Esc again to confirm, or Ctrl+S to save".to_string(),
+                    );
+                    // Clear modifications and close
+                    if let Some(ref mut settings) = app.help_state.settings_state {
+                        settings.clear_modifications();
+                    }
+                }
+            }
+            app.mode = AppMode::Normal;
+        }
+        // Tab switching: Tab, Shift+Tab, Left, Right
+        KeyCode::Tab | KeyCode::BackTab | KeyCode::Left | KeyCode::Right
+            if app.help_state.active_tab == HelpTab::Keybindings
+                || !matches!(
+                    key.code,
+                    KeyCode::Left | KeyCode::Right
+                ) =>
+        {
+            let new_tab = app.help_state.active_tab.toggle();
+            app.help_state.active_tab = new_tab;
+            app.help_state.scroll_offset = 0; // Reset scroll on tab switch
+
+            // Lazily initialize settings state
+            if new_tab == HelpTab::Settings && app.help_state.settings_state.is_none() {
+                app.help_state.settings_state =
+                    Some(SettingsState::from_config(&app.config));
+            }
+        }
+        // Scroll keys
         KeyCode::Char('j') | KeyCode::Down => {
-            if app.help_state.scroll_offset < total.saturating_sub(1) {
+            if app.help_state.active_tab == HelpTab::Settings {
+                if let Some(ref mut settings) = app.help_state.settings_state {
+                    settings.select_next();
+                }
+            } else if app.help_state.scroll_offset < total.saturating_sub(1) {
                 app.help_state.scroll_offset += 1;
             }
         }
         KeyCode::Char('k') | KeyCode::Up => {
-            app.help_state.scroll_offset = app.help_state.scroll_offset.saturating_sub(1);
+            if app.help_state.active_tab == HelpTab::Settings {
+                if let Some(ref mut settings) = app.help_state.settings_state {
+                    settings.select_prev();
+                }
+            } else {
+                app.help_state.scroll_offset = app.help_state.scroll_offset.saturating_sub(1);
+            }
         }
         KeyCode::Char('g') | KeyCode::Home => {
-            app.help_state.scroll_offset = 0;
+            if app.help_state.active_tab == HelpTab::Settings {
+                if let Some(ref mut settings) = app.help_state.settings_state {
+                    settings.select_first();
+                }
+            } else {
+                app.help_state.scroll_offset = 0;
+            }
         }
         KeyCode::Char('G') | KeyCode::End => {
-            app.help_state.scroll_offset = total.saturating_sub(1);
+            if app.help_state.active_tab == HelpTab::Settings {
+                if let Some(ref mut settings) = app.help_state.settings_state {
+                    settings.select_last();
+                }
+            } else {
+                app.help_state.scroll_offset = total.saturating_sub(1);
+            }
+        }
+        // Settings-specific keys
+        KeyCode::Enter | KeyCode::Char(' ') if app.help_state.active_tab == HelpTab::Settings => {
+            if let Some(ref mut settings) = app.help_state.settings_state {
+                if let Some(entry) = settings.entries.get(settings.selected_index) {
+                    match &entry.modified_value.as_ref().unwrap_or(&entry.current_value) {
+                        crate::components::settings::SettingValueKind::Bool(_) => {
+                            settings.toggle_bool();
+                        }
+                        crate::components::settings::SettingValueKind::Enum(_, _) => {
+                            settings.cycle_enum();
+                        }
+                        crate::components::settings::SettingValueKind::UInt(_)
+                        | crate::components::settings::SettingValueKind::Str(_) => {
+                            settings.start_editing();
+                        }
+                    }
+                }
+            }
+        }
+        // Reset to default
+        KeyCode::Backspace | KeyCode::Delete
+            if app.help_state.active_tab == HelpTab::Settings =>
+        {
+            if let Some(ref mut settings) = app.help_state.settings_state {
+                settings.reset_to_default();
+            }
+        }
+        // Save settings
+        KeyCode::Char('s')
+            if key.modifiers.contains(KeyModifiers::CONTROL)
+                && app.help_state.active_tab == HelpTab::Settings =>
+        {
+            if let Some(ref settings) = app.help_state.settings_state {
+                if settings.modified_count() > 0 {
+                    app.open_dialog(DialogKind::SaveSettings);
+                } else {
+                    app.set_status_message("No settings modified".to_string());
+                }
+            }
+        }
+        // Open config file in editor
+        KeyCode::Char('o') if app.help_state.active_tab == HelpTab::Settings => {
+            let config_path = dirs::config_dir()
+                .map(|d| d.join("fm-tui").join("config.toml"));
+            if let Some(path) = config_path {
+                if path.exists() {
+                    app.mode = AppMode::Normal;
+                    // Navigate to config file and enter edit mode
+                    app.preview_state.current_path = Some(path.clone());
+                    app.update_preview();
+                    app.enter_edit_mode();
+                } else {
+                    app.set_status_message(
+                        "Config file does not exist yet. Save settings first (Ctrl+S)".to_string(),
+                    );
+                }
+            }
         }
         _ => {}
     }
@@ -1007,6 +1155,9 @@ fn handle_dialog_mode(app: &mut App, key: KeyEvent) {
         }
         DialogKind::SaveConfirm => {
             handle_save_confirm(app, key);
+        }
+        DialogKind::SaveSettings => {
+            handle_save_settings_dialog(app, key);
         }
         _ => {
             handle_input_dialog(app, key, kind);
@@ -1165,6 +1316,282 @@ fn handle_save_confirm(app: &mut App, key: KeyEvent) {
             app.mode = AppMode::Edit;
         }
         _ => {}
+    }
+}
+
+/// Handle the save settings dialog (Global / Local / Cancel).
+fn handle_save_settings_dialog(app: &mut App, key: KeyEvent) {
+    match key.code {
+        KeyCode::Char('g') | KeyCode::Char('G') => {
+            // Save to global config
+            let path = dirs::config_dir()
+                .map(|d| d.join("fm-tui").join("config.toml"));
+            if let Some(path) = path {
+                save_settings_to_file(app, &path);
+            } else {
+                app.set_status_message("Could not determine config directory".to_string());
+                app.close_dialog();
+            }
+        }
+        KeyCode::Char('l') | KeyCode::Char('L') => {
+            // Save to local config (.fm-tui.toml in current directory)
+            let cwd = app.tree_state.root.path.clone();
+            let path = cwd.join(".fm-tui.toml");
+            save_settings_to_file(app, &path);
+        }
+        KeyCode::Esc | KeyCode::Char('c') | KeyCode::Char('C') => {
+            // Back to help/settings
+            app.mode = AppMode::Help;
+        }
+        _ => {}
+    }
+}
+
+/// Save modified settings to a TOML file and apply them live.
+fn save_settings_to_file(app: &mut App, path: &std::path::Path) {
+    use crate::components::settings::SettingValueKind;
+
+    let settings = match &app.help_state.settings_state {
+        Some(s) => s,
+        None => {
+            app.set_status_message("No settings state to save".to_string());
+            app.close_dialog();
+            return;
+        }
+    };
+
+    // Build a TOML table from modified entries, merging with existing file content
+    let existing_content = if path.exists() {
+        std::fs::read_to_string(path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let mut doc: toml::Table = existing_content
+        .parse::<toml::Table>()
+        .unwrap_or_default();
+
+    for entry in &settings.entries {
+        let value = match &entry.modified_value {
+            Some(v) => v,
+            None => continue, // Not modified, skip
+        };
+
+        // Get or create the section table
+        let section = doc
+            .entry(entry.section.to_string())
+            .or_insert_with(|| toml::Value::Table(toml::Table::new()));
+
+        if let toml::Value::Table(ref mut table) = section {
+            let toml_value = match value {
+                SettingValueKind::Bool(b) => toml::Value::Boolean(*b),
+                SettingValueKind::UInt(n) => toml::Value::Integer(*n as i64),
+                SettingValueKind::Str(s) => toml::Value::String(s.clone()),
+                SettingValueKind::Enum(s, _) => toml::Value::String(s.clone()),
+            };
+            table.insert(entry.key.to_string(), toml_value);
+        }
+    }
+
+    // Serialize the table to a TOML string
+    let toml_string = toml::to_string_pretty(&doc).unwrap_or_else(|e| {
+        format!("# Failed to serialize: {}\n", e)
+    });
+
+    // Ensure parent directory exists
+    if let Some(parent) = path.parent() {
+        if !parent.exists() {
+            if let Err(e) = std::fs::create_dir_all(parent) {
+                app.set_status_message(format!("Failed to create config directory: {}", e));
+                app.close_dialog();
+                return;
+            }
+        }
+    }
+
+    // Write the file
+    match std::fs::write(path, &toml_string) {
+        Ok(()) => {
+            // Apply live: update app.config with the modified values
+            apply_settings_live(app);
+
+            // Clear modification markers
+            if let Some(ref mut settings) = app.help_state.settings_state {
+                settings.clear_modifications();
+            }
+
+            app.set_status_message(format!(
+                "✓ Settings saved to {}",
+                path.display()
+            ));
+            app.mode = AppMode::Help;
+        }
+        Err(e) => {
+            app.set_status_message(format!("Failed to save settings: {}", e));
+            app.close_dialog();
+        }
+    }
+}
+
+/// Apply modified settings from the settings state into the live app config.
+fn apply_settings_live(app: &mut App) {
+    use crate::components::settings::SettingValueKind;
+
+    let settings = match &app.help_state.settings_state {
+        Some(s) => s,
+        None => return,
+    };
+
+    for entry in &settings.entries {
+        let value = match &entry.modified_value {
+            Some(v) => v,
+            None => continue,
+        };
+
+        match (entry.section, entry.key) {
+            ("general", "show_hidden") => {
+                if let SettingValueKind::Bool(b) = value {
+                    app.config.general.show_hidden = Some(*b);
+                    app.tree_state.show_hidden = *b;
+                    app.tree_state.sort_all_children();
+                    app.tree_state.flatten();
+                }
+            }
+            ("general", "confirm_delete") => {
+                if let SettingValueKind::Bool(b) = value {
+                    app.config.general.confirm_delete = Some(*b);
+                }
+            }
+            ("general", "mouse") => {
+                if let SettingValueKind::Bool(b) = value {
+                    app.config.general.mouse = Some(*b);
+                }
+            }
+            ("general", "max_entries_per_page") => {
+                if let SettingValueKind::UInt(n) = value {
+                    app.config.general.max_entries_per_page = Some(*n as u32);
+                }
+            }
+            ("general", "search_max_entries") => {
+                if let SettingValueKind::UInt(n) = value {
+                    app.config.general.search_max_entries = Some(*n as u32);
+                }
+            }
+            ("general", "snapshot_max_entries") => {
+                if let SettingValueKind::UInt(n) = value {
+                    app.config.general.snapshot_max_entries = Some(*n as u32);
+                }
+            }
+            ("general", "max_editor_bytes") => {
+                if let SettingValueKind::UInt(n) = value {
+                    app.config.general.max_editor_bytes = Some(*n);
+                }
+            }
+            ("general", "max_editor_lines") => {
+                if let SettingValueKind::UInt(n) = value {
+                    app.config.general.max_editor_lines = Some(*n);
+                }
+            }
+            ("preview", "enabled") => {
+                if let SettingValueKind::Bool(b) = value {
+                    app.config.preview.enabled = Some(*b);
+                }
+            }
+            ("preview", "max_full_preview_bytes") => {
+                if let SettingValueKind::UInt(n) = value {
+                    app.config.preview.max_full_preview_bytes = Some(*n);
+                }
+            }
+            ("preview", "head_lines") => {
+                if let SettingValueKind::UInt(n) = value {
+                    app.config.preview.head_lines = Some(*n as usize);
+                }
+            }
+            ("preview", "tail_lines") => {
+                if let SettingValueKind::UInt(n) = value {
+                    app.config.preview.tail_lines = Some(*n as usize);
+                }
+            }
+            ("preview", "default_view_mode") => {
+                if let SettingValueKind::Enum(s, _) = value {
+                    app.config.preview.default_view_mode = Some(s.clone());
+                }
+            }
+            ("preview", "tab_width") => {
+                if let SettingValueKind::UInt(n) = value {
+                    app.config.preview.tab_width = Some(*n as usize);
+                }
+            }
+            ("preview", "line_wrap") => {
+                if let SettingValueKind::Bool(b) = value {
+                    app.config.preview.line_wrap = Some(*b);
+                }
+            }
+            ("preview", "syntax_theme") => {
+                if let SettingValueKind::Str(s) = value {
+                    app.config.preview.syntax_theme = Some(s.clone());
+                }
+            }
+            ("tree", "sort_by") => {
+                if let SettingValueKind::Enum(s, _) = value {
+                    app.config.tree.sort_by = Some(s.clone());
+                    app.tree_state.sort_by = crate::fs::tree::SortBy::from_str(s);
+                    app.tree_state.sort_all_children();
+                    app.tree_state.flatten();
+                }
+            }
+            ("tree", "dirs_first") => {
+                if let SettingValueKind::Bool(b) = value {
+                    app.config.tree.dirs_first = Some(*b);
+                    app.tree_state.dirs_first = *b;
+                    app.tree_state.sort_all_children();
+                    app.tree_state.flatten();
+                }
+            }
+            ("tree", "use_icons") => {
+                if let SettingValueKind::Bool(b) = value {
+                    app.config.tree.use_icons = Some(*b);
+                }
+            }
+            ("watcher", "enabled") => {
+                if let SettingValueKind::Bool(b) = value {
+                    app.config.watcher.enabled = Some(*b);
+                }
+            }
+            ("watcher", "debounce_ms") => {
+                if let SettingValueKind::UInt(n) = value {
+                    app.config.watcher.debounce_ms = Some(*n);
+                }
+            }
+            ("watcher", "auto_refresh") => {
+                if let SettingValueKind::Bool(b) = value {
+                    app.config.watcher.auto_refresh = Some(*b);
+                    app.watcher_active = *b;
+                }
+            }
+            ("terminal", "enabled") => {
+                if let SettingValueKind::Bool(b) = value {
+                    app.config.terminal.enabled = Some(*b);
+                }
+            }
+            ("terminal", "default_shell") => {
+                if let SettingValueKind::Str(s) = value {
+                    app.config.terminal.default_shell = Some(s.clone());
+                }
+            }
+            ("terminal", "scrollback_lines") => {
+                if let SettingValueKind::UInt(n) = value {
+                    app.config.terminal.scrollback_lines = Some(*n as usize);
+                }
+            }
+            ("theme", "scheme") => {
+                if let SettingValueKind::Enum(s, _) = value {
+                    app.config.theme.scheme = Some(s.clone());
+                    app.theme_colors = crate::theme::resolve_theme(&app.config.theme);
+                }
+            }
+            _ => {}
+        }
     }
 }
 

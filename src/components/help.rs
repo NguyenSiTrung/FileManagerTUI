@@ -8,11 +8,35 @@ use ratatui::{
 
 use crate::theme::ThemeColors;
 
+use super::settings::SettingsState;
+
+/// Active tab within the Help overlay.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum HelpTab {
+    #[default]
+    Keybindings,
+    Settings,
+}
+
+impl HelpTab {
+    /// Toggle to the other tab.
+    pub fn toggle(self) -> Self {
+        match self {
+            HelpTab::Keybindings => HelpTab::Settings,
+            HelpTab::Settings => HelpTab::Keybindings,
+        }
+    }
+}
+
 /// State for the help overlay.
 #[derive(Debug, Default)]
 pub struct HelpState {
     /// Scroll offset for the help content.
     pub scroll_offset: usize,
+    /// Active tab (Keybindings or Settings).
+    pub active_tab: HelpTab,
+    /// Settings state (lazily initialized on first tab switch).
+    pub settings_state: Option<SettingsState>,
 }
 
 /// A single keybinding entry for display.
@@ -402,22 +426,45 @@ const CATEGORIES: &[KeyCategory] = &[
     },
 ];
 
-/// Help overlay widget showing all keybindings.
+/// Help overlay widget showing keybindings or settings.
 pub struct HelpOverlay<'a> {
     theme: &'a ThemeColors,
-    scroll_offset: usize,
+    state: &'a HelpState,
 }
 
 impl<'a> HelpOverlay<'a> {
-    pub fn new(theme: &'a ThemeColors, scroll_offset: usize) -> Self {
-        Self {
-            theme,
-            scroll_offset,
-        }
+    pub fn new(theme: &'a ThemeColors, state: &'a HelpState) -> Self {
+        Self { theme, state }
     }
 
-    /// Build all the lines for the help content.
-    fn build_content_lines(&self) -> Vec<Line<'static>> {
+    /// Build the tab bar line.
+    fn build_tab_bar(&self) -> Line<'static> {
+        let kb_style = if self.state.active_tab == HelpTab::Keybindings {
+            Style::default()
+                .fg(self.theme.accent_fg)
+                .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+        } else {
+            Style::default().fg(self.theme.dim_fg)
+        };
+        let settings_style = if self.state.active_tab == HelpTab::Settings {
+            Style::default()
+                .fg(self.theme.accent_fg)
+                .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+        } else {
+            Style::default().fg(self.theme.dim_fg)
+        };
+
+        Line::from(vec![
+            Span::styled("  ", Style::default()),
+            Span::styled(" Keybindings ", kb_style),
+            Span::styled("  │  ", Style::default().fg(self.theme.dim_fg)),
+            Span::styled(" Settings ", settings_style),
+            Span::styled("  ", Style::default()),
+        ])
+    }
+
+    /// Build keybinding content lines.
+    fn build_keybinding_lines(&self) -> Vec<Line<'static>> {
         let mut lines: Vec<Line<'static>> = Vec::new();
 
         // Title
@@ -463,15 +510,34 @@ impl<'a> HelpOverlay<'a> {
 
         // Footer
         lines.push(Line::from(vec![Span::styled(
-            " Press ? or Esc to close ",
+            " Press ? or Esc to close  |  Tab/←/→ to switch tabs ",
             Style::default().fg(self.theme.dim_fg),
         )]));
 
         lines
     }
 
-    /// Get total number of content lines (for scroll bounds).
-    pub fn total_lines() -> usize {
+    /// Build all the lines for the current tab.
+    fn build_content_lines(&self) -> Vec<Line<'static>> {
+        match self.state.active_tab {
+            HelpTab::Keybindings => self.build_keybinding_lines(),
+            HelpTab::Settings => {
+                if let Some(ref settings) = self.state.settings_state {
+                    use super::settings::SettingsWidget;
+                    let widget = SettingsWidget::new(settings, self.theme);
+                    widget.build_content_lines()
+                } else {
+                    vec![Line::from(vec![Span::styled(
+                        "  Settings not loaded. Switch tabs to initialize.",
+                        Style::default().fg(self.theme.dim_fg),
+                    )])]
+                }
+            }
+        }
+    }
+
+    /// Get total number of keybinding content lines (for scroll bounds).
+    pub fn keybinding_total_lines() -> usize {
         let mut count = 2; // title + blank
         for category in CATEGORIES {
             count += 1; // header
@@ -481,12 +547,28 @@ impl<'a> HelpOverlay<'a> {
         count += 1; // footer
         count
     }
+
+    /// Get total lines for the current tab.
+    pub fn total_lines_for_tab(&self) -> usize {
+        match self.state.active_tab {
+            HelpTab::Keybindings => Self::keybinding_total_lines(),
+            HelpTab::Settings => {
+                if let Some(ref settings) = self.state.settings_state {
+                    use super::settings::SettingsWidget;
+                    let widget = SettingsWidget::new(settings, self.theme);
+                    widget.total_lines()
+                } else {
+                    1
+                }
+            }
+        }
+    }
 }
 
 impl<'a> Widget for HelpOverlay<'a> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         // Center the overlay — 70% width, 80% height
-        let overlay_width = (area.width as f32 * 0.70).min(80.0) as u16;
+        let overlay_width = (area.width as f32 * 0.70).min(90.0) as u16;
         let overlay_height = (area.height as f32 * 0.80).min(50.0) as u16;
 
         let x = area.x + (area.width.saturating_sub(overlay_width)) / 2;
@@ -506,19 +588,36 @@ impl<'a> Widget for HelpOverlay<'a> {
         let inner = block.inner(overlay_area);
         block.render(overlay_area, buf);
 
+        // Render tab bar at the top of the inner area
+        let tab_line = self.build_tab_bar();
+        if inner.height > 0 {
+            buf.set_line(inner.x, inner.y, &tab_line, inner.width);
+        }
+
+        // Separator line below tab bar
+        if inner.height > 1 {
+            let sep = Line::from(Span::styled(
+                "─".repeat(inner.width as usize),
+                Style::default().fg(self.theme.dim_fg),
+            ));
+            buf.set_line(inner.x, inner.y + 1, &sep, inner.width);
+        }
+
+        // Content area below the tab bar + separator (2 lines reserved)
+        let content_y = inner.y + 2;
+        let content_height = inner.height.saturating_sub(2) as usize;
+
         // Build and render content lines
         let content_lines = self.build_content_lines();
-        let visible_height = inner.height as usize;
-
-        let scroll = self.scroll_offset;
+        let scroll = self.state.scroll_offset;
 
         for (i, line) in content_lines
             .iter()
             .skip(scroll)
-            .take(visible_height)
+            .take(content_height)
             .enumerate()
         {
-            let line_y = inner.y + i as u16;
+            let line_y = content_y + i as u16;
             if line_y >= inner.y + inner.height {
                 break;
             }
@@ -526,7 +625,7 @@ impl<'a> Widget for HelpOverlay<'a> {
         }
 
         // Draw scroll indicator if content overflows
-        if content_lines.len() > visible_height {
+        if content_lines.len() > content_height {
             let total = content_lines.len();
             let indicator = format!(" {}/{} ", (scroll + 1).min(total), total);
             let ind_span = Span::styled(indicator, Style::default().fg(self.theme.dim_fg));
@@ -545,8 +644,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn total_lines_is_nonzero() {
-        assert!(HelpOverlay::total_lines() > 0);
+    fn keybinding_total_lines_is_nonzero() {
+        assert!(HelpOverlay::keybinding_total_lines() > 0);
     }
 
     #[test]
@@ -561,10 +660,46 @@ mod tests {
     }
 
     #[test]
-    fn content_lines_match_total() {
+    fn keybinding_content_lines_match_total() {
         let theme = crate::theme::dark_theme();
-        let overlay = HelpOverlay::new(&theme, 0);
-        let lines = overlay.build_content_lines();
-        assert_eq!(lines.len(), HelpOverlay::total_lines());
+        let state = HelpState::default();
+        let overlay = HelpOverlay::new(&theme, &state);
+        let lines = overlay.build_keybinding_lines();
+        assert_eq!(lines.len(), HelpOverlay::keybinding_total_lines());
+    }
+
+    #[test]
+    fn default_tab_is_keybindings() {
+        let state = HelpState::default();
+        assert_eq!(state.active_tab, HelpTab::Keybindings);
+    }
+
+    #[test]
+    fn tab_toggle_cycles() {
+        assert_eq!(HelpTab::Keybindings.toggle(), HelpTab::Settings);
+        assert_eq!(HelpTab::Settings.toggle(), HelpTab::Keybindings);
+    }
+
+    #[test]
+    fn total_lines_for_keybinding_tab() {
+        let theme = crate::theme::dark_theme();
+        let state = HelpState::default();
+        let overlay = HelpOverlay::new(&theme, &state);
+        assert_eq!(
+            overlay.total_lines_for_tab(),
+            HelpOverlay::keybinding_total_lines()
+        );
+    }
+
+    #[test]
+    fn total_lines_for_settings_tab() {
+        let theme = crate::theme::dark_theme();
+        let config = crate::config::AppConfig::default();
+        let mut state = HelpState::default();
+        state.active_tab = HelpTab::Settings;
+        state.settings_state = Some(super::super::settings::SettingsState::from_config(&config));
+        let overlay = HelpOverlay::new(&theme, &state);
+        assert!(overlay.total_lines_for_tab() > 0);
     }
 }
+

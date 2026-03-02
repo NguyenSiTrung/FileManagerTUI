@@ -74,6 +74,9 @@ impl<'a> Widget for DialogWidget<'a> {
             DialogKind::SaveConfirm => {
                 render_save_confirm_dialog(self.theme, area, buf);
             }
+            DialogKind::SaveSettings => {
+                render_save_settings_dialog(self.theme, area, buf);
+            }
         }
     }
 }
@@ -352,6 +355,80 @@ fn render_save_confirm_dialog(theme: &ThemeColors, area: Rect, buf: &mut Buffer)
         .add_modifier(Modifier::DIM);
     let hint_line = Line::from(Span::styled(hint, hint_style));
     if inner.height > 1 {
+        buf.set_line(inner.x, inner.y + inner.height - 1, &hint_line, inner.width);
+    }
+}
+
+fn render_save_settings_dialog(theme: &ThemeColors, area: Rect, buf: &mut Buffer) {
+    let dialog_width = 60u16.min(area.width.saturating_sub(4));
+    let dialog_height = 7;
+    let rect = DialogWidget::centered_rect(dialog_width, dialog_height, area);
+
+    Clear.render(rect, buf);
+
+    let block = Block::default()
+        .title(" Save Settings ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(theme.info_fg))
+        .padding(Padding::horizontal(1));
+
+    let inner = block.inner(rect);
+    block.render(rect, buf);
+
+    if inner.height == 0 || inner.width == 0 {
+        return;
+    }
+
+    // Question text
+    let msg = Line::from(Span::styled(
+        "Save modified settings to:",
+        Style::default()
+            .fg(theme.status_fg)
+            .add_modifier(Modifier::BOLD),
+    ));
+    buf.set_line(inner.x, inner.y, &msg, inner.width);
+
+    // Global option
+    let global = Line::from(vec![
+        Span::styled(
+            "  [G] ",
+            Style::default()
+                .fg(theme.warning_fg)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            "Global  (~/.config/fm-tui/config.toml)",
+            Style::default().fg(theme.tree_file_fg),
+        ),
+    ]);
+    if inner.height > 1 {
+        buf.set_line(inner.x, inner.y + 1, &global, inner.width);
+    }
+
+    // Local option
+    let local = Line::from(vec![
+        Span::styled(
+            "  [L] ",
+            Style::default()
+                .fg(theme.warning_fg)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            "Local   (.fm-tui.toml in current directory)",
+            Style::default().fg(theme.tree_file_fg),
+        ),
+    ]);
+    if inner.height > 2 {
+        buf.set_line(inner.x, inner.y + 2, &local, inner.width);
+    }
+
+    // Hint at bottom
+    let hint = "[g] Global  [l] Local  [c/Esc] Cancel";
+    let hint_style = Style::default()
+        .fg(theme.dim_fg)
+        .add_modifier(Modifier::DIM);
+    let hint_line = Line::from(Span::styled(hint, hint_style));
+    if inner.height > 3 {
         buf.set_line(inner.x, inner.y + inner.height - 1, &hint_line, inner.width);
     }
 }
