@@ -126,4 +126,9 @@ This file is the project's institutional knowledge - learnings extracted from co
 - Entry line index computation for auto-scroll: iterate through all entries counting section headers and separators for variable-height lists (from: help-settings_20260302, archived 2026-03-02)
 - Type bridge pattern (`SettingValueKind`): intermediate enum bridging heterogeneous config field types to a uniform UI/editing API — enables generic toggle/cycle/edit without knowing specific field type (from: help-settings_20260302, archived 2026-03-02)
 
-Last refreshed: 2026-03-02 (help-settings patterns elevated)
+- Shallow-first → on-demand-deep pattern: default to cheap depth-1 counting for directory preview, offer explicit user action (`D` key) for full recursive scan — keeps UI responsive while preserving power-user access (from: shallow-dir-preview_20260302, archived 2026-03-02)
+- Wrap async directory scans with `tokio::time::timeout` using configurable `preview_timeout_ms` — abort and show partial results on timeout rather than blocking indefinitely (from: shallow-dir-preview_20260302, archived 2026-03-02)
+- Cancel-on-navigate: store `Arc<AtomicBool>` cancel token on App, signal it in `update_preview()` before launching new scan — prevents stale background scans from wasting resources (from: shallow-dir-preview_20260302, archived 2026-03-02)
+- Use `is_shallow_preview` flag on preview state for conditional UI hints (e.g., "[D] Deep scan") — avoids showing deep-scan prompt when results are already full (from: shallow-dir-preview_20260302, archived 2026-03-02)
+
+Last refreshed: 2026-03-02 (shallow-dir-preview patterns elevated)

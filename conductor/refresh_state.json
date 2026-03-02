@@ -1,13 +1,12 @@
 {
-    "last_refresh": "2026-03-02T13:46:57+07:00",
+    "last_refresh": "2026-03-02T17:29:47+07:00",
     "changes": [
-        "product.md: Added 3 new key features (Large Directory Performance #10, Large File Handling #11, Install Script #12)",
-        "product.md: Updated features #1-5,7 with current capabilities (inline filter, action menu, async progress, manual refresh, settings panel)",
-        "tech-stack.md: Updated module structure to include editor.rs, components/settings.rs, components/search_action.rs",
-        "tech-stack.md: Updated architecture notes for pagination and async directory/preview operations",
-        "patterns.md: Already up-to-date (all 16 archived tracks consolidated, last elevated 2026-03-02)",
-        "Learnings consolidation: All recurring cross-track patterns already in patterns.md — no new elevations needed",
-        "Beads: All tasks completed (✓), no drift between Beads and Conductor"
+        "product.md: Updated Feature #2 (File Preview) — added shallow directory summaries, on-demand deep scan (D key), cancel-on-navigate, configurable preview_timeout_ms",
+        "patterns.md: Elevated 4 new patterns from shallow-dir-preview_20260302 (shallow-first UX, tokio::time::timeout, cancel-on-navigate, is_shallow_preview flag)",
+        "Beads: Closed 18 orphaned tasks from help-settings_20260302 epic (FileManagerTUI-jwv.*) — track was archived but Beads tasks remained open",
+        "tracks.md: Clean — no active tracks, 17 archived tracks total",
+        "tech-stack.md: Up-to-date — no new crates or module changes",
+        "workflow.md: Up-to-date — no CI/workflow changes"
     ],
-    "drift_source": "16 completed+archived tracks since last refresh: search-action, large-dir-perf, large-dir-robust, large-file-scalability, help-settings, plus watcher auto_refresh and preview flicker fixes"
+    "drift_source": "shallow-dir-preview_20260302 completed+archived since last refresh, plus install script fix, 't' key terminal toggle, CI clippy fix"
 }

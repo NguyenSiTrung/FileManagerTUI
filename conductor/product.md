@@ -26,7 +26,7 @@ A single static binary that provides a VS Code-like file explorer experience in 
 
 ## Key Features
 1. **Tree Navigation** — Folder tree with lazy loading, expand/collapse, multi-select, inline filter (`/`)
-2. **File Preview** — Syntax-highlighted preview panel with streaming head/tail for large files, async directory summaries
+2. **File Preview** — Syntax-highlighted preview panel with streaming head/tail for large files, shallow directory summaries (depth-1) by default with on-demand deep scan (`D` key), cancel-on-navigate, and configurable `preview_timeout_ms`
 3. **File Operations** — Create, rename, delete, copy, cut, paste with confirmation dialogs and async progress
 4. **Fuzzy Search + Action Menu** — Ctrl+P fuzzy finder overlay with context-aware action menu (navigate, preview, edit, copy path, rename, delete, open in terminal)
 5. **Filesystem Watcher** — Background watcher with manual refresh (F5/Ctrl+R) and optional auto-refresh mode via config
