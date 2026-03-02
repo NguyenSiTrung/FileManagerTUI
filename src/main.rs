@@ -13,6 +13,8 @@ mod tui;
 mod ui;
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use clap::Parser;
@@ -142,30 +144,44 @@ async fn main() -> error::Result<()> {
     let event_tx = events.sender();
     app.event_tx = Some(event_tx.clone());
 
-    // Initialize filesystem watcher (using merged config)
-    let _watcher = if !app.config.watcher_enabled() {
+    let (watcher_flag_tx, watcher_flag_rx) = std::sync::mpsc::channel::<Arc<AtomicBool>>();
+    let mut watcher_flag_rx = Some(watcher_flag_rx);
+    let mut watcher_flag: Option<Arc<AtomicBool>> = None;
+
+    // Initialize filesystem watcher in the background so startup stays responsive
+    // even for very deep/large directory trees.
+    let _watcher_thread = if !app.config.watcher_enabled() {
         app.watcher_active = false;
         None
     } else {
+        let root = path.clone();
+        let debounce = Duration::from_millis(app.config.debounce_ms());
+        let watcher_tx = event_tx.clone();
+        let watcher_flag_tx = watcher_flag_tx.clone();
         let ignore_patterns: Vec<String> = fs::watcher::DEFAULT_IGNORE_PATTERNS
             .iter()
             .map(|s| s.to_string())
             .collect();
 
-        match FsWatcher::new(
-            &path,
-            Duration::from_millis(app.config.debounce_ms()),
-            ignore_patterns,
-            fs::watcher::DEFAULT_FLOOD_THRESHOLD,
-            event_tx.clone(),
-        ) {
-            Ok(watcher) => Some(watcher),
-            Err(e) => {
-                app.watcher_active = false;
-                app.set_status_message(format!("⚠ Watcher unavailable: {}", e));
-                None
+        Some(std::thread::spawn(move || {
+            match FsWatcher::new(
+                &root,
+                debounce,
+                ignore_patterns,
+                fs::watcher::DEFAULT_FLOOD_THRESHOLD,
+                watcher_tx.clone(),
+            ) {
+                Ok(watcher) => {
+                    let _ = watcher_flag_tx.send(watcher.active_flag());
+                    loop {
+                        std::thread::sleep(Duration::from_secs(3600));
+                    }
+                }
+                Err(e) => {
+                    let _ = watcher_tx.send(Event::WatcherInitFailed(e.to_string()));
+                }
             }
-        }
+        }))
     };
 
     // Kick off async loading of root directory contents.
@@ -204,15 +220,29 @@ async fn main() -> error::Result<()> {
             Event::ShallowDirSummary { path, lines, total } => {
                 app.handle_shallow_dir_summary(&path, lines, total);
             }
+            Event::WatcherInitFailed(msg) => {
+                app.watcher_active = false;
+                app.set_status_message(format!("⚠ Watcher unavailable: {}", msg));
+            }
         }
 
-        // Sync watcher pause/resume state
-        if let Some(ref watcher) = _watcher {
-            if app.watcher_active && !watcher.is_active() {
-                watcher.resume();
-            } else if !app.watcher_active && watcher.is_active() {
-                watcher.pause();
+        if watcher_flag.is_none() {
+            if let Some(rx) = &watcher_flag_rx {
+                match rx.try_recv() {
+                    Ok(flag) => {
+                        watcher_flag = Some(flag);
+                        watcher_flag_rx = None;
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        watcher_flag_rx = None;
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                }
             }
+        }
+
+        if let Some(flag) = &watcher_flag {
+            flag.store(app.watcher_active, Ordering::Relaxed);
         }
 
         if app.should_quit {

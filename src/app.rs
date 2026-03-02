@@ -285,17 +285,15 @@ impl App {
     /// Must be called after `event_tx` is set. Spawns a blocking task that
     /// collects a `DirSnapshot` of the root and sends `DirScanComplete` when
     /// done. The UI remains responsive with a "Loading..." placeholder.
-    pub fn spawn_initial_load(
-        &mut self,
-        event_tx: &mpsc::UnboundedSender<crate::event::Event>,
-    ) {
+    pub fn spawn_initial_load(&mut self, event_tx: &mpsc::UnboundedSender<crate::event::Event>) {
         let root_path = self.tree_state.root.path.clone();
         if self.tree_state.root.node_type != NodeType::Directory {
             return;
         }
         self.set_status_message(format!(
             "📂 Loading {}...",
-            root_path.file_name()
+            root_path
+                .file_name()
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_else(|| root_path.to_string_lossy().to_string())
         ));

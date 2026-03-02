@@ -115,6 +115,11 @@ impl FsWatcher {
         self.active.store(true, Ordering::Relaxed);
     }
 
+    /// Get a clone of the internal active flag used by the watcher callback.
+    pub fn active_flag(&self) -> Arc<AtomicBool> {
+        self.active.clone()
+    }
+
     /// Check if the watcher is currently active (forwarding events).
     pub fn is_active(&self) -> bool {
         self.active.load(Ordering::Relaxed)

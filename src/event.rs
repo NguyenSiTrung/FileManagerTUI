@@ -81,6 +81,8 @@ pub enum Event {
         lines: Vec<ratatui::text::Line<'static>>,
         total: usize,
     },
+    /// Filesystem watcher initialization failed.
+    WatcherInitFailed(String),
 }
 
 /// Async event handler that polls crossterm events and forwards them via a channel.
