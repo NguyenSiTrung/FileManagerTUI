@@ -650,6 +650,7 @@ fn is_leap_year(year: u64) -> bool {
 ///
 /// Shows: directory name, file count, subdirectory count, total size.
 /// Caps recursive walk to avoid hanging on huge trees.
+#[allow(dead_code)]
 pub fn load_directory_summary(path: &Path) -> (Vec<Line<'static>>, usize) {
     let label_style = Style::default()
         .fg(Color::Cyan)
@@ -777,10 +778,7 @@ pub fn load_directory_summary_shallow(path: &Path) -> (Vec<Line<'static>>, usize
     };
 
     for entry in entries.flatten() {
-        let is_dir = entry
-            .metadata()
-            .map(|m| m.is_dir())
-            .unwrap_or(false);
+        let is_dir = entry.metadata().map(|m| m.is_dir()).unwrap_or(false);
         let name = entry.file_name().to_string_lossy().to_string();
 
         if is_dir {
@@ -796,7 +794,8 @@ pub fn load_directory_summary_shallow(path: &Path) -> (Vec<Line<'static>>, usize
 
     // Sort child names: directories first, then alphabetically
     child_names.sort_by(|a, b| {
-        b.1.cmp(&a.1).then_with(|| a.0.to_lowercase().cmp(&b.0.to_lowercase()))
+        b.1.cmp(&a.1)
+            .then_with(|| a.0.to_lowercase().cmp(&b.0.to_lowercase()))
     });
 
     let mut lines = vec![
@@ -807,17 +806,11 @@ pub fn load_directory_summary_shallow(path: &Path) -> (Vec<Line<'static>>, usize
         ]),
         Line::from(vec![
             Span::styled("  Files: ", label_style),
-            Span::styled(
-                format!("{} (direct)", file_count),
-                value_style,
-            ),
+            Span::styled(format!("{} (direct)", file_count), value_style),
         ]),
         Line::from(vec![
             Span::styled("  Subdirectories: ", label_style),
-            Span::styled(
-                format!("{} (direct)", dir_count),
-                value_style,
-            ),
+            Span::styled(format!("{} (direct)", dir_count), value_style),
         ]),
         Line::from(""),
     ];
@@ -825,10 +818,7 @@ pub fn load_directory_summary_shallow(path: &Path) -> (Vec<Line<'static>>, usize
     // Child listing
     let total_children = file_count + dir_count;
     if total_children > 0 {
-        lines.push(Line::from(Span::styled(
-            "  Contents:",
-            label_style,
-        )));
+        lines.push(Line::from(Span::styled("  Contents:", label_style)));
 
         for (name, is_dir) in &child_names {
             let icon = if *is_dir { "📂 " } else { "  📄 " };

@@ -42,5 +42,5 @@
 
 ---
 
-## [~] Track: Non-Blocking Directory Preview with Shallow Counting
+## [x] Track: Non-Blocking Directory Preview with Shallow Counting
 *Link: [./conductor/tracks/shallow-dir-preview_20260302/](./conductor/tracks/shallow-dir-preview_20260302/)*

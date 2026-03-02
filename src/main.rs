@@ -197,11 +197,7 @@ async fn main() -> error::Result<()> {
             } => {
                 app.handle_dir_summary_update(&path, files, dirs, size, done);
             }
-            Event::ShallowDirSummary {
-                path,
-                lines,
-                total,
-            } => {
+            Event::ShallowDirSummary { path, lines, total } => {
                 app.handle_shallow_dir_summary(&path, lines, total);
             }
         }

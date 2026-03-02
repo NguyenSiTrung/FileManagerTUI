@@ -868,13 +868,8 @@ impl App {
 
         tokio::spawn(async move {
             let result = tokio::task::spawn_blocking(move || {
-                let (lines, total) =
-                    crate::preview_content::load_directory_summary_shallow(&path);
-                let _ = tx.send(crate::event::Event::ShallowDirSummary {
-                    path,
-                    lines,
-                    total,
-                });
+                let (lines, total) = crate::preview_content::load_directory_summary_shallow(&path);
+                let _ = tx.send(crate::event::Event::ShallowDirSummary { path, lines, total });
             })
             .await;
 

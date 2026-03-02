@@ -18,7 +18,7 @@
   - Replace `spawn_async_dir_summary` call in `update_preview` with shallow variant
   - Add "[Press D for deep scan]" hint line to preview output
 
-- [ ] Conductor - User Manual Verification 'Phase 1' (Protocol in workflow.md)
+- [x] Conductor - User Manual Verification 'Phase 1' (Protocol in workflow.md)
 
 ## Phase 2: Scan Cancellation
 
@@ -33,7 +33,7 @@
   - Reset cancel token before spawning new scan
   - Test: verify old scan is cancelled when navigating to new item
 
-- [ ] Conductor - User Manual Verification 'Phase 2' (Protocol in workflow.md)
+- [x] Conductor - User Manual Verification 'Phase 2' (Protocol in workflow.md)
 
 ## Phase 3: Preview Timeout
 
@@ -50,7 +50,7 @@
   - For deep scans, display partial counts collected before timeout
   - Test timeout behavior with mock slow scan
 
-- [ ] Conductor - User Manual Verification 'Phase 3' (Protocol in workflow.md)
+- [x] Conductor - User Manual Verification 'Phase 3' (Protocol in workflow.md)
 
 ## Phase 4: Deep Scan on Demand
 
@@ -67,20 +67,20 @@
   - On cancel/timeout, show partial results + warning message
   - Test: deep scan updates preview progressively
 
-- [ ] Conductor - User Manual Verification 'Phase 4' (Protocol in workflow.md)
+- [x] Conductor - User Manual Verification 'Phase 4' (Protocol in workflow.md)
 
 ## Phase 5: Polish & Integration
 
-- [ ] Task 1: Loading indicator in preview panel
+- [x] Task 1: Loading indicator in preview panel
   - Show "⏳ Scanning..." with directory name during shallow scan
   - Show "⏳ Deep scan in progress..." with running counts during deep scan
   - Ensure indicator clears on scan complete, cancel, or timeout
 
-- [ ] Task 2: Integration testing and edge cases
+- [x] Task 2: Integration testing and edge cases
   - Test navigation rapid-fire (quick up/down through many directories)
   - Test deep scan cancel by navigating away
   - Test timeout with configurable value
   - Verify no resource leaks (file handles, spawned tasks)
   - Run `cargo clippy` and `cargo fmt`
 
-- [ ] Conductor - User Manual Verification 'Phase 5' (Protocol in workflow.md)
+- [x] Conductor - User Manual Verification 'Phase 5' (Protocol in workflow.md)
