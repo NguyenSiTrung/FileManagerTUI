@@ -23,6 +23,8 @@ pub struct TerminalSelection {
     pub anchor: Option<TerminalCoord>,
     /// The moving endpoint of the selection (current mouse position during drag).
     pub endpoint: Option<TerminalCoord>,
+    /// True while a mouse drag selection is in progress.
+    pub dragging: bool,
 }
 
 impl TerminalSelection {
@@ -30,17 +32,30 @@ impl TerminalSelection {
     pub fn clear(&mut self) {
         self.anchor = None;
         self.endpoint = None;
+        self.dragging = false;
     }
 
     /// Set the anchor (start of selection).
     pub fn set_anchor(&mut self, coord: TerminalCoord) {
         self.anchor = Some(coord);
         self.endpoint = Some(coord);
+        self.dragging = false;
+    }
+
+    /// Start a mouse drag selection from the given anchor.
+    pub fn begin_drag(&mut self, coord: TerminalCoord) {
+        self.set_anchor(coord);
+        self.dragging = true;
     }
 
     /// Update the moving endpoint.
     pub fn set_endpoint(&mut self, coord: TerminalCoord) {
         self.endpoint = Some(coord);
+    }
+
+    /// Finish an active drag gesture.
+    pub fn end_drag(&mut self) {
+        self.dragging = false;
     }
 
     /// Returns true if a selection is active (both anchor and endpoint set).

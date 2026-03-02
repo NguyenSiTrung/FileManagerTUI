@@ -80,21 +80,42 @@ pub fn handle_mouse_event(
             } else if app.terminal_state.visible && is_in_rect(col, row, app.terminal_area) {
                 // Switch focus to terminal and start/clear selection
                 app.focused_panel = FocusedPanel::Terminal;
-                if let Some(coord) = mouse_to_terminal_coord(app, col, row) {
+                if let Some(coord) = mouse_to_terminal_coord(app, col, row, false) {
                     // Click sets anchor (clears any previous selection by overwriting)
-                    app.terminal_state.selection.set_anchor(coord);
+                    app.terminal_state.selection.begin_drag(coord);
                 }
+            }
+        }
+        MouseEventKind::Down(MouseButton::Right) => {
+            if app.terminal_state.visible && is_in_rect(col, row, app.terminal_area) {
+                app.focused_panel = FocusedPanel::Terminal;
+                app.copy_terminal_selection();
             }
         }
         MouseEventKind::Drag(MouseButton::Left) => {
             // Update terminal selection endpoint during drag
-            if app.terminal_state.visible && app.terminal_state.selection.anchor.is_some() {
-                if let Some(coord) = mouse_to_terminal_coord(app, col, row) {
+            if app.terminal_state.visible && app.terminal_state.selection.dragging {
+                if let Some(coord) = mouse_to_terminal_coord(app, col, row, true) {
+                    app.terminal_state.selection.set_endpoint(coord);
+                }
+            }
+        }
+        MouseEventKind::Moved => {
+            // Fallback for terminals that emit Moved (not Drag) during left-button drag.
+            if app.terminal_state.visible && app.terminal_state.selection.dragging {
+                if let Some(coord) = mouse_to_terminal_coord(app, col, row, true) {
                     app.terminal_state.selection.set_endpoint(coord);
                 }
             }
         }
         MouseEventKind::Up(MouseButton::Left) => {
+            if app.terminal_state.selection.dragging {
+                // Final endpoint update allows releasing outside panel bounds.
+                if let Some(coord) = mouse_to_terminal_coord(app, col, row, true) {
+                    app.terminal_state.selection.set_endpoint(coord);
+                }
+                app.terminal_state.selection.end_drag();
+            }
             // If anchor == endpoint after click-release (no drag), clear selection
             if let Some((start, end)) = app.terminal_state.selection.normalized() {
                 if start == end {
@@ -143,6 +164,7 @@ fn mouse_to_terminal_coord(
     app: &App,
     mouse_col: u16,
     mouse_row: u16,
+    clamp_to_inner: bool,
 ) -> Option<crate::terminal::TerminalCoord> {
     let area = app.terminal_area;
     // Account for border offset (1 pixel on each side)
@@ -151,16 +173,30 @@ fn mouse_to_terminal_coord(
     let inner_w = area.width.saturating_sub(2);
     let inner_h = area.height.saturating_sub(2);
 
-    if mouse_col < inner_x
-        || mouse_row < inner_y
-        || mouse_col >= inner_x + inner_w
-        || mouse_row >= inner_y + inner_h
-    {
+    if inner_w == 0 || inner_h == 0 {
         return None;
     }
 
-    let local_col = (mouse_col - inner_x) as usize;
-    let local_row = (mouse_row - inner_y) as usize;
+    let (effective_col, effective_row) = if clamp_to_inner {
+        let max_x = inner_x + inner_w - 1;
+        let max_y = inner_y + inner_h - 1;
+        (
+            mouse_col.clamp(inner_x, max_x),
+            mouse_row.clamp(inner_y, max_y),
+        )
+    } else {
+        if mouse_col < inner_x
+            || mouse_row < inner_y
+            || mouse_col >= inner_x + inner_w
+            || mouse_row >= inner_y + inner_h
+        {
+            return None;
+        }
+        (mouse_col, mouse_row)
+    };
+
+    let local_col = (effective_col - inner_x) as usize;
+    let local_row = (effective_row - inner_y) as usize;
 
     // Convert viewport row to absolute line, accounting for scroll offset.
     // scroll_offset=0 means we're at the bottom (live view).
@@ -884,12 +920,27 @@ fn handle_terminal_keys(app: &mut App, key: KeyEvent) {
             }
             return;
         }
-        // Copy terminal selection to system clipboard: Ctrl+Shift+C
-        // crossterm may report this as Char('C') or Char('c') depending on terminal
-        KeyCode::Char('C') | KeyCode::Char('c')
+        // Copy terminal selection to system clipboard.
+        // Supports Ctrl+Shift+C, Ctrl+C (when selection exists), and Cmd+C on macOS terminals
+        // that pass SUPER-modified keys through to the app.
+        KeyCode::Char('C')
             if key.modifiers.contains(KeyModifiers::CONTROL)
-                && key.modifiers.contains(KeyModifiers::SHIFT) =>
+                || key.modifiers.contains(KeyModifiers::SUPER) =>
         {
+            app.copy_terminal_selection();
+            return;
+        }
+        KeyCode::Char('c')
+            if (key.modifiers.contains(KeyModifiers::CONTROL)
+                && (key.modifiers.contains(KeyModifiers::SHIFT)
+                    || app.terminal_state.selection.is_active()))
+                || key.modifiers.contains(KeyModifiers::SUPER) =>
+        {
+            app.copy_terminal_selection();
+            return;
+        }
+        // Legacy terminal copy shortcut.
+        KeyCode::Insert if key.modifiers.contains(KeyModifiers::CONTROL) => {
             app.copy_terminal_selection();
             return;
         }
@@ -3222,6 +3273,79 @@ mod tests {
     }
 
     #[test]
+    fn terminal_moved_updates_selection_endpoint_while_dragging() {
+        let (_dir, mut app) = setup_app();
+        app.terminal_state.visible = true;
+        app.terminal_area = ratatui::layout::Rect::new(0, 20, 80, 10);
+
+        let tx = make_event_tx();
+        let down = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 5,
+            row: 22,
+            modifiers: KeyModifiers::NONE,
+        };
+        handle_mouse_event(&mut app, down, &tx);
+
+        // Some terminals emit Moved instead of Drag while left button is held.
+        let moved = MouseEvent {
+            kind: MouseEventKind::Moved,
+            column: 20,
+            row: 24,
+            modifiers: KeyModifiers::NONE,
+        };
+        handle_mouse_event(&mut app, moved, &tx);
+
+        let (start, end) = app.terminal_state.selection.normalized().unwrap();
+        assert!(start != end || start.col != end.col);
+    }
+
+    #[test]
+    fn terminal_moved_after_drag_end_does_not_change_selection() {
+        let (_dir, mut app) = setup_app();
+        app.terminal_state.visible = true;
+        app.terminal_area = ratatui::layout::Rect::new(0, 20, 80, 10);
+
+        let tx = make_event_tx();
+        let down = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 5,
+            row: 22,
+            modifiers: KeyModifiers::NONE,
+        };
+        handle_mouse_event(&mut app, down, &tx);
+
+        let drag = MouseEvent {
+            kind: MouseEventKind::Drag(MouseButton::Left),
+            column: 10,
+            row: 22,
+            modifiers: KeyModifiers::NONE,
+        };
+        handle_mouse_event(&mut app, drag, &tx);
+
+        let up = MouseEvent {
+            kind: MouseEventKind::Up(MouseButton::Left),
+            column: 10,
+            row: 22,
+            modifiers: KeyModifiers::NONE,
+        };
+        handle_mouse_event(&mut app, up, &tx);
+
+        let before = app.terminal_state.selection.normalized();
+        assert!(before.is_some());
+
+        let moved = MouseEvent {
+            kind: MouseEventKind::Moved,
+            column: 40,
+            row: 25,
+            modifiers: KeyModifiers::NONE,
+        };
+        handle_mouse_event(&mut app, moved, &tx);
+
+        assert_eq!(app.terminal_state.selection.normalized(), before);
+    }
+
+    #[test]
     fn terminal_click_without_drag_clears_selection() {
         let (_dir, mut app) = setup_app();
         app.terminal_state.visible = true;
@@ -3339,6 +3463,111 @@ mod tests {
         assert!(app.status_message.is_some());
         let (msg, _) = app.status_message.as_ref().unwrap();
         assert!(msg.contains("No terminal text selected"));
+    }
+
+    #[test]
+    fn ctrl_c_with_selection_in_terminal_triggers_copy() {
+        let (_dir, mut app) = setup_app();
+        app.terminal_state.visible = true;
+        app.focused_panel = FocusedPanel::Terminal;
+        app.status_message = None;
+
+        app.terminal_state.emulator.process(b"Hello");
+        let sb = app.terminal_state.emulator.scrollback_len();
+        app.terminal_state
+            .selection
+            .set_anchor(crate::terminal::TerminalCoord { line: sb, col: 0 });
+        app.terminal_state
+            .selection
+            .set_endpoint(crate::terminal::TerminalCoord { line: sb, col: 4 });
+
+        // Some terminals emit Ctrl+Shift+C as lowercase 'c' with only CONTROL modifier.
+        handle_key(
+            &mut app,
+            make_key_with_modifiers(KeyCode::Char('c'), KeyModifiers::CONTROL),
+        );
+
+        assert!(app.status_message.is_some());
+        let (msg, _) = app.status_message.as_ref().unwrap();
+        assert!(!msg.contains("No terminal text selected"));
+    }
+
+    #[test]
+    fn ctrl_c_without_selection_in_terminal_is_not_copy() {
+        let (_dir, mut app) = setup_app();
+        app.terminal_state.visible = true;
+        app.focused_panel = FocusedPanel::Terminal;
+        app.status_message = None;
+
+        handle_key(
+            &mut app,
+            make_key_with_modifiers(KeyCode::Char('c'), KeyModifiers::CONTROL),
+        );
+
+        assert!(app.status_message.is_none());
+    }
+
+    #[test]
+    fn cmd_c_in_terminal_triggers_copy() {
+        let (_dir, mut app) = setup_app();
+        app.terminal_state.visible = true;
+        app.focused_panel = FocusedPanel::Terminal;
+
+        handle_key(
+            &mut app,
+            make_key_with_modifiers(KeyCode::Char('c'), KeyModifiers::SUPER),
+        );
+
+        assert!(app.status_message.is_some());
+        let (msg, _) = app.status_message.as_ref().unwrap();
+        assert!(msg.contains("No terminal text selected"));
+    }
+
+    #[test]
+    fn ctrl_insert_in_terminal_triggers_copy() {
+        let (_dir, mut app) = setup_app();
+        app.terminal_state.visible = true;
+        app.focused_panel = FocusedPanel::Terminal;
+
+        handle_key(
+            &mut app,
+            make_key_with_modifiers(KeyCode::Insert, KeyModifiers::CONTROL),
+        );
+
+        assert!(app.status_message.is_some());
+        let (msg, _) = app.status_message.as_ref().unwrap();
+        assert!(msg.contains("No terminal text selected"));
+    }
+
+    #[test]
+    fn terminal_right_click_copies_selection() {
+        let (_dir, mut app) = setup_app();
+        app.terminal_state.visible = true;
+        app.terminal_area = ratatui::layout::Rect::new(0, 20, 80, 10);
+        app.focused_panel = FocusedPanel::Terminal;
+
+        app.terminal_state.emulator.process(b"Hello");
+        let sb = app.terminal_state.emulator.scrollback_len();
+        app.terminal_state
+            .selection
+            .set_anchor(crate::terminal::TerminalCoord { line: sb, col: 0 });
+        app.terminal_state
+            .selection
+            .set_endpoint(crate::terminal::TerminalCoord { line: sb, col: 4 });
+        app.status_message = None;
+
+        let tx = make_event_tx();
+        let right_click = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Right),
+            column: 5,
+            row: 22,
+            modifiers: KeyModifiers::NONE,
+        };
+        handle_mouse_event(&mut app, right_click, &tx);
+
+        assert!(app.status_message.is_some());
+        let (msg, _) = app.status_message.as_ref().unwrap();
+        assert!(msg.contains("Copied"));
     }
 
     #[test]

@@ -379,6 +379,14 @@ const TERMINAL_KEYS: &[KeyEntry] = &[
         description: "Copy selected text to clipboard",
     },
     KeyEntry {
+        key: "Ctrl+Insert",
+        description: "Copy selected text to clipboard",
+    },
+    KeyEntry {
+        key: "Right click",
+        description: "Copy current terminal selection",
+    },
+    KeyEntry {
         key: "Scroll wheel",
         description: "Scroll terminal history",
     },

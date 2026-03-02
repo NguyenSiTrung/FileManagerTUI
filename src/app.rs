@@ -2422,6 +2422,16 @@ fn format_size_bytes(bytes: u64) -> String {
 /// Copy text to the system clipboard using platform-native commands.
 /// Tries (in order): wl-copy, xclip, xsel (Linux/BSD), pbcopy (macOS), clip.exe (Windows).
 /// Returns Ok(()) on success, Err(message) on failure.
+#[cfg(test)]
+fn copy_to_system_clipboard(_text: &str) -> std::result::Result<(), String> {
+    // Keep unit tests side-effect free: never mutate the developer's clipboard.
+    Ok(())
+}
+
+/// Copy text to the system clipboard using platform-native commands.
+/// Tries (in order): wl-copy, xclip, xsel (Linux/BSD), pbcopy (macOS), clip.exe (Windows).
+/// Returns Ok(()) on success, Err(message) on failure.
+#[cfg(not(test))]
 fn copy_to_system_clipboard(text: &str) -> std::result::Result<(), String> {
     use std::io::{ErrorKind, Write};
     use std::process::{Command, Stdio};
