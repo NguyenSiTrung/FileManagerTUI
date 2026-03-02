@@ -1,18 +1,41 @@
-# Track Learnings: help-settings_20260302
+# Learnings: Settings Panel in Help Overlay
 
-Patterns, gotchas, and context discovered during implementation.
+## Inherited Patterns
+- (from previous tracks — see patterns.md for full reference)
 
-## Codebase Patterns (Inherited)
+## New Patterns from This Track
 
-- Handler uses 3-level dispatch: global keys → panel-specific keys → dialog keys (from: preview-panel_20260227)
-- Two-state overlay transition (Search → SearchAction) preserves search query when going back via Esc — reusable pattern for multi-step overlays (from: search-action_20260228)
-- Clone SearchActionState before match in handler to avoid borrow conflicts — same pattern as DialogKind clone (from: search-action_20260228)
-- All config fields use `Option<T>` so partial configs from different sources compose cleanly via `.or()` merge (from: config-polish_20260228)
-- `#[serde(default)]` on both struct and fields ensures TOML parsing tolerates missing sections (from: config-polish_20260228)
-- Widget builder pattern: `WidgetName::new(state, theme).block(block)` — theme is always the last constructor parameter (from: config-polish_20260228)
-- Clone ThemeColors at render start to avoid borrow checker conflicts with `app` mutation during rendering (from: config-polish_20260228)
-- `enter_edit_mode()` requires `update_preview()` first since it reads `preview_state.current_path` — order-dependent state setup (from: search-action_20260228)
+### Tab-Aware Overlay Architecture
+When adding multiple modes/tabs to an overlay, pass the full state struct to the widget
+rather than individual fields. This allows the widget to render conditionally based on state
+without needing multiple constructors or render paths.
+- **Example**: `HelpOverlay::new(&theme, &help_state)` instead of `HelpOverlay::new(&theme, scroll_offset)`
+- **Benefit**: Future tabs or states can be added without changing the constructor signature.
 
----
+### Lazy Initialization for Expensive State
+Use `Option<State>` and initialize on first demand (e.g., first tab switch) instead of
+always constructing at startup. This avoids unnecessary work when the user never opens
+that feature.
+- **Example**: `help_state.settings_state: Option<SettingsState>` initialized only on first tab switch to Settings.
 
-<!-- Learnings from implementation will be appended below -->
+### Live Config Application Pattern
+When saving settings, apply changes to the running `AppConfig` immediately, then serialize
+to disk. This provides instant feedback without requiring a restart.
+- **Key**: Match on `(section, key)` tuples for a clean dispatch table.
+- **Side effects**: Some settings (show_hidden, sort_by, dirs_first, theme) have immediate UI
+  side effects (re-sort, re-flatten, re-resolve theme). These must be handled explicitly.
+
+### TOML Merge Strategy
+When saving settings, read the existing file, parse to a `toml::Table`, merge modified
+entries, and write back. This preserves comments and unmodified settings that might have
+been hand-edited by the user.
+
+### Entry Line Index Computation for Auto-Scroll
+For variable-height entry lists (section headers take extra lines), compute the line index
+of an entry by iterating through all entries before it, counting headers and separators.
+This is necessary for accurate auto-scrolling.
+
+### Type Bridge Pattern: SettingValueKind
+Use an intermediate enum (`SettingValueKind`) to bridge between the config's heterogeneous
+field types and a uniform UI/editing API. This allows generic toggle/cycle/edit operations
+without knowing the specific config field type.
