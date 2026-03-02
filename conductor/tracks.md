@@ -33,3 +33,6 @@
 <!-- Archived: large-dir-robust_20260301 (2026-03-01) → conductor/archive/ -->
 
 ---
+
+## [~] Track: Large File & Directory Scalability — Fix UI blocking for 1M+ file folders, >10MB file preview, and 100K+ line editor
+*Link: [./conductor/tracks/large-file-scalability_20260302/](./conductor/tracks/large-file-scalability_20260302/)*

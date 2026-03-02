@@ -181,9 +181,99 @@ pub fn fast_line_count(path: &Path) -> std::io::Result<usize> {
     Ok(count)
 }
 
+/// Read the first `n` lines from a file using streaming I/O.
+///
+/// Only reads as many bytes as needed — never loads the entire file.
+pub fn read_head_lines(path: &Path, n: usize) -> std::io::Result<Vec<String>> {
+    let file = fs::File::open(path)?;
+    let reader = BufReader::new(file);
+    Ok(reader.lines().take(n).map_while(Result::ok).collect())
+}
+
+/// Read the last `n` lines from a file by seeking to the end and scanning backward.
+///
+/// Memory usage is bounded to O(n) regardless of file size.
+pub fn read_tail_lines(path: &Path, n: usize) -> std::io::Result<Vec<String>> {
+    use std::io::Seek;
+
+    if n == 0 {
+        return Ok(Vec::new());
+    }
+
+    let mut file = fs::File::open(path)?;
+    let file_len = file.metadata()?.len();
+    if file_len == 0 {
+        return Ok(Vec::new());
+    }
+
+    // Scan backward in chunks to find n newlines
+    const CHUNK_SIZE: u64 = 65536;
+    let mut newline_positions: Vec<u64> = Vec::new();
+    // If file ends with \n, skip it — it doesn't start a new line
+    let mut offset = file_len;
+    {
+        let mut last_byte = [0u8];
+        file.seek(std::io::SeekFrom::Start(file_len - 1))?;
+        file.read_exact(&mut last_byte)?;
+        if last_byte[0] == b'\n' {
+            offset = file_len - 1;
+        }
+    }
+
+    // Find n newlines scanning backward. Each newline marks a line boundary,
+    // so n newlines delineate n tail lines.
+    loop {
+        let read_start = offset.saturating_sub(CHUNK_SIZE);
+        let read_len = (offset - read_start) as usize;
+        if read_len == 0 {
+            break;
+        }
+
+        file.seek(std::io::SeekFrom::Start(read_start))?;
+        let mut buf = vec![0u8; read_len];
+        file.read_exact(&mut buf)?;
+
+        for i in (0..read_len).rev() {
+            if buf[i] == b'\n' {
+                newline_positions.push(read_start + i as u64);
+                if newline_positions.len() >= n {
+                    break;
+                }
+            }
+        }
+
+        if newline_positions.len() >= n || read_start == 0 {
+            break;
+        }
+        offset = read_start;
+    }
+
+    // Determine the byte offset where our tail lines begin
+    let start_offset = if newline_positions.len() >= n {
+        // Start right after the n-th newline from the end
+        newline_positions[n - 1] + 1
+    } else {
+        // Fewer than n lines in file — start from beginning
+        0
+    };
+
+    // Read from start_offset to end
+    file.seek(std::io::SeekFrom::Start(start_offset))?;
+    let mut content = String::new();
+    file.read_to_string(&mut content)?;
+
+    // Strip trailing newline to avoid empty last element
+    if content.ends_with('\n') {
+        content.pop();
+    }
+
+    Ok(content.lines().map(|l| l.to_string()).collect())
+}
+
 /// Load head+tail content from a large file.
 ///
 /// Returns styled lines with head section, separator, and tail section.
+/// Uses streaming I/O — memory usage is bounded to O(head_lines + tail_lines).
 pub fn load_head_tail_content(
     path: &Path,
     ss: &SyntaxSet,
@@ -205,21 +295,6 @@ pub fn load_head_tail_content(
         }
     };
 
-    let file = match fs::File::open(path) {
-        Ok(f) => f,
-        Err(e) => {
-            return (
-                vec![Line::from(Span::styled(
-                    format!("Error reading file: {}", e),
-                    Style::default().fg(Color::Red),
-                ))],
-                1,
-            );
-        }
-    };
-    let reader = BufReader::new(file);
-    let all_lines: Vec<String> = reader.lines().map_while(Result::ok).collect();
-
     let syntax_name = detect_syntax_name(path);
     let syntax = ss
         .find_syntax_by_name(syntax_name)
@@ -229,14 +304,39 @@ pub fn load_head_tail_content(
     let line_num_width = total_lines.to_string().len();
     let mut result_lines: Vec<Line<'static>> = Vec::new();
 
-    let effective_head = head_lines.min(all_lines.len());
-    let effective_tail = tail_lines.min(all_lines.len().saturating_sub(effective_head));
-    let tail_start = all_lines.len().saturating_sub(effective_tail);
-
     match view_mode {
         ViewMode::HeadAndTail => {
+            let head = match read_head_lines(path, head_lines) {
+                Ok(lines) => lines,
+                Err(e) => {
+                    return (
+                        vec![Line::from(Span::styled(
+                            format!("Error reading file: {}", e),
+                            Style::default().fg(Color::Red),
+                        ))],
+                        1,
+                    );
+                }
+            };
+            let tail = match read_tail_lines(path, tail_lines) {
+                Ok(lines) => lines,
+                Err(e) => {
+                    return (
+                        vec![Line::from(Span::styled(
+                            format!("Error reading file: {}", e),
+                            Style::default().fg(Color::Red),
+                        ))],
+                        1,
+                    );
+                }
+            };
+
+            let effective_head = head.len();
+            // Calculate tail start line number
+            let tail_start_line = total_lines.saturating_sub(tail.len());
+
             // Head section
-            for (i, line_str) in all_lines[..effective_head].iter().enumerate() {
+            for (i, line_str) in head.iter().enumerate() {
                 result_lines.push(highlight_single_line(
                     line_str,
                     i + 1,
@@ -246,9 +346,9 @@ pub fn load_head_tail_content(
                 ));
             }
 
-            // Separator
-            if tail_start > effective_head {
-                let omitted = tail_start - effective_head;
+            // Separator (if there are omitted lines between head and tail)
+            if tail_start_line > effective_head {
+                let omitted = tail_start_line - effective_head;
                 let sep = format!("  ──── {} lines omitted ────", omitted);
                 result_lines.push(Line::from(Span::styled(
                     sep,
@@ -259,10 +359,10 @@ pub fn load_head_tail_content(
             }
 
             // Tail section
-            for (i, line_str) in all_lines[tail_start..].iter().enumerate() {
+            for (i, line_str) in tail.iter().enumerate() {
                 result_lines.push(highlight_single_line(
                     line_str,
-                    tail_start + i + 1,
+                    tail_start_line + i + 1,
                     line_num_width,
                     &mut highlighter,
                     ss,
@@ -270,7 +370,19 @@ pub fn load_head_tail_content(
             }
         }
         ViewMode::HeadOnly => {
-            for (i, line_str) in all_lines[..effective_head].iter().enumerate() {
+            let head = match read_head_lines(path, head_lines) {
+                Ok(lines) => lines,
+                Err(e) => {
+                    return (
+                        vec![Line::from(Span::styled(
+                            format!("Error reading file: {}", e),
+                            Style::default().fg(Color::Red),
+                        ))],
+                        1,
+                    );
+                }
+            };
+            for (i, line_str) in head.iter().enumerate() {
                 result_lines.push(highlight_single_line(
                     line_str,
                     i + 1,
@@ -281,10 +393,23 @@ pub fn load_head_tail_content(
             }
         }
         ViewMode::TailOnly => {
-            for (i, line_str) in all_lines[tail_start..].iter().enumerate() {
+            let tail = match read_tail_lines(path, tail_lines) {
+                Ok(lines) => lines,
+                Err(e) => {
+                    return (
+                        vec![Line::from(Span::styled(
+                            format!("Error reading file: {}", e),
+                            Style::default().fg(Color::Red),
+                        ))],
+                        1,
+                    );
+                }
+            };
+            let tail_start_line = total_lines.saturating_sub(tail.len());
+            for (i, line_str) in tail.iter().enumerate() {
                 result_lines.push(highlight_single_line(
                     line_str,
-                    tail_start + i + 1,
+                    tail_start_line + i + 1,
                     line_num_width,
                     &mut highlighter,
                     ss,
@@ -1381,5 +1506,104 @@ mod tests {
         let path = dir.path().join("zero.txt");
         File::create(&path).unwrap();
         assert_eq!(fast_line_count(&path).unwrap(), 0);
+    }
+
+    // === Streaming read_head_lines / read_tail_lines tests ===
+
+    #[test]
+    fn read_head_lines_returns_n_lines() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("big.txt");
+        let mut f = File::create(&path).unwrap();
+        for i in 0..10_000 {
+            writeln!(f, "line {}", i).unwrap();
+        }
+
+        let head = read_head_lines(&path, 50).unwrap();
+        assert_eq!(head.len(), 50);
+        assert_eq!(head[0], "line 0");
+        assert_eq!(head[49], "line 49");
+    }
+
+    #[test]
+    fn read_head_lines_small_file_returns_all() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("small.txt");
+        let mut f = File::create(&path).unwrap();
+        for i in 0..5 {
+            writeln!(f, "line {}", i).unwrap();
+        }
+
+        let head = read_head_lines(&path, 50).unwrap();
+        assert_eq!(head.len(), 5);
+        assert_eq!(head[4], "line 4");
+    }
+
+    #[test]
+    fn read_tail_lines_returns_last_m() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("big.txt");
+        let mut f = File::create(&path).unwrap();
+        for i in 0..10_000 {
+            writeln!(f, "line {}", i).unwrap();
+        }
+
+        let tail = read_tail_lines(&path, 20).unwrap();
+        assert_eq!(tail.len(), 20);
+        assert_eq!(tail[0], "line 9980");
+        assert_eq!(tail[19], "line 9999");
+    }
+
+    #[test]
+    fn read_tail_lines_small_file_returns_all() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("small.txt");
+        let mut f = File::create(&path).unwrap();
+        for i in 0..3 {
+            writeln!(f, "line {}", i).unwrap();
+        }
+
+        let tail = read_tail_lines(&path, 20).unwrap();
+        assert_eq!(tail.len(), 3);
+        assert_eq!(tail[0], "line 0");
+        assert_eq!(tail[2], "line 2");
+    }
+
+    #[test]
+    fn read_tail_lines_no_trailing_newline() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("no_nl.txt");
+        let mut f = File::create(&path).unwrap();
+        write!(f, "line 0\nline 1\nline 2").unwrap();
+
+        let tail = read_tail_lines(&path, 2).unwrap();
+        assert_eq!(tail.len(), 2);
+        assert_eq!(tail[0], "line 1");
+        assert_eq!(tail[1], "line 2");
+    }
+
+    #[test]
+    fn streaming_head_tail_integration() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("medium.txt");
+        let mut f = File::create(&path).unwrap();
+        for i in 0..1000 {
+            writeln!(f, "content line {}", i).unwrap();
+        }
+
+        let ss = SyntaxSet::load_defaults_newlines();
+        let theme = load_theme(None);
+        let (lines, total) =
+            load_head_tail_content(&path, &ss, &theme, 10, 5, ViewMode::HeadAndTail);
+        // 10 head + 1 separator + 5 tail = 16
+        assert_eq!(total, 16);
+        let all_text: String = lines
+            .iter()
+            .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
+            .collect();
+        assert!(all_text.contains("content line 0"));
+        assert!(all_text.contains("content line 9"));
+        assert!(all_text.contains("lines omitted"));
+        assert!(all_text.contains("content line 999"));
     }
 }
