@@ -594,6 +594,11 @@ fn handle_normal_mode(app: &mut App, key: KeyEvent, event_tx: &mpsc::UnboundedSe
             app.quit();
             return;
         }
+        // Bare 't' toggles terminal (alternative to Ctrl+T, avoids browser conflict)
+        KeyCode::Char('t') if key.modifiers.is_empty() => {
+            let _ = app.toggle_terminal(event_tx);
+            return;
+        }
         KeyCode::Tab => {
             app.toggle_focus();
             return;
@@ -783,6 +788,7 @@ fn handle_terminal_keys(app: &mut App, key: KeyEvent) {
         // Note: Tab is NOT intercepted here — it is forwarded to the PTY
         // for shell autocompletion (e.g. `cd <Tab>`).
         // Use Esc or Ctrl+T to leave the terminal panel.
+        // (Bare 't' is NOT intercepted here — it types into the PTY.)
         //
         // Scrollback navigation (Shift+Up/Down)
         KeyCode::Up if key.modifiers.contains(KeyModifiers::SHIFT) => {

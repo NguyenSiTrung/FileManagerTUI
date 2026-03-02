@@ -49,7 +49,7 @@ impl<'a> Widget for TerminalWidget<'a> {
 
         if self.state.exited {
             // Show exited message in center
-            let msg = "[Process exited - press Ctrl+T to restart]";
+            let msg = "[Process exited - press t or Ctrl+T to restart]";
             let y = inner.y + inner.height / 2;
             let x = inner.x + inner.width.saturating_sub(msg.len() as u16) / 2;
             let style = Style::default()

@@ -339,7 +339,7 @@ const EDITOR_KEYS: &[KeyEntry] = &[
 
 const TERMINAL_KEYS: &[KeyEntry] = &[
     KeyEntry {
-        key: "Ctrl+T",
+        key: "t / Ctrl+T",
         description: "Toggle terminal panel",
     },
     KeyEntry {
