@@ -37,7 +37,7 @@
 
 ## Phase 3: Preview Timeout
 
-- [ ] Task 1: Add `preview_timeout_ms` config option
+- [x] Task 1: Add `preview_timeout_ms` config option
   - Add field to `PreviewConfig` in `config.rs` (default: 2000ms)
   - Add accessor method `preview_timeout_ms()` on `AppConfig`
   - Add to settings panel entries in `app.rs`

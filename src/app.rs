@@ -757,9 +757,14 @@ impl App {
         let path = dir_path.to_path_buf();
         let tx = event_tx.clone();
         let cancel = self.dir_scan_cancel.clone();
+        let timeout_ms = self.config.preview_timeout_ms();
 
         tokio::spawn(async move {
-            let result = tokio::task::spawn_blocking(move || {
+            let cancel_for_timeout = cancel.clone();
+            let path_for_timeout = path.clone();
+            let tx_for_timeout = tx.clone();
+
+            let scan_future = tokio::task::spawn_blocking(move || {
                 let mut files: u64 = 0;
                 let mut dirs: u64 = 0;
                 let mut size: u64 = 0;
@@ -828,11 +833,21 @@ impl App {
                     size,
                     done: true,
                 });
-            })
-            .await;
+            });
 
-            // Ignore join errors
-            let _ = result;
+            let timeout = std::time::Duration::from_millis(timeout_ms);
+            if tokio::time::timeout(timeout, scan_future).await.is_err() {
+                // Timeout: signal the blocking task to stop
+                cancel_for_timeout.store(true, Ordering::SeqCst);
+                // Send a timeout event so the UI shows partial results
+                let _ = tx_for_timeout.send(crate::event::Event::DirSummaryUpdate {
+                    path: path_for_timeout,
+                    files: 0,
+                    dirs: 0,
+                    size: 0,
+                    done: true,
+                });
+            }
         });
     }
 
