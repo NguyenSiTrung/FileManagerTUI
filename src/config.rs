@@ -33,6 +33,10 @@ pub struct GeneralConfig {
     /// Maximum entries in a DirSnapshot (default: 500000).
     /// Limits memory usage for very large directories. Clamped to 10000..5000000.
     pub snapshot_max_entries: Option<u32>,
+    /// Maximum file size in bytes that the editor will open (default: 10MB).
+    pub max_editor_bytes: Option<u64>,
+    /// Maximum line count that the editor will open (default: 100000).
+    pub max_editor_lines: Option<u64>,
 }
 
 /// Preview panel settings.
@@ -163,6 +167,10 @@ pub const DEFAULT_SNAPSHOT_MAX_ENTRIES: u32 = 500_000;
 pub const MIN_SNAPSHOT_MAX_ENTRIES: u32 = 10_000;
 /// Maximum allowed value for snapshot_max_entries.
 pub const MAX_SNAPSHOT_MAX_ENTRIES: u32 = 5_000_000;
+/// Default max file size for editor (10 MiB).
+pub const DEFAULT_MAX_EDITOR_BYTES: u64 = 10 * 1024 * 1024;
+/// Default max line count for editor.
+pub const DEFAULT_MAX_EDITOR_LINES: usize = 100_000;
 
 // ── Config file locator ──────────────────────────────────────────────────────
 
@@ -240,6 +248,14 @@ impl AppConfig {
                     .general
                     .snapshot_max_entries
                     .or(self.general.snapshot_max_entries),
+                max_editor_bytes: other
+                    .general
+                    .max_editor_bytes
+                    .or(self.general.max_editor_bytes),
+                max_editor_lines: other
+                    .general
+                    .max_editor_lines
+                    .or(self.general.max_editor_lines),
             },
             preview: PreviewConfig {
                 max_full_preview_bytes: other
@@ -436,6 +452,20 @@ impl AppConfig {
         self.general
             .search_max_entries
             .unwrap_or(DEFAULT_SEARCH_MAX_ENTRIES) as usize
+    }
+
+    /// Max file size in bytes the editor will open.
+    pub fn max_editor_bytes(&self) -> u64 {
+        self.general
+            .max_editor_bytes
+            .unwrap_or(DEFAULT_MAX_EDITOR_BYTES)
+    }
+
+    /// Max line count the editor will open.
+    pub fn max_editor_lines(&self) -> usize {
+        self.general
+            .max_editor_lines
+            .unwrap_or(DEFAULT_MAX_EDITOR_LINES as u64) as usize
     }
 
     /// Max entries for DirSnapshot.

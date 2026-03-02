@@ -85,6 +85,8 @@ impl Cli {
                 max_entries_per_page: None,
                 search_max_entries: None,
                 snapshot_max_entries: None,
+                max_editor_bytes: None,
+                max_editor_lines: None,
             },
             preview: PreviewConfig {
                 max_full_preview_bytes: self.max_preview,

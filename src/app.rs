@@ -1037,14 +1037,25 @@ impl App {
             return false;
         }
 
-        // Warn about large files
+        // Hard block: refuse to edit files that are too large
         let file_size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
-        let max_preview = self.config.max_full_preview_bytes();
-        if file_size > max_preview {
+        let max_bytes = self.config.max_editor_bytes();
+        if file_size > max_bytes {
             self.set_status_message(format!(
-                "⚠ Large file ({:.1} KB) — editing may be slow",
-                file_size as f64 / 1024.0
+                "File too large for editing ({:.1} MB). Use an external editor.",
+                file_size as f64 / (1024.0 * 1024.0)
             ));
+            return false;
+        }
+
+        let max_lines = self.config.max_editor_lines();
+        let line_count = crate::preview_content::fast_line_count(&path).unwrap_or(0);
+        if line_count > max_lines {
+            self.set_status_message(format!(
+                "File too large for editing ({} lines). Use an external editor.",
+                line_count
+            ));
+            return false;
         }
 
         // Load file into editor state
@@ -3382,5 +3393,87 @@ mod tests {
         app.focused_panel = FocusedPanel::Terminal;
         app.focus_down();
         assert_eq!(app.focused_panel, FocusedPanel::Terminal);
+    }
+
+    // === Editor hard block tests ===
+
+    #[test]
+    fn editor_refuses_large_file_by_bytes() {
+        let dir = TempDir::new().unwrap();
+        let big_path = dir.path().join("big.txt");
+        // Create file > 10MB
+        let data = vec![b'x'; 11 * 1024 * 1024];
+        std::fs::write(&big_path, &data).unwrap();
+
+        let mut app = App::new(dir.path(), crate::config::AppConfig::default()).unwrap();
+        // Navigate to big.txt: expand root, then select the file
+        app.tree_state.expand_selected();
+        // Find and select the big file
+        for i in 0..app.tree_state.flat_items.len() {
+            if app.tree_state.flat_items[i].path == big_path {
+                app.tree_state.selected_index = i;
+                break;
+            }
+        }
+        app.focused_panel = FocusedPanel::Preview;
+        app.last_previewed_index = None;
+        app.update_preview();
+
+        let result = app.enter_edit_mode();
+        assert!(!result);
+        assert!(app.status_message.as_ref().unwrap().0.contains("too large"));
+    }
+
+    #[test]
+    fn editor_refuses_file_with_too_many_lines() {
+        let dir = TempDir::new().unwrap();
+        let big_path = dir.path().join("many_lines.txt");
+        // Create file with >100K lines (small per line to stay under 10MB)
+        {
+            use std::io::Write;
+            let mut f = std::fs::File::create(&big_path).unwrap();
+            for i in 0..100_001 {
+                writeln!(f, "{}", i).unwrap();
+            }
+        }
+
+        let mut app = App::new(dir.path(), crate::config::AppConfig::default()).unwrap();
+        app.tree_state.expand_selected();
+        for i in 0..app.tree_state.flat_items.len() {
+            if app.tree_state.flat_items[i].path == big_path {
+                app.tree_state.selected_index = i;
+                break;
+            }
+        }
+        app.focused_panel = FocusedPanel::Preview;
+        app.last_previewed_index = None;
+        app.update_preview();
+
+        let result = app.enter_edit_mode();
+        assert!(!result);
+        assert!(app.status_message.as_ref().unwrap().0.contains("too large"));
+    }
+
+    #[test]
+    fn editor_opens_small_file() {
+        let dir = TempDir::new().unwrap();
+        let small_path = dir.path().join("small.txt");
+        std::fs::write(&small_path, "hello world\n").unwrap();
+
+        let mut app = App::new(dir.path(), crate::config::AppConfig::default()).unwrap();
+        app.tree_state.expand_selected();
+        for i in 0..app.tree_state.flat_items.len() {
+            if app.tree_state.flat_items[i].path == small_path {
+                app.tree_state.selected_index = i;
+                break;
+            }
+        }
+        app.focused_panel = FocusedPanel::Preview;
+        app.last_previewed_index = None;
+        app.update_preview();
+
+        let result = app.enter_edit_mode();
+        assert!(result);
+        assert_eq!(app.mode, AppMode::Edit);
     }
 }
