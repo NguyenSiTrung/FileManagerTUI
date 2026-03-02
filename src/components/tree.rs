@@ -84,6 +84,7 @@ impl<'a> TreeWidget<'a> {
                 NodeType::Symlink => " ",
                 NodeType::File => Self::file_icon_by_ext(&item.name),
                 NodeType::LoadMore => "▼ ",
+                NodeType::Loading => "⏳ ",
             }
         } else {
             match item.node_type {
@@ -92,6 +93,7 @@ impl<'a> TreeWidget<'a> {
                 NodeType::Symlink => "[L] ",
                 NodeType::File => "[F] ",
                 NodeType::LoadMore => "[+] ",
+                NodeType::Loading => "[.] ",
             }
         }
     }
@@ -193,6 +195,9 @@ impl<'a> Widget for TreeWidget<'a> {
                     NodeType::LoadMore => Style::default()
                         .fg(self.theme.info_fg)
                         .add_modifier(Modifier::ITALIC),
+                    NodeType::Loading => Style::default()
+                        .fg(self.theme.info_fg)
+                        .add_modifier(Modifier::DIM),
                 }
             };
 

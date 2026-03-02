@@ -1328,6 +1328,44 @@ impl App {
     }
 
     /// Expand the selected directory (or no-op on files).
+    ///
+    /// If `event_tx` is provided and the directory has more entries than `page_size`,
+    /// expansion is done asynchronously — a "Loading..." placeholder is shown while
+    /// the snapshot is collected on a background thread.
+    pub fn expand_selected_async(&mut self, event_tx: &mpsc::UnboundedSender<crate::event::Event>) {
+        if self.tree_state.flat_items.is_empty() {
+            return;
+        }
+        let selected = &self.tree_state.flat_items[self.tree_state.selected_index];
+        if selected.node_type != NodeType::Directory {
+            return;
+        }
+        let path = selected.path.clone();
+        let page_size = self.tree_state.page_size;
+
+        // Quick peek: count entries via read_dir to decide sync vs async
+        let entry_count = std::fs::read_dir(&path).map(|rd| rd.count()).unwrap_or(0);
+
+        if entry_count > page_size {
+            // Async expansion: set loading state, flatten to show "Loading...", spawn scan
+            if let Some(node) = TreeState::find_node_mut_pub(&mut self.tree_state.root, &path) {
+                if node.is_loading {
+                    return; // Already loading
+                }
+                node.is_loading = true;
+                node.is_expanded = true;
+                self.tree_state.flatten();
+            }
+            self.spawn_async_snapshot(&path, event_tx);
+        } else {
+            // Sync expansion (fast path for small directories)
+            self.tree_state.expand_selected();
+        }
+        self.invalidate_search_cache();
+    }
+
+    /// Expand the selected directory synchronously (for non-async contexts like tests).
+    #[allow(dead_code)]
     pub fn expand_selected(&mut self) {
         self.tree_state.expand_selected();
         self.invalidate_search_cache();
@@ -2010,6 +2048,7 @@ impl App {
 
             TreeState::sort_children_of_pub(node, &sort_by, dirs_first);
             node.is_expanded = true;
+            node.is_loading = false;
             self.tree_state.flatten();
         }
     }

@@ -13,7 +13,7 @@ use crate::fs::tree::NodeType;
 pub fn handle_mouse_event(
     app: &mut App,
     mouse: MouseEvent,
-    _event_tx: &mpsc::UnboundedSender<Event>,
+    event_tx: &mpsc::UnboundedSender<Event>,
 ) {
     // Handle mouse in Edit mode for editor cursor positioning
     if app.mode == AppMode::Edit {
@@ -64,7 +64,7 @@ pub fn handle_mouse_event(
                                 if item.is_expanded {
                                     app.collapse_selected();
                                 } else {
-                                    app.expand_selected();
+                                    app.expand_selected_async(event_tx);
                                 }
                             }
                         }
@@ -655,7 +655,7 @@ fn handle_tree_keys(app: &mut App, key: KeyEvent, event_tx: &mpsc::UnboundedSend
                         }
                     }
                 } else {
-                    app.expand_selected();
+                    app.expand_selected_async(event_tx);
                 }
             }
         }

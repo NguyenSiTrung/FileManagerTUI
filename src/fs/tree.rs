@@ -206,6 +206,9 @@ pub enum NodeType {
     /// Virtual node for paginated directory loading.
     #[allow(dead_code)]
     LoadMore,
+    /// Virtual node shown while async directory scan is in progress.
+    #[allow(dead_code)]
+    Loading,
 }
 
 /// File metadata for display purposes.
@@ -242,6 +245,8 @@ pub struct TreeNode {
     /// Whether the directory contents may have changed since last load.
     /// Set by FS watcher for paginated dirs; cleared on re-scan.
     pub is_stale: bool,
+    /// Whether an async directory scan is in progress for this node.
+    pub is_loading: bool,
 }
 
 impl TreeNode {
@@ -283,6 +288,7 @@ impl TreeNode {
             snapshot: None,
             loaded_offset: 0,
             is_stale: false,
+            is_loading: false,
         })
     }
 
@@ -688,7 +694,24 @@ impl TreeState {
             child_count: node.total_child_count,
         });
 
-        if node.is_expanded {
+        if node.is_expanded || node.is_loading {
+            // Emit a "Loading..." virtual node while async scan is in progress
+            if node.is_loading && node.children.is_none() {
+                items.push(FlatItem {
+                    name: "Loading...".to_string(),
+                    path: node.path.clone(),
+                    node_type: NodeType::Loading,
+                    depth: node.depth + 1,
+                    is_expanded: false,
+                    is_last_sibling: true,
+                    is_hidden: false,
+                    load_more_parent: None,
+                    load_more_remaining: None,
+                    child_count: None,
+                });
+                return;
+            }
+
             if let Some(children) = &node.children {
                 let visible_children: Vec<&TreeNode> = if show_hidden {
                     children.iter().collect()
@@ -1956,5 +1979,25 @@ mod tests {
         // Now re-paginated: first 5 alphabetically (no dirs-first preference)
         assert_eq!(state.root.loaded_child_count, 5);
         assert_eq!(state.root.loaded_offset, 5);
+    }
+
+    #[test]
+    fn loading_node_produces_loading_flat_item() {
+        let dir = setup_test_dir();
+        let mut state = TreeState::new(dir.path()).unwrap();
+        // Simulate async loading: set is_loading on the root
+        state.root.is_loading = true;
+        state.root.is_expanded = false;
+        state.root.children = None;
+        state.flatten();
+        // Should have root + Loading... item
+        assert!(state.flat_items.len() >= 2);
+        let loading_items: Vec<_> = state
+            .flat_items
+            .iter()
+            .filter(|i| i.node_type == NodeType::Loading)
+            .collect();
+        assert_eq!(loading_items.len(), 1);
+        assert_eq!(loading_items[0].name, "Loading...");
     }
 }

@@ -237,6 +237,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
                     "Load more...".to_string()
                 }
             }
+            NodeType::Loading => "Loading...".to_string(),
         })
         .unwrap_or_default();
 
