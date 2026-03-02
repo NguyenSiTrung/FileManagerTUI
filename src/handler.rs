@@ -1660,6 +1660,21 @@ mod tests {
         handle_key_event(app, key, &tx);
     }
 
+    /// Synchronously load root children for an App created with deferred loading.
+    /// Tests use this because they can't await async events.
+    fn sync_load_root(app: &mut App) {
+        let page_size = app.tree_state.page_size;
+        let sort_by = app.tree_state.sort_by.clone();
+        let dirs_first = app.tree_state.dirs_first;
+        let root = &mut app.tree_state.root;
+        let _ = root.load_children_paged_with_sort(page_size, &sort_by, dirs_first);
+        root.is_loading = false;
+        root.is_expanded = true;
+        crate::fs::tree::TreeState::sort_children_of_pub(root, &sort_by, dirs_first);
+        app.tree_state.sort_all_children();
+        app.tree_state.flatten();
+    }
+
     fn setup_app() -> (TempDir, App) {
         let dir = TempDir::new().unwrap();
         fs::create_dir(dir.path().join("alpha")).unwrap();
@@ -1667,6 +1682,7 @@ mod tests {
         File::create(dir.path().join("file_a.txt")).unwrap();
         File::create(dir.path().join(".hidden")).unwrap();
         let mut app = App::new(dir.path(), crate::config::AppConfig::default()).unwrap();
+        sync_load_root(&mut app);
         // Enable watcher for tests that assert watcher_active state.
         app.watcher_active = true;
         (dir, app)

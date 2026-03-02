@@ -168,6 +168,10 @@ async fn main() -> error::Result<()> {
         }
     };
 
+    // Kick off async loading of root directory contents.
+    // The UI renders immediately with a "Loading..." placeholder.
+    app.spawn_initial_load(&event_tx);
+
     loop {
         tui.terminal_mut().draw(|frame| {
             ui::render(&mut app, frame);

@@ -229,15 +229,19 @@ fn shell_quote_single(input: &str) -> String {
 
 impl App {
     /// Create a new App rooted at the given path, using the provided config.
+    ///
+    /// Uses deferred tree loading: the root directory is shown immediately
+    /// in a "Loading..." state. Call `spawn_initial_load()` after the event
+    /// loop is set up to populate the tree asynchronously.
     pub fn new(path: &Path, config: AppConfig) -> Result<Self> {
         let page_size = config.max_entries_per_page();
-        let mut tree_state = TreeState::with_page_size(path, page_size)?;
+        let mut tree_state = TreeState::new_deferred(path, page_size)?;
         // Apply config: show_hidden
         tree_state.show_hidden = config.show_hidden();
         // Apply config: sort settings
         tree_state.sort_by = crate::fs::tree::SortBy::from_str(config.sort_by());
         tree_state.dirs_first = config.dirs_first();
-        tree_state.sort_all_children();
+        // No sort_all_children() here — there are no children loaded yet
         tree_state.flatten();
 
         let syntax_set = SyntaxSet::load_defaults_newlines();
@@ -274,6 +278,47 @@ impl App {
             active_dir_scan: None,
             dir_scan_cancel: Arc::new(AtomicBool::new(false)),
         })
+    }
+
+    /// Kick off async loading of the root directory contents.
+    ///
+    /// Must be called after `event_tx` is set. Spawns a blocking task that
+    /// collects a `DirSnapshot` of the root and sends `DirScanComplete` when
+    /// done. The UI remains responsive with a "Loading..." placeholder.
+    pub fn spawn_initial_load(
+        &mut self,
+        event_tx: &mpsc::UnboundedSender<crate::event::Event>,
+    ) {
+        let root_path = self.tree_state.root.path.clone();
+        if self.tree_state.root.node_type != NodeType::Directory {
+            return;
+        }
+        self.set_status_message(format!(
+            "📂 Loading {}...",
+            root_path.file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| root_path.to_string_lossy().to_string())
+        ));
+
+        let tx = event_tx.clone();
+        let snapshot_limit = self.config.snapshot_max_entries();
+
+        tokio::spawn(async move {
+            let result = tokio::task::spawn_blocking(move || {
+                crate::fs::tree::DirSnapshot::collect_with_limit(&root_path, snapshot_limit)
+                    .map(|snapshot| (root_path, snapshot))
+            })
+            .await;
+
+            match result {
+                Ok(Ok((path, snapshot))) => {
+                    let _ = tx.send(crate::event::Event::DirScanComplete { path, snapshot });
+                }
+                Ok(Err(_)) | Err(_) => {
+                    // Snapshot collection failed — silently ignore
+                }
+            }
+        });
     }
 
     /// Open a dialog of the given kind.
@@ -2199,7 +2244,16 @@ impl App {
             TreeState::sort_children_of_pub(node, &sort_by, dirs_first);
             node.is_expanded = true;
             node.is_loading = false;
+            node.is_stale = false;
             self.tree_state.flatten();
+
+            // Clear the "Loading..." status message
+            let count_msg = if total > page_size {
+                format!("📂 Loaded {} entries (showing first {})", total, page_size)
+            } else {
+                format!("📂 Loaded {} entries", total)
+            };
+            self.set_status_message(count_msg);
         }
     }
 
@@ -2342,6 +2396,21 @@ mod tests {
     use std::fs::{self, File};
     use tempfile::TempDir;
 
+    /// Synchronously load root children for an App created with deferred loading.
+    /// Tests use this because they can't await async events.
+    fn sync_load_root(app: &mut App) {
+        let page_size = app.tree_state.page_size;
+        let sort_by = app.tree_state.sort_by.clone();
+        let dirs_first = app.tree_state.dirs_first;
+        let root = &mut app.tree_state.root;
+        let _ = root.load_children_paged_with_sort(page_size, &sort_by, dirs_first);
+        root.is_loading = false;
+        root.is_expanded = true;
+        crate::fs::tree::TreeState::sort_children_of_pub(root, &sort_by, dirs_first);
+        app.tree_state.sort_all_children();
+        app.tree_state.flatten();
+    }
+
     fn setup_app() -> (TempDir, App) {
         let dir = TempDir::new().unwrap();
         fs::create_dir(dir.path().join("alpha")).unwrap();
@@ -2350,6 +2419,7 @@ mod tests {
         File::create(dir.path().join("file_b.rs")).unwrap();
         File::create(dir.path().join(".hidden")).unwrap();
         let mut app = App::new(dir.path(), crate::config::AppConfig::default()).unwrap();
+        sync_load_root(&mut app);
         // Enable auto-refresh for testing handle_fs_change directly.
         app.watcher_active = true;
         (dir, app)
@@ -3668,6 +3738,7 @@ mod tests {
         std::fs::write(&big_path, &data).unwrap();
 
         let mut app = App::new(dir.path(), crate::config::AppConfig::default()).unwrap();
+        sync_load_root(&mut app);
         // Navigate to big.txt: expand root, then select the file
         app.tree_state.expand_selected();
         // Find and select the big file
@@ -3700,6 +3771,7 @@ mod tests {
         }
 
         let mut app = App::new(dir.path(), crate::config::AppConfig::default()).unwrap();
+        sync_load_root(&mut app);
         app.tree_state.expand_selected();
         for i in 0..app.tree_state.flat_items.len() {
             if app.tree_state.flat_items[i].path == big_path {
@@ -3723,6 +3795,7 @@ mod tests {
         std::fs::write(&small_path, "hello world\n").unwrap();
 
         let mut app = App::new(dir.path(), crate::config::AppConfig::default()).unwrap();
+        sync_load_root(&mut app);
         app.tree_state.expand_selected();
         for i in 0..app.tree_state.flat_items.len() {
             if app.tree_state.flat_items[i].path == small_path {

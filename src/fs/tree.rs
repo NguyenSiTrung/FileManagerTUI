@@ -640,6 +640,34 @@ impl TreeState {
         Ok(state)
     }
 
+    /// Create a new TreeState with deferred loading — root is set to "loading"
+    /// state with no children. The UI renders immediately with a "Loading..."
+    /// indicator. Call `spawn_initial_load()` afterward to populate children async.
+    pub fn new_deferred(path: &Path, page_size: usize) -> Result<Self> {
+        let mut root = TreeNode::new(path, 0)?;
+        if root.node_type == NodeType::Directory {
+            // Mark as expanded + loading but do NOT load children yet
+            root.is_expanded = true;
+            root.is_loading = true;
+        }
+
+        let mut state = Self {
+            root,
+            flat_items: Vec::new(),
+            selected_index: 0,
+            scroll_offset: 0,
+            show_hidden: false,
+            multi_selected: HashSet::new(),
+            filter_query: String::new(),
+            is_filtering: false,
+            sort_by: SortBy::Name,
+            dirs_first: true,
+            page_size,
+        };
+        state.flatten();
+        Ok(state)
+    }
+
     /// Rebuild the flat items list from the tree, respecting `show_hidden`.
     ///
     /// The root node is always included regardless of hidden status.
