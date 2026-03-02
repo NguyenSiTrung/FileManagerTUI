@@ -2248,7 +2248,7 @@ impl App {
         let status = if done { "Complete" } else { "Scanning..." };
         let size_str = format_size_bytes(size);
         let summary = format!(
-            "📁 Directory Summary ({})\n\n  Files: {}\n  Directories: {}\n  Total size: {}",
+            "📁 Directory Summary — Deep Scan ({})\n\n  Files: {}\n  Directories: {}\n  Total size: {}",
             status, files, dirs, size_str
         );
 
@@ -2257,6 +2257,7 @@ impl App {
             .map(|l| ratatui::text::Line::raw(l.to_string()))
             .collect();
         self.preview_state.total_lines = self.preview_state.content_lines.len();
+        self.preview_state.is_shallow_preview = false;
     }
 
     /// Handle a shallow directory summary completion.

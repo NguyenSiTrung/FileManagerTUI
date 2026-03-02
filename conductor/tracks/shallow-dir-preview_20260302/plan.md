@@ -54,7 +54,7 @@
 
 ## Phase 4: Deep Scan on Demand
 
-- [ ] Task 1: Add `D` key handler for deep scan trigger
+- [x] Task 1: Add `D` key handler for deep scan trigger
   - In `handler.rs`, add `KeyCode::Char('D')` (or `'d'`) handler in preview-focused normal mode
   - Only trigger when preview shows a directory with shallow results
   - Call existing `spawn_async_dir_summary` (full recursive) with cancel token + timeout
