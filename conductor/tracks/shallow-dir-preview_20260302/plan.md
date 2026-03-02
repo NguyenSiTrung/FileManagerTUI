@@ -12,7 +12,7 @@
   - Replace `load_directory_summary` call with `load_directory_summary_shallow` in `update_preview` sync path
   - Ensure existing tests still pass with new summary format
 
-- [ ] Task 3: Create shallow async scan variant in `app.rs`
+- [x] Task 3: Create shallow async scan variant in `app.rs`
   - Add `spawn_async_dir_summary_shallow` that does depth-1 only scan
   - Send a single `DirSummaryUpdate` event on completion (no progressive updates needed for shallow)
   - Replace `spawn_async_dir_summary` call in `update_preview` with shallow variant

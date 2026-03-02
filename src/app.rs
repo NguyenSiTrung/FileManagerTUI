@@ -219,6 +219,8 @@ pub struct App {
     pub event_tx: Option<mpsc::UnboundedSender<crate::event::Event>>,
     /// Path of the directory currently being scanned asynchronously (dedup guard).
     pub active_dir_scan: Option<PathBuf>,
+    /// Cancellation token for async directory scans.
+    pub dir_scan_cancel: Arc<AtomicBool>,
 }
 
 fn shell_quote_single(input: &str) -> String {
@@ -270,6 +272,7 @@ impl App {
             search_action_state: None,
             event_tx: None,
             active_dir_scan: None,
+            dir_scan_cancel: Arc::new(AtomicBool::new(false)),
         })
     }
 
@@ -748,9 +751,12 @@ impl App {
         dir_path: &Path,
         event_tx: &mpsc::UnboundedSender<crate::event::Event>,
     ) {
+        // Reset cancel token
+        self.dir_scan_cancel.store(false, Ordering::SeqCst);
         self.active_dir_scan = Some(dir_path.to_path_buf());
         let path = dir_path.to_path_buf();
         let tx = event_tx.clone();
+        let cancel = self.dir_scan_cancel.clone();
 
         tokio::spawn(async move {
             let result = tokio::task::spawn_blocking(move || {
@@ -763,12 +769,22 @@ impl App {
                 let mut visited = crate::fs::tree::VisitedDirs::new();
                 visited.visit(&path);
 
-                while let Some(dir) = stack.pop() {
+                'outer: while let Some(dir) = stack.pop() {
+                    // Check cancel token before each directory
+                    if cancel.load(Ordering::Relaxed) {
+                        break;
+                    }
+
                     let entries = match std::fs::read_dir(&dir) {
                         Ok(e) => e,
                         Err(_) => continue,
                     };
                     for entry in entries {
+                        // Check cancel token periodically
+                        if cancel.load(Ordering::Relaxed) {
+                            break 'outer;
+                        }
+
                         let entry = match entry {
                             Ok(e) => e,
                             Err(_) => continue,
@@ -804,7 +820,7 @@ impl App {
                     }
                 }
 
-                // Send final update
+                // Send final update (even if cancelled, to clear scanning state)
                 let _ = tx.send(crate::event::Event::DirSummaryUpdate {
                     path,
                     files,
@@ -829,6 +845,8 @@ impl App {
         dir_path: &Path,
         event_tx: &mpsc::UnboundedSender<crate::event::Event>,
     ) {
+        // Reset cancel token for any previous scan
+        self.dir_scan_cancel.store(false, Ordering::SeqCst);
         self.active_dir_scan = Some(dir_path.to_path_buf());
         let path = dir_path.to_path_buf();
         let tx = event_tx.clone();
