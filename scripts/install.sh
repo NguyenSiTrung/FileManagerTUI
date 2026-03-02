@@ -123,12 +123,14 @@ if [[ -f "$PROJECT_DIR/Cargo.toml" ]]; then
 
         case "$choice" in
             1)
+                sudo rm -f /usr/local/bin/fm
                 sudo cp "$BINARY" /usr/local/bin/fm
                 sudo chmod +x /usr/local/bin/fm
                 success "Installed to /usr/local/bin/fm"
                 ;;
             2)
                 mkdir -p "$HOME/.cargo/bin"
+                rm -f "$HOME/.cargo/bin/fm"
                 cp "$BINARY" "$HOME/.cargo/bin/fm"
                 chmod +x "$HOME/.cargo/bin/fm"
                 success "Installed to ~/.cargo/bin/fm"
