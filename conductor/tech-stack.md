@@ -33,6 +33,6 @@
 ## Architecture
 - Single-binary monolith (no plugins, no IPC)
 - Event-driven TUI loop (crossterm poll → handler dispatch → render)
-- Lazy directory loading (on-demand tree expansion)
-- Async file operations (tokio tasks for large copy/delete)
-- Module structure: `main.rs`, `app.rs`, `event.rs`, `handler.rs`, `ui.rs`, `tui.rs`, `error.rs`, `config.rs`, `theme.rs`, `preview_content.rs`, `components/` (tree, preview, status_bar, dialog, search, help, terminal), `fs/` (tree, operations, watcher, clipboard), `terminal/` (mod, pty, emulator)
+- Lazy directory loading (on-demand tree expansion with pagination)
+- Async file operations (tokio tasks for large copy/delete, directory expansion, preview)
+- Module structure: `main.rs`, `app.rs`, `event.rs`, `handler.rs`, `ui.rs`, `tui.rs`, `error.rs`, `config.rs`, `theme.rs`, `editor.rs`, `preview_content.rs`, `components/` (tree, preview, editor, status_bar, dialog, search, search_action, help, settings, terminal), `fs/` (tree, operations, watcher, clipboard), `terminal/` (mod, pty, emulator)
