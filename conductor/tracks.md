@@ -47,3 +47,8 @@
 ---
 
 <!-- Archived: light-preview-contrast_20260302 (2026-03-02) → conductor/archive/ -->
+
+---
+
+## [ ] Track: Terminal panel mouse actions and copy
+*Link: [./conductor/tracks/terminal-mouse-copy_20260302/](./conductor/tracks/terminal-mouse-copy_20260302/)*
