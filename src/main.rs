@@ -19,7 +19,7 @@ use std::time::Duration;
 
 use clap::Parser;
 
-use crate::app::App;
+use crate::app::{App, AppMode};
 use crate::config::{AppConfig, GeneralConfig, PreviewConfig, TreeConfig, WatcherConfig};
 use crate::event::{Event, EventHandler};
 use crate::fs::watcher::FsWatcher;
@@ -222,50 +222,43 @@ async fn main() -> error::Result<()> {
                 app.handle_shallow_dir_summary(&path, lines, total);
             }
             Event::ClipboardCopyComplete(message) => {
-                app.set_status_message(message);
+                // Re-enable mouse capture if we were in CopyOverlay mode
+                if app.config.mouse_enabled() {
+                    let _ = crossterm::execute!(
+                        tui.terminal_mut().backend_mut(),
+                        crossterm::event::EnableMouseCapture
+                    );
+                }
+                if !message.is_empty() {
+                    app.set_status_message(message);
+                }
             }
             Event::ShowCopyableText(text) => {
                 // Save to temp file as backup
                 let _ = std::fs::write("/tmp/.fm_clipboard", &text);
 
-                // Suspend the TUI — exit alternate screen, disable mouse, disable raw mode.
-                let _ = tui.suspend();
-
-                // Try OSC 52 in normal screen mode (outside alternate screen).
-                // Some xterm.js deployments process OSC 52 differently when not
-                // in alternate screen. This is our best shot at auto-clipboard.
+                // Try OSC 52 for auto-clipboard (works on terminals that support it)
                 {
                     use base64::Engine;
+                    use std::io::Write;
                     let encoded =
                         base64::engine::general_purpose::STANDARD.encode(text.as_bytes());
-                    // Print OSC 52 with both BEL and ST terminators
-                    print!("\x1b]52;c;{}\x07", encoded);
-                    print!("\x1b]52;c;{}\x1b\\", encoded);
-                    // Also try via /dev/tty for SSH-like setups
-                    if let Ok(mut tty) = std::fs::OpenOptions::new()
-                        .write(true)
-                        .open("/dev/tty")
-                    {
-                        use std::io::Write;
-                        let _ = write!(tty, "\x1b]52;c;{}\x07", encoded);
-                        let _ = write!(tty, "\x1b]52;c;{}\x1b\\", encoded);
-                        let _ = tty.flush();
-                    }
+                    let backend = tui.terminal_mut().backend_mut();
+                    let _ = write!(backend, "\x1b]52;c;{}\x07", encoded);
+                    let _ = write!(backend, "\x1b]52;c;{}\x1b\\", encoded);
+                    let _ = backend.flush();
                 }
 
-                // Show the text for manual selection as fallback
-                println!();
-                println!("{}", text);
-                println!();
-                println!("\x1b[90mAuto-copied if terminal supports it. Otherwise select above → Ctrl+C\x1b[0m");
-                println!("\x1b[90mPress Enter to return to fm\x1b[0m");
+                // Disable mouse capture so the browser/xterm.js can handle
+                // native text selection + Ctrl+C for clipboard copy.
+                // The TUI stays visible with a copy overlay.
+                let _ = crossterm::execute!(
+                    tui.terminal_mut().backend_mut(),
+                    crossterm::event::DisableMouseCapture
+                );
 
-                // Wait for Enter
-                let mut buf = String::new();
-                let _ = std::io::stdin().read_line(&mut buf);
-
-                let _ = tui.resume();
-                app.set_status_message(format!("📋 Path: {}", text));
+                app.copy_overlay_text = Some(text);
+                app.mode = AppMode::CopyOverlay;
             }
             Event::WatcherInitFailed(msg) => {
                 app.watcher_active = false;

@@ -349,4 +349,55 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         let help_widget = HelpOverlay::new(&theme, &app.help_state);
         frame.render_widget(help_widget, area);
     }
+
+    // Render copy overlay — mouse capture is disabled in this mode so the
+    // browser/xterm.js handles text selection + Ctrl+C natively.
+    if app.mode == AppMode::CopyOverlay {
+        if let Some(ref text) = app.copy_overlay_text {
+            use ratatui::layout::Alignment;
+            use ratatui::text::{Line, Span};
+            use ratatui::widgets::{Clear, Paragraph, Wrap};
+
+            // Center the overlay
+            let text_width = (text.len() as u16 + 6).min(area.width.saturating_sub(4));
+            let overlay_width = text_width.max(46);
+            let overlay_height = 7u16;
+            let x = area.x + (area.width.saturating_sub(overlay_width)) / 2;
+            let y = area.y + (area.height.saturating_sub(overlay_height)) / 2;
+            let overlay_area = ratatui::layout::Rect::new(x, y, overlay_width, overlay_height);
+
+            frame.render_widget(Clear, overlay_area);
+
+            let lines = vec![
+                Line::raw(""),
+                Line::from(Span::styled(
+                    text.clone(),
+                    Style::default()
+                        .fg(ratatui::style::Color::Yellow)
+                        .add_modifier(ratatui::style::Modifier::BOLD),
+                )),
+                Line::raw(""),
+                Line::from(Span::styled(
+                    "Select above → Ctrl+C to copy",
+                    Style::default().fg(ratatui::style::Color::DarkGray),
+                )),
+                Line::from(Span::styled(
+                    "Press Enter/Esc to return",
+                    Style::default().fg(ratatui::style::Color::DarkGray),
+                )),
+            ];
+
+            let popup = Paragraph::new(lines)
+                .block(
+                    Block::default()
+                        .title(" 📋 Copy Path ")
+                        .borders(Borders::ALL)
+                        .border_style(Style::default().fg(theme.border_focused_fg)),
+                )
+                .alignment(Alignment::Center)
+                .wrap(Wrap { trim: false });
+
+            frame.render_widget(popup, overlay_area);
+        }
+    }
 }

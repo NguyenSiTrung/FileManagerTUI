@@ -147,6 +147,9 @@ pub enum AppMode {
     Filter,
     Help,
     Edit,
+    /// Clipboard copy overlay: mouse capture is disabled so the browser/xterm.js
+    /// can handle text selection + Ctrl+C natively.
+    CopyOverlay,
 }
 
 /// State for a dialog's text input.
@@ -233,6 +236,8 @@ pub struct App {
     /// When true, `update_scroll` is skipped so the viewport doesn't snap back
     /// to the selection. Cleared by any keyboard navigation or tree mouse click.
     pub tree_viewport_locked: bool,
+    /// Text shown in the copy overlay (mouse capture disabled for browser clipboard).
+    pub copy_overlay_text: Option<String>,
 }
 
 fn shell_quote_single(input: &str) -> String {
@@ -295,6 +300,7 @@ impl App {
             scrollbar_column: None,
             scrollbar_dragging: false,
             tree_viewport_locked: false,
+            copy_overlay_text: None,
         })
     }
 
