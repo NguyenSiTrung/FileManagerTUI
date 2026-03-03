@@ -1727,10 +1727,14 @@ impl App {
                     })
                     .await
                     {
-                        Ok(Ok(())) => format!("📋 Path copied: {}", path_str),
-                        Ok(Err(err)) => format!("📋 {}: {}", err, path_str),
+                        Ok(Ok(true)) => format!("📋 Path copied: {}", path_str),
+                        Ok(Ok(false)) => format!(
+                            "📋 Copied via OSC 52 (requires terminal support): {}",
+                            path_str
+                        ),
+                        Ok(Err(err)) => format!("⚠ {}: {}", err, path_str),
                         Err(err) => {
-                            format!("📋 Clipboard copy task failed ({}): {}", err, path_str)
+                            format!("⚠ Clipboard copy task failed ({}): {}", err, path_str)
                         }
                     };
 
@@ -1741,8 +1745,12 @@ impl App {
                     use crate::event::Event;
 
                     let message = match copy_to_system_clipboard(&path_str) {
-                        Ok(()) => format!("📋 Path copied: {}", path_str),
-                        Err(err) => format!("📋 {}: {}", err, path_str),
+                        Ok(true) => format!("📋 Path copied: {}", path_str),
+                        Ok(false) => format!(
+                            "📋 Copied via OSC 52 (requires terminal support): {}",
+                            path_str
+                        ),
+                        Err(err) => format!("⚠ {}: {}", err, path_str),
                     };
 
                     let _ = tx.send(Event::ClipboardCopyComplete(message));
@@ -2415,9 +2423,11 @@ impl App {
                 let line_count = text.lines().count();
                 let byte_count = text.len();
                 match copy_to_system_clipboard(&text) {
-                    Ok(()) => {
+                    Ok(native) => {
+                        let method = if native { "" } else { " via OSC 52" };
                         self.set_status_message(format!(
-                            "📋 Copied {} bytes ({} line{})",
+                            "📋 Copied{} {} bytes ({} line{})",
+                            method,
                             byte_count,
                             line_count,
                             if line_count == 1 { "" } else { "s" }
@@ -2444,9 +2454,11 @@ impl App {
                 let line_count = text.lines().count();
                 let byte_count = text.len();
                 match copy_to_system_clipboard(&text) {
-                    Ok(()) => {
+                    Ok(native) => {
+                        let method = if native { "" } else { " via OSC 52" };
                         self.set_status_message(format!(
-                            "📋 Copied {} bytes ({} line{})",
+                            "📋 Copied{} {} bytes ({} line{})",
+                            method,
                             byte_count,
                             line_count,
                             if line_count == 1 { "" } else { "s" }
@@ -2505,11 +2517,11 @@ fn format_size_bytes(bytes: u64) -> String {
 }
 /// Copy text to the system clipboard using platform-native commands.
 /// Tries (in order): wl-copy, xclip, xsel (Linux/BSD), pbcopy (macOS), clip.exe (Windows).
-/// Returns Ok(()) on success, Err(message) on failure.
+/// Returns Ok(true) for native clipboard, Ok(false) for OSC 52 fallback, Err on failure.
 #[cfg(test)]
-fn copy_to_system_clipboard(_text: &str) -> std::result::Result<(), String> {
+fn copy_to_system_clipboard(_text: &str) -> std::result::Result<bool, String> {
     // Keep unit tests side-effect free: never mutate the developer's clipboard.
-    Ok(())
+    Ok(true)
 }
 
 /// Copy text to the system clipboard via OSC 52 terminal escape sequence.
@@ -2518,36 +2530,63 @@ fn copy_to_system_clipboard(_text: &str) -> std::result::Result<(), String> {
 /// over SSH, inside containers, and in any headless/remote session as long as
 /// the terminal (iTerm2, kitty, alacritty, Windows Terminal, tmux, …) supports
 /// it.  This is tried as a **fallback** when native clipboard tools fail.
+///
+/// Writes through both stdout and /dev/tty, and tries both BEL and ST
+/// terminators for maximum compatibility with web-based terminals (xterm.js).
 #[cfg(not(test))]
 fn copy_via_osc52(text: &str) -> std::result::Result<(), String> {
     use base64::Engine;
     use std::io::Write;
 
     let encoded = base64::engine::general_purpose::STANDARD.encode(text.as_bytes());
-    // OSC 52 ; c ; <base64> ST  —  "c" = clipboard selection
-    let seq = format!("\x1b]52;c;{}\x07", encoded);
 
-    // Write directly to /dev/tty so it reaches the user's terminal even when
-    // stdout/stderr have been redirected by the TUI framework.
-    let mut tty = std::fs::OpenOptions::new()
-        .write(true)
-        .open("/dev/tty")
-        .map_err(|e| format!("OSC 52: cannot open /dev/tty ({})", e))?;
+    // Try both terminators: BEL (\x07) is traditional, ST (\x1b\\) is more correct.
+    // Some terminals (xterm.js, tmux) only accept one of the two.
+    let seq_bel = format!("\x1b]52;c;{}\x07", encoded);
+    let seq_st = format!("\x1b]52;c;{}\x1b\\", encoded);
 
-    tty.write_all(seq.as_bytes())
-        .map_err(|e| format!("OSC 52: write failed ({})", e))?;
-    tty.flush()
-        .map_err(|e| format!("OSC 52: flush failed ({})", e))?;
+    let mut any_success = false;
 
-    Ok(())
+    // Method 1: Write through stdout (same pipe as the TUI framework).
+    // This is more reliable for web-based terminals (xterm.js / Kubeflow)
+    // because the escape sequence travels the same path as all other output.
+    if let Ok(()) = (|| -> std::result::Result<(), std::io::Error> {
+        let mut stdout = std::io::stdout().lock();
+        stdout.write_all(seq_bel.as_bytes())?;
+        stdout.write_all(seq_st.as_bytes())?;
+        stdout.flush()?;
+        Ok(())
+    })() {
+        any_success = true;
+    }
+
+    // Method 2: Write directly to /dev/tty as a second attempt.
+    // This works in SSH sessions where stdout may be captured.
+    if let Ok(mut tty) = std::fs::OpenOptions::new().write(true).open("/dev/tty") {
+        if tty.write_all(seq_bel.as_bytes()).is_ok()
+            && tty.write_all(seq_st.as_bytes()).is_ok()
+            && tty.flush().is_ok()
+        {
+            any_success = true;
+        }
+    }
+
+    if any_success {
+        Ok(())
+    } else {
+        Err("OSC 52: failed to write to both stdout and /dev/tty".to_string())
+    }
 }
 
 /// Copy text to the system clipboard using platform-native commands.
 /// Tries (in order): wl-copy, xclip, xsel (Linux/BSD), pbcopy (macOS), clip.exe (Windows).
 /// Falls back to OSC 52 escape sequence for headless/remote sessions.
-/// Returns Ok(()) on success, Err(message) on failure.
+///
+/// Returns Ok(true) if native clipboard succeeded, Ok(false) if OSC 52 fallback
+/// was used (clipboard may or may not be set depending on terminal support),
+/// Err(message) on complete failure.
 #[cfg(not(test))]
-fn copy_to_system_clipboard(text: &str) -> std::result::Result<(), String> {
+fn copy_to_system_clipboard(text: &str) -> std::result::Result<bool, String> {
     use std::io::{ErrorKind, Write};
     use std::process::{Command, Stdio};
 
@@ -2614,7 +2653,7 @@ fn copy_to_system_clipboard(text: &str) -> std::result::Result<(), String> {
             drop(child.stdin.take()); // close stdin to signal EOF
 
             match child.wait_with_output() {
-                Ok(output) if output.status.success() => return Ok(()),
+                Ok(output) if output.status.success() => return Ok(true),
                 Ok(output) => {
                     let stderr =
                         String::from_utf8_lossy(&output.stderr).trim().to_string();
@@ -2640,7 +2679,7 @@ fn copy_to_system_clipboard(text: &str) -> std::result::Result<(), String> {
     }
 
     // ── 3. No display or no tool → fall back to OSC 52 ──
-    copy_via_osc52(text)
+    copy_via_osc52(text).map(|()| false)
 }
 
 #[cfg(test)]
