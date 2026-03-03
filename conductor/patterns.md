@@ -136,4 +136,9 @@ This file is the project's institutional knowledge - learnings extracted from co
 - Bulk regex refactors across function calls can accidentally touch function declarations; re-run targeted signature validation with `rg` immediately after (from: light-preview-contrast_20260302, archived 2026-03-02)
 - `spawn_async_dir_summary_shallow` needs cloned `ThemeColors` moved into `spawn_blocking` for directory preview styling consistency (from: light-preview-contrast_20260302, archived 2026-03-02)
 
-Last refreshed: 2026-03-02 (light-preview-contrast patterns elevated)
+- Viewport vs Selection scrolling: mouse wheel moves `scroll_offset` (viewport) independently from `selected_index` (selection); keyboard nav uses `update_scroll()` to keep selection visible by adjusting scroll_offset (from: tree-scroll_20260303, archived 2026-03-03)
+- Scrollbar rendering: only show when `total_items > visible_height`; reduce content width by 1 when present; proportional thumb size `(visible² / total).max(1)`; use `█` for thumb, `░` for track (from: tree-scroll_20260303, archived 2026-03-03)
+- Scrollbar mouse interaction: click-to-jump maps click row to scroll offset via `inner_y * max_scroll / visible_height`; drag-to-scroll uses `scrollbar_dragging` flag to prevent event leak to other handlers (from: tree-scroll_20260303, archived 2026-03-03)
+- Config `Option<u16>` with clamp range for scroll settings; `UInt` kind in settings panel for inline numeric editing; live-apply maps value directly to app config field (from: tree-scroll_20260303, archived 2026-03-03)
+
+Last refreshed: 2026-03-03 (tree-scroll patterns elevated)

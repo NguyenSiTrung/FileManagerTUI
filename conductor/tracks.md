@@ -50,10 +50,6 @@
 
 ---
 
-## [x] Track: Terminal panel mouse actions and copy
-*Link: [./conductor/tracks/terminal-mouse-copy_20260302/](./conductor/tracks/terminal-mouse-copy_20260302/)*
+<!-- Archived: terminal-mouse-copy_20260302 (2026-03-03) → conductor/archive/ -->
 
----
-
-## [x] Track: Tree panel scroll improvements
-*Link: [./conductor/tracks/tree-scroll_20260303/](./conductor/tracks/tree-scroll_20260303/)*
+<!-- Archived: tree-scroll_20260303 (2026-03-03) → conductor/archive/ -->
