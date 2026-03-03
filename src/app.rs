@@ -640,6 +640,107 @@ impl App {
         ));
     }
 
+    /// Copy the path of the selected item to the system clipboard.
+    pub fn copy_path_to_system_clipboard(
+        &mut self,
+        event_tx: &mpsc::UnboundedSender<crate::event::Event>,
+    ) {
+        let item = match self
+            .tree_state
+            .flat_items
+            .get(self.tree_state.selected_index)
+        {
+            Some(i) if i.node_type != NodeType::LoadMore => i,
+            _ => return,
+        };
+
+        let path_str = item.path.to_string_lossy().to_string();
+        self.set_status_message("📋 Copying path to clipboard...".to_string());
+
+        let tx = event_tx.clone();
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn(async move {
+                use crate::event::Event;
+
+                let path_for_task = path_str.clone();
+                let message = match tokio::task::spawn_blocking(move || {
+                    copy_to_system_clipboard(&path_for_task)
+                })
+                .await
+                {
+                    Ok(Ok(true)) => format!("📋 Path copied: {}", path_str),
+                    Ok(Ok(false)) => format!(
+                        "📋 Copied via OSC 52 (requires terminal support): {}",
+                        path_str
+                    ),
+                    Ok(Err(err)) => format!("⚠ {}: {}", err, path_str),
+                    Err(err) => {
+                        format!("⚠ Clipboard copy task failed ({}): {}", err, path_str)
+                    }
+                };
+
+                let _ = tx.send(Event::ClipboardCopyComplete(message));
+            });
+        } else {
+            std::thread::spawn(move || {
+                use crate::event::Event;
+
+                let message = match copy_to_system_clipboard(&path_str) {
+                    Ok(true) => format!("📋 Path copied: {}", path_str),
+                    Ok(false) => format!(
+                        "📋 Copied via OSC 52 (requires terminal support): {}",
+                        path_str
+                    ),
+                    Err(err) => format!("⚠ {}: {}", err, path_str),
+                };
+
+                let _ = tx.send(Event::ClipboardCopyComplete(message));
+            });
+        }
+    }
+
+    /// Open the selected file or directory with the system's default application.
+    pub fn open_in_system(&mut self) {
+        let item = match self
+            .tree_state
+            .flat_items
+            .get(self.tree_state.selected_index)
+        {
+            Some(i) if i.node_type != NodeType::LoadMore && i.node_type != NodeType::Loading => i,
+            _ => return,
+        };
+
+        let path = item.path.clone();
+        let path_display = path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| path.to_string_lossy().to_string());
+
+        #[cfg(target_os = "linux")]
+        let cmd = "xdg-open";
+        #[cfg(target_os = "macos")]
+        let cmd = "open";
+        #[cfg(target_os = "windows")]
+        let cmd = "start";
+        #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+        let cmd = "xdg-open";
+
+        match std::process::Command::new(cmd)
+            .arg(&path)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+        {
+            Ok(_) => {
+                self.set_status_message(format!("🔗 Opened: {}", path_display));
+            }
+            Err(e) => {
+                self.set_status_message(format!("⚠ Failed to open {}: {}", path_display, e));
+            }
+        }
+    }
+
     /// Paste clipboard contents — async version that spawns a tokio task.
     pub fn paste_clipboard_async(&mut self, event_tx: mpsc::UnboundedSender<crate::event::Event>) {
         use crate::event::{Event, OperationResult, ProgressUpdate};

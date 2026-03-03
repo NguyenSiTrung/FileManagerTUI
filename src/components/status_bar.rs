@@ -17,6 +17,7 @@ pub struct StatusBarWidget<'a> {
     is_error: bool,
     clipboard_info: Option<&'a str>,
     watcher_status: Option<&'a str>,
+    key_hints: Option<&'a str>,
 }
 
 impl<'a> StatusBarWidget<'a> {
@@ -29,6 +30,7 @@ impl<'a> StatusBarWidget<'a> {
             is_error: false,
             clipboard_info: None,
             watcher_status: None,
+            key_hints: None,
         }
     }
 
@@ -45,6 +47,11 @@ impl<'a> StatusBarWidget<'a> {
 
     pub fn watcher_status(mut self, status: &'a str) -> Self {
         self.watcher_status = Some(status);
+        self
+    }
+
+    pub fn key_hints(mut self, hints: &'a str) -> Self {
+        self.key_hints = Some(hints);
         self
     }
 }
@@ -94,7 +101,8 @@ impl<'a> Widget for StatusBarWidget<'a> {
         }
 
         // Normal bar: [path] [file_info] [key_hints]
-        let key_hints = " a:new  A:dir  r:ren  d:del ";
+        let default_hints = " y:cp x:cut p:paste Y:path o:open ";
+        let key_hints = self.key_hints.unwrap_or(default_hints);
         let hints_len = char_count(key_hints);
 
         // Reserve space for hints on the right
@@ -252,8 +260,8 @@ mod tests {
             .collect();
         assert!(content.contains("/home/user/project"));
         assert!(content.contains("4.0 KB | Dir | rwxr-xr-x"));
-        assert!(content.contains("a:new"));
-        assert!(content.contains("d:del"));
+        assert!(content.contains("y:cp"));
+        assert!(content.contains("o:open"));
     }
 
     #[test]

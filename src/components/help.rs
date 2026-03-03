@@ -129,15 +129,23 @@ const FILE_OPS_KEYS: &[KeyEntry] = &[
     },
     KeyEntry {
         key: "y",
-        description: "Copy to clipboard",
+        description: "Copy to internal clipboard",
     },
     KeyEntry {
         key: "x",
-        description: "Cut to clipboard",
+        description: "Cut to internal clipboard",
     },
     KeyEntry {
         key: "p",
-        description: "Paste from clipboard",
+        description: "Paste from internal clipboard",
+    },
+    KeyEntry {
+        key: "Y",
+        description: "Copy path to system clipboard",
+    },
+    KeyEntry {
+        key: "o",
+        description: "Open with system default app",
     },
     KeyEntry {
         key: "Ctrl+Z",
@@ -179,7 +187,7 @@ const SEARCH_ACTION_KEYS: &[KeyEntry] = &[
     },
     KeyEntry {
         key: "y",
-        description: "Copy path to status bar",
+        description: "Copy path to system clipboard",
     },
     KeyEntry {
         key: "r",

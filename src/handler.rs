@@ -955,6 +955,16 @@ fn handle_tree_keys(app: &mut App, key: KeyEvent, event_tx: &mpsc::UnboundedSend
             ));
         }
 
+        // Copy path to system clipboard
+        KeyCode::Char('Y') => {
+            app.copy_path_to_system_clipboard(event_tx);
+        }
+
+        // Open file/directory with system default application
+        KeyCode::Char('o') => {
+            app.open_in_system();
+        }
+
         _ => {}
     }
 }

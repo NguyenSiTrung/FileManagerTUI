@@ -245,6 +245,26 @@ pub fn render(app: &mut App, frame: &mut Frame) {
 
     let mut status_widget = StatusBarWidget::new(&path_str, &file_info, &theme);
 
+    // Context-aware key hints based on focused panel
+    let key_hints_str = match app.focused_panel {
+        FocusedPanel::Tree => {
+            if app.clipboard.is_empty() {
+                " y:cp x:cut Y:path o:open a:new r:ren d:del ".to_string()
+            } else {
+                " y:cp x:cut p:paste Y:path o:open r:ren d:del ".to_string()
+            }
+        }
+        FocusedPanel::Preview => {
+            if app.preview_state.is_shallow_preview {
+                " e:edit j/k:scroll D:deep ?:help ".to_string()
+            } else {
+                " e:edit j/k:scroll g/G:top/bot ?:help ".to_string()
+            }
+        }
+        FocusedPanel::Terminal => " Esc:back C-c:copy ?:help ".to_string(),
+    };
+    status_widget = status_widget.key_hints(&key_hints_str);
+
     // Show clipboard info if clipboard has content
     let clipboard_info_str;
     if !app.clipboard.is_empty() {
