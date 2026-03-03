@@ -141,4 +141,9 @@ This file is the project's institutional knowledge - learnings extracted from co
 - Scrollbar mouse interaction: click-to-jump maps click row to scroll offset via `inner_y * max_scroll / visible_height`; drag-to-scroll uses `scrollbar_dragging` flag to prevent event leak to other handlers (from: tree-scroll_20260303, archived 2026-03-03)
 - Config `Option<u16>` with clamp range for scroll settings; `UInt` kind in settings panel for inline numeric editing; live-apply maps value directly to app config field (from: tree-scroll_20260303, archived 2026-03-03)
 
-Last refreshed: 2026-03-03 (tree-scroll patterns elevated)
+- Terminal mouse selection uses bordered-panel offset mapping (`y+1`, `x+1`) to convert screen coordinates to emulator grid positions (from: terminal-mouse-copy_20260302, archived 2026-03-03)
+- OSC 52 clipboard fallback: encode text as base64, write `\x1b]52;c;<base64>\x07` to stdout for headless/web terminal clipboard access — degrades gracefully when unsupported (from: terminal-mouse-copy_20260302, archived 2026-03-03)
+- Ctrl+Shift+C matching requires `modifiers.contains(CONTROL | SHIFT)` — crossterm combines modifier flags; explicit bitflag checks prevent false positives with plain Ctrl+C (from: terminal-mouse-copy_20260302, archived 2026-03-03)
+- Preview view-mode mouse selection reuses the same coordinate-mapping and selection-rendering patterns as terminal and editor panels (from: terminal-mouse-copy_20260302, archived 2026-03-03)
+
+Last refreshed: 2026-03-03 (terminal-mouse-copy patterns elevated, product.md synced)

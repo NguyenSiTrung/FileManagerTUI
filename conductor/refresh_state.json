@@ -1,13 +1,16 @@
 {
-    "last_refresh": "2026-03-02T22:10:01+07:00",
+    "last_refresh": "2026-03-03T15:37:15+07:00",
     "changes": [
-        "product.md: Updated Feature #2 — added theme-aware syntax highlighting defaults (InspiredGitHub for light, base16-ocean.dark for dark), semantic ThemeColors for consistent contrast",
-        "product.md: Updated Feature #7 — added live syntax theme reload on scheme change in settings",
-        "patterns.md: Already up-to-date — light-preview-contrast patterns were elevated in previous archive",
-        "tracks.md: Clean — no active tracks, 18 archived tracks total",
-        "tech-stack.md: Up-to-date — no new crates or module changes",
-        "workflow.md: Up-to-date — no CI/workflow changes",
-        "Beads: 10 open backlog tasks remain (bugs + future features) — left as-is, not tied to any active track"
+        "product.md: Updated Feature #1 — added viewport scrolling, visual scrollbar, PageUp/PageDown, scroll_lines config",
+        "product.md: Updated Feature #4 — added copy path via 'y' key",
+        "product.md: Updated Feature #8 — added mouse text selection and Ctrl+Shift+C copy",
+        "product.md: Added Feature #13 (Clipboard) — OSC 52 fallback for headless/remote/web terminals",
+        "product.md: Added Feature #14 (Status Bar) — context-aware hints, copy path, preview mouse copy",
+        "tech-stack.md: Added base64 0.22 crate for OSC 52 encoding",
+        "tech-stack.md: Updated module structure — added fs/mod.rs",
+        "patterns.md: Elevated terminal-mouse-copy patterns — OSC 52 fallback, bordered-panel offset mapping, Ctrl+Shift+C bitflag matching, preview view-mode selection reuse",
+        "Beads: Closed 16 orphaned tree-scroll_20260303 tasks (epic + 15 subtasks)",
+        "tracks.md: Clean — no active tracks, 20 archived tracks total"
     ],
-    "drift_source": "light-preview-contrast_20260302 archived since last refresh"
+    "drift_source": "terminal-mouse-copy_20260302 and tree-scroll_20260303 archived since last refresh; standalone commits for OSC 52 clipboard, status bar enhancements, preview mouse copy"
 }

@@ -22,6 +22,7 @@
 | `dirs` | 5 | Platform-specific config directory resolution |
 | `portable-pty` | 0.8 | Cross-platform pseudo-terminal (PTY) creation |
 | `vte` | 0.13 | VT100/xterm escape sequence parser for terminal emulation |
+| `base64` | 0.22 | Base64 encoding for OSC 52 clipboard escape sequences |
 
 ## Build & Distribution
 - **Release profile**: `opt-level = "z"`, LTO, single codegen unit, stripped
@@ -35,4 +36,4 @@
 - Event-driven TUI loop (crossterm poll → handler dispatch → render)
 - Lazy directory loading (on-demand tree expansion with pagination)
 - Async file operations (tokio tasks for large copy/delete, directory expansion, preview)
-- Module structure: `main.rs`, `app.rs`, `event.rs`, `handler.rs`, `ui.rs`, `tui.rs`, `error.rs`, `config.rs`, `theme.rs`, `editor.rs`, `preview_content.rs`, `components/` (tree, preview, editor, status_bar, dialog, search, search_action, help, settings, terminal), `fs/` (tree, operations, watcher, clipboard), `terminal/` (mod, pty, emulator)
+- Module structure: `main.rs`, `app.rs`, `event.rs`, `handler.rs`, `ui.rs`, `tui.rs`, `error.rs`, `config.rs`, `theme.rs`, `editor.rs`, `preview_content.rs`, `components/` (tree, preview, editor, status_bar, dialog, search, search_action, help, settings, terminal), `fs/` (mod, tree, operations, watcher, clipboard), `terminal/` (mod, pty, emulator)
