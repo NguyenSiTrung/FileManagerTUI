@@ -115,7 +115,7 @@ pub fn dark_theme() -> ThemeColors {
         editor_selection_bg: Color::Rgb(68, 71, 90), // #44475a (selection blue)
 
         // Scrollbar
-        scrollbar_track_fg: Color::Rgb(60, 60, 60),    // dark gray
+        scrollbar_track_fg: Color::Rgb(60, 60, 60), // dark gray
         scrollbar_thumb_fg: Color::Rgb(137, 180, 250), // #89b4fa (blue/accent)
     }
 }
@@ -169,8 +169,8 @@ pub fn light_theme() -> ThemeColors {
         editor_selection_bg: Color::Rgb(172, 209, 233), // #acd1e9 (selection blue)
 
         // Scrollbar
-        scrollbar_track_fg: Color::Rgb(200, 200, 200),  // light gray
-        scrollbar_thumb_fg: Color::Rgb(30, 102, 245),   // #1e66f5 (blue/accent)
+        scrollbar_track_fg: Color::Rgb(200, 200, 200), // light gray
+        scrollbar_thumb_fg: Color::Rgb(30, 102, 245),  // #1e66f5 (blue/accent)
     }
 }
 
