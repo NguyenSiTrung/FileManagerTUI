@@ -73,6 +73,8 @@ pub struct TreeConfig {
     pub dirs_first: Option<bool>,
     /// Use nerd font icons (false = ASCII fallback).
     pub use_icons: Option<bool>,
+    /// Lines to scroll per mouse wheel tick (default: 3). Clamped to 1..=10.
+    pub scroll_lines: Option<u16>,
 }
 
 /// Filesystem watcher settings.
@@ -121,6 +123,8 @@ pub struct ThemeColorsConfig {
     pub border_fg: Option<String>,
     pub dialog_bg: Option<String>,
     pub dialog_border_fg: Option<String>,
+    pub scrollbar_track_fg: Option<String>,
+    pub scrollbar_thumb_fg: Option<String>,
 }
 
 /// Theme configuration section.
@@ -180,6 +184,8 @@ pub const DEFAULT_MAX_EDITOR_BYTES: u64 = 10 * 1024 * 1024;
 pub const DEFAULT_MAX_EDITOR_LINES: usize = 100_000;
 /// Default preview timeout in milliseconds.
 pub const DEFAULT_PREVIEW_TIMEOUT_MS: u64 = 2000;
+/// Default scroll lines per mouse wheel tick.
+pub const DEFAULT_SCROLL_LINES: u16 = 3;
 
 // ── Config file locator ──────────────────────────────────────────────────────
 
@@ -295,6 +301,7 @@ impl AppConfig {
                 sort_by: other.tree.sort_by.clone().or(self.tree.sort_by),
                 dirs_first: other.tree.dirs_first.or(self.tree.dirs_first),
                 use_icons: other.tree.use_icons.or(self.tree.use_icons),
+                scroll_lines: other.tree.scroll_lines.or(self.tree.scroll_lines),
             },
             watcher: WatcherConfig {
                 enabled: other.watcher.enabled.or(self.watcher.enabled),
@@ -445,6 +452,14 @@ impl AppConfig {
     /// Whether to use nerd font icons.
     pub fn use_icons(&self) -> bool {
         self.tree.use_icons.unwrap_or(true)
+    }
+
+    /// Lines to scroll per mouse wheel tick. Clamped to 1..=10.
+    pub fn scroll_lines(&self) -> usize {
+        self.tree
+            .scroll_lines
+            .unwrap_or(DEFAULT_SCROLL_LINES)
+            .clamp(1, 10) as usize
     }
 
     /// Theme scheme: "dark", "light", or "custom".

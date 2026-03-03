@@ -223,6 +223,16 @@ pub struct App {
     pub active_dir_scan: Option<PathBuf>,
     /// Cancellation token for async directory scans.
     pub dir_scan_cancel: Arc<AtomicBool>,
+    /// Visible height of the tree panel inner area (set during render).
+    pub tree_visible_height: usize,
+    /// X-coordinate of the scrollbar column (None if no scrollbar rendered).
+    pub scrollbar_column: Option<u16>,
+    /// Whether the user is dragging the scrollbar thumb.
+    pub scrollbar_dragging: bool,
+    /// Whether the viewport was explicitly scrolled (mouse wheel / scrollbar).
+    /// When true, `update_scroll` is skipped so the viewport doesn't snap back
+    /// to the selection. Cleared by any keyboard navigation or tree mouse click.
+    pub tree_viewport_locked: bool,
 }
 
 fn shell_quote_single(input: &str) -> String {
@@ -281,6 +291,10 @@ impl App {
             event_tx: None,
             active_dir_scan: None,
             dir_scan_cancel: Arc::new(AtomicBool::new(false)),
+            tree_visible_height: 0,
+            scrollbar_column: None,
+            scrollbar_dragging: false,
+            tree_viewport_locked: false,
         })
     }
 
@@ -1601,6 +1615,35 @@ impl App {
         let len = self.tree_state.flat_items.len();
         if len > 0 {
             self.tree_state.selected_index = len - 1;
+        }
+    }
+
+    /// Scroll the tree viewport up by `n` lines without moving the selection.
+    pub fn tree_scroll_up(&mut self, n: usize) {
+        self.tree_state.scroll_offset = self.tree_state.scroll_offset.saturating_sub(n);
+        self.tree_viewport_locked = true;
+    }
+
+    /// Scroll the tree viewport down by `n` lines without moving the selection.
+    pub fn tree_scroll_down(&mut self, n: usize) {
+        let total = self.tree_state.flat_items.len();
+        let max_scroll = total.saturating_sub(self.tree_visible_height);
+        self.tree_state.scroll_offset = (self.tree_state.scroll_offset + n).min(max_scroll);
+        self.tree_viewport_locked = true;
+    }
+
+    /// Move selection up by one visible page height.
+    pub fn tree_page_up(&mut self) {
+        let page = self.tree_visible_height.max(1);
+        self.tree_state.selected_index = self.tree_state.selected_index.saturating_sub(page);
+    }
+
+    /// Move selection down by one visible page height.
+    pub fn tree_page_down(&mut self) {
+        let page = self.tree_visible_height.max(1);
+        let len = self.tree_state.flat_items.len();
+        if len > 0 {
+            self.tree_state.selected_index = (self.tree_state.selected_index + page).min(len - 1);
         }
     }
 

@@ -105,6 +105,7 @@ impl Cli {
                 sort_by: None,
                 dirs_first: None,
                 use_icons: if self.no_icons { Some(false) } else { None },
+                scroll_lines: None,
             },
             watcher: WatcherConfig {
                 enabled: if self.no_watcher { Some(false) } else { None },

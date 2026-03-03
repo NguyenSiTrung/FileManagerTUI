@@ -55,5 +55,5 @@
 
 ---
 
-## [ ] Track: Tree panel scroll improvements
+## [x] Track: Tree panel scroll improvements
 *Link: [./conductor/tracks/tree-scroll_20260303/](./conductor/tracks/tree-scroll_20260303/)*

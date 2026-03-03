@@ -58,6 +58,10 @@ pub struct ThemeColors {
     pub editor_find_match_bg: Color,
     pub editor_find_bar_bg: Color,
     pub editor_selection_bg: Color,
+
+    // Scrollbar
+    pub scrollbar_track_fg: Color,
+    pub scrollbar_thumb_fg: Color,
 }
 
 // ── Built-in palettes ────────────────────────────────────────────────────────
@@ -109,6 +113,10 @@ pub fn dark_theme() -> ThemeColors {
         editor_find_match_bg: Color::Rgb(249, 226, 175), // #f9e2af (yellow)
         editor_find_bar_bg: Color::Rgb(49, 50, 68), // #313244 (surface0)
         editor_selection_bg: Color::Rgb(68, 71, 90), // #44475a (selection blue)
+
+        // Scrollbar
+        scrollbar_track_fg: Color::Rgb(60, 60, 60),    // dark gray
+        scrollbar_thumb_fg: Color::Rgb(137, 180, 250), // #89b4fa (blue/accent)
     }
 }
 
@@ -159,6 +167,10 @@ pub fn light_theme() -> ThemeColors {
         editor_find_match_bg: Color::Rgb(223, 142, 29), // #df8e1d (yellow)
         editor_find_bar_bg: Color::Rgb(230, 233, 239), // #e6e9ef
         editor_selection_bg: Color::Rgb(172, 209, 233), // #acd1e9 (selection blue)
+
+        // Scrollbar
+        scrollbar_track_fg: Color::Rgb(200, 200, 200),  // light gray
+        scrollbar_thumb_fg: Color::Rgb(30, 102, 245),   // #1e66f5 (blue/accent)
     }
 }
 
@@ -250,6 +262,12 @@ fn apply_custom_colors(theme: &mut ThemeColors, custom: &ThemeColorsConfig) {
     }
     if let Some(ref c) = custom.dialog_border_fg {
         theme.dialog_border_fg = parse_or(Some(c), theme.dialog_border_fg);
+    }
+    if let Some(ref c) = custom.scrollbar_track_fg {
+        theme.scrollbar_track_fg = parse_or(Some(c), theme.scrollbar_track_fg);
+    }
+    if let Some(ref c) = custom.scrollbar_thumb_fg {
+        theme.scrollbar_thumb_fg = parse_or(Some(c), theme.scrollbar_thumb_fg);
     }
 }
 

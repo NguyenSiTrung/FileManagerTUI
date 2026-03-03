@@ -9,8 +9,8 @@ use ratatui::{
 use crate::config::{
     AppConfig, DEFAULT_DEBOUNCE_MS, DEFAULT_HEAD_LINES, DEFAULT_MAX_EDITOR_BYTES,
     DEFAULT_MAX_EDITOR_LINES, DEFAULT_MAX_ENTRIES_PER_PAGE, DEFAULT_MAX_FULL_PREVIEW_BYTES,
-    DEFAULT_PREVIEW_TIMEOUT_MS, DEFAULT_SEARCH_MAX_ENTRIES, DEFAULT_SNAPSHOT_MAX_ENTRIES,
-    DEFAULT_TAIL_LINES,
+    DEFAULT_PREVIEW_TIMEOUT_MS, DEFAULT_SCROLL_LINES, DEFAULT_SEARCH_MAX_ENTRIES,
+    DEFAULT_SNAPSHOT_MAX_ENTRIES, DEFAULT_TAIL_LINES,
 };
 use crate::theme::ThemeColors;
 
@@ -291,6 +291,14 @@ impl SettingsState {
                 description: "Use nerd font icons (false = ASCII)",
                 current_value: SettingValueKind::Bool(config.use_icons()),
                 default_value: SettingValueKind::Bool(true),
+                modified_value: None,
+            },
+            SettingEntry {
+                section: "tree",
+                key: "scroll_lines",
+                description: "Lines to scroll per mouse wheel tick (1–10)",
+                current_value: SettingValueKind::UInt(config.scroll_lines() as u64),
+                default_value: SettingValueKind::UInt(DEFAULT_SCROLL_LINES as u64),
                 modified_value: None,
             },
             // ── Watcher ──────────────────────────────────────────────────

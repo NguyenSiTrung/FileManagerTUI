@@ -151,10 +151,21 @@ impl<'a> Widget for TreeWidget<'a> {
         let items = &self.tree_state.flat_items;
         let selected = self.tree_state.selected_index;
         let visible_height = inner_area.height as usize;
+        let total_items = items.len();
 
         if items.is_empty() || visible_height == 0 {
             return;
         }
+
+        // Determine if scrollbar is needed
+        let needs_scrollbar = total_items > visible_height && inner_area.width > 1;
+
+        // Content width: reserve 1 column for scrollbar if needed
+        let content_width = if needs_scrollbar {
+            inner_area.width.saturating_sub(1)
+        } else {
+            inner_area.width
+        };
 
         // Compute scroll offset to keep selected item visible
         let scroll = self.tree_state.scroll_offset;
@@ -219,8 +230,55 @@ impl<'a> Widget for TreeWidget<'a> {
                 Line::from(name_span)
             };
 
-            let line_area = Rect::new(inner_area.x, y, inner_area.width, 1);
+            let line_area = Rect::new(inner_area.x, y, content_width, 1);
             buf.set_line(line_area.x, line_area.y, &line, line_area.width);
+        }
+
+        // Render scrollbar if needed
+        if needs_scrollbar {
+            let scrollbar_x = inner_area.x + inner_area.width - 1;
+            let max_scroll = total_items.saturating_sub(visible_height);
+
+            // Thumb size: proportional to visible/total, minimum 1 row
+            let thumb_size = (visible_height * visible_height / total_items).max(1);
+
+            // Thumb position
+            let thumb_pos = if max_scroll > 0 {
+                scroll * (visible_height.saturating_sub(thumb_size)) / max_scroll
+            } else {
+                0
+            };
+
+            let track_style = Style::default().fg(self.theme.scrollbar_track_fg);
+            let thumb_style = Style::default().fg(self.theme.scrollbar_thumb_fg);
+
+            for row in 0..visible_height {
+                let y = inner_area.y + row as u16;
+                if row >= thumb_pos && row < thumb_pos + thumb_size {
+                    buf.set_string(scrollbar_x, y, "█", thumb_style);
+                } else {
+                    buf.set_string(scrollbar_x, y, "░", track_style);
+                }
+            }
+        }
+    }
+}
+
+impl<'a> TreeWidget<'a> {
+    /// Compute the scrollbar column x-coordinate, if scrollbar would be rendered.
+    /// Returns `Some(x)` if scrollbar is needed, `None` otherwise.
+    pub fn scrollbar_x(&self, area: Rect) -> Option<u16> {
+        let inner_area = if let Some(block) = &self.block {
+            block.inner(area)
+        } else {
+            area
+        };
+        let total = self.tree_state.flat_items.len();
+        let visible_height = inner_area.height as usize;
+        if total > visible_height && inner_area.width > 1 {
+            Some(inner_area.x + inner_area.width - 1)
+        } else {
+            None
         }
     }
 }

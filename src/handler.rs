@@ -33,11 +33,39 @@ pub fn handle_mouse_event(
         MouseEventKind::Down(MouseButton::Left) => {
             // Determine which panel was clicked
             if is_in_rect(col, row, app.tree_area) {
+                // Check if click is on the scrollbar column
+                if let Some(sb_col) = app.scrollbar_column {
+                    if col == sb_col {
+                        // Scrollbar click-to-jump: map click row to scroll offset
+                        app.focused_panel = FocusedPanel::Tree;
+                        app.terminal_state.selection.clear();
+                        app.preview_selection.clear();
+                        app.scrollbar_dragging = true;
+                        app.tree_viewport_locked = true;
+
+                        let inner_y = row.saturating_sub(app.tree_area.y + 1) as usize;
+                        let visible_height = app.tree_visible_height;
+                        let total = app.tree_state.flat_items.len();
+                        let max_scroll = total.saturating_sub(visible_height);
+
+                        if visible_height > 1 && max_scroll > 0 {
+                            let track_max = visible_height - 1;
+                            let clamped_y = inner_y.min(track_max);
+                            let new_offset = clamped_y * max_scroll / track_max;
+                            app.tree_state.scroll_offset = new_offset.min(max_scroll);
+                        }
+                        // Don't fall through to normal tree click handling
+                        return;
+                    }
+                }
+
                 // Clear any terminal selection when clicking elsewhere
                 app.terminal_state.selection.clear();
                 app.preview_selection.clear();
                 // Switch focus to tree
                 app.focused_panel = FocusedPanel::Tree;
+                // Unlock viewport so update_scroll works for clicked item
+                app.tree_viewport_locked = false;
 
                 // Map click to tree item index
                 // Inner area: subtract border (1 top, 1 left)
@@ -103,8 +131,20 @@ pub fn handle_mouse_event(
             }
         }
         MouseEventKind::Drag(MouseButton::Left) => {
-            // Update terminal selection endpoint during drag
-            if app.terminal_state.visible && app.terminal_state.selection.dragging {
+            // Scrollbar drag-to-scroll
+            if app.scrollbar_dragging {
+                let inner_y = row.saturating_sub(app.tree_area.y + 1) as usize;
+                let visible_height = app.tree_visible_height;
+                let total = app.tree_state.flat_items.len();
+                let max_scroll = total.saturating_sub(visible_height);
+
+                if visible_height > 1 && max_scroll > 0 {
+                    let track_max = visible_height - 1;
+                    let clamped_y = inner_y.min(track_max);
+                    let new_offset = clamped_y * max_scroll / track_max;
+                    app.tree_state.scroll_offset = new_offset.min(max_scroll);
+                }
+            } else if app.terminal_state.visible && app.terminal_state.selection.dragging {
                 if let Some(coord) = mouse_to_terminal_coord(app, col, row, true) {
                     app.terminal_state.selection.set_endpoint(coord);
                 }
@@ -116,7 +156,19 @@ pub fn handle_mouse_event(
         }
         MouseEventKind::Moved => {
             // Fallback for terminals that emit Moved (not Drag) during left-button drag.
-            if app.terminal_state.visible && app.terminal_state.selection.dragging {
+            if app.scrollbar_dragging {
+                let inner_y = row.saturating_sub(app.tree_area.y + 1) as usize;
+                let visible_height = app.tree_visible_height;
+                let total = app.tree_state.flat_items.len();
+                let max_scroll = total.saturating_sub(visible_height);
+
+                if visible_height > 1 && max_scroll > 0 {
+                    let track_max = visible_height - 1;
+                    let clamped_y = inner_y.min(track_max);
+                    let new_offset = clamped_y * max_scroll / track_max;
+                    app.tree_state.scroll_offset = new_offset.min(max_scroll);
+                }
+            } else if app.terminal_state.visible && app.terminal_state.selection.dragging {
                 if let Some(coord) = mouse_to_terminal_coord(app, col, row, true) {
                     app.terminal_state.selection.set_endpoint(coord);
                 }
@@ -127,6 +179,10 @@ pub fn handle_mouse_event(
             }
         }
         MouseEventKind::Up(MouseButton::Left) => {
+            // End scrollbar drag
+            if app.scrollbar_dragging {
+                app.scrollbar_dragging = false;
+            }
             if app.terminal_state.selection.dragging {
                 // Final endpoint update allows releasing outside panel bounds.
                 if let Some(coord) = mouse_to_terminal_coord(app, col, row, true) {
@@ -154,7 +210,8 @@ pub fn handle_mouse_event(
         MouseEventKind::ScrollUp => {
             if is_in_rect(col, row, app.tree_area) {
                 app.focused_panel = FocusedPanel::Tree;
-                app.select_previous();
+                let n = app.config.scroll_lines();
+                app.tree_scroll_up(n);
             } else if is_in_rect(col, row, app.preview_area) {
                 app.focused_panel = FocusedPanel::Preview;
                 app.preview_scroll_up();
@@ -173,7 +230,8 @@ pub fn handle_mouse_event(
         MouseEventKind::ScrollDown => {
             if is_in_rect(col, row, app.tree_area) {
                 app.focused_panel = FocusedPanel::Tree;
-                app.select_next();
+                let n = app.config.scroll_lines();
+                app.tree_scroll_down(n);
             } else if is_in_rect(col, row, app.preview_area) {
                 app.focused_panel = FocusedPanel::Preview;
                 app.preview_scroll_down();
@@ -858,12 +916,16 @@ fn handle_normal_mode(app: &mut App, key: KeyEvent, event_tx: &mpsc::UnboundedSe
 }
 
 fn handle_tree_keys(app: &mut App, key: KeyEvent, event_tx: &mpsc::UnboundedSender<Event>) {
+    // Any keyboard action in the tree unlocks the viewport so it follows selection
+    app.tree_viewport_locked = false;
     match key.code {
         // Navigation
         KeyCode::Char('j') | KeyCode::Down => app.select_next(),
         KeyCode::Char('k') | KeyCode::Up => app.select_previous(),
         KeyCode::Char('g') | KeyCode::Home => app.select_first(),
         KeyCode::Char('G') | KeyCode::End => app.select_last(),
+        KeyCode::PageUp => app.tree_page_up(),
+        KeyCode::PageDown => app.tree_page_down(),
 
         // Tree expand/collapse / Load more
         KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => {
@@ -1847,6 +1909,11 @@ fn apply_settings_live(app: &mut App) {
             ("tree", "use_icons") => {
                 if let SettingValueKind::Bool(b) = value {
                     app.config.tree.use_icons = Some(*b);
+                }
+            }
+            ("tree", "scroll_lines") => {
+                if let SettingValueKind::UInt(n) = value {
+                    app.config.tree.scroll_lines = Some(*n as u16);
                 }
             }
             ("watcher", "enabled") => {
@@ -3233,11 +3300,25 @@ mod tests {
         let (_dir, mut app) = setup_app();
         app.tree_area = ratatui::layout::Rect::new(0, 0, 40, 20);
         app.preview_area = ratatui::layout::Rect::new(40, 0, 60, 20);
+        // Set tree_visible_height so max_scroll calculation works
+        app.tree_visible_height = 18; // 20 - 2 border
 
+        // Mouse scroll now moves viewport (scroll_offset), not selection
         let tx = make_event_tx();
+        let initial_offset = app.tree_state.scroll_offset;
         handle_mouse_event(&mut app, make_mouse_scroll_down(10, 5), &tx);
-        assert_eq!(app.tree_state.selected_index, 1);
+        // scroll_offset should increase (viewport scrolls down)
+        // Note: may be clamped if total items < visible_height
+        let total = app.tree_state.flat_items.len();
+        if total > app.tree_visible_height {
+            assert!(app.tree_state.scroll_offset > initial_offset);
+        }
+        // selection should NOT change from mouse scroll
+        assert_eq!(app.tree_state.selected_index, 0);
+
         handle_mouse_event(&mut app, make_mouse_scroll_up(10, 5), &tx);
+        // Should scroll back to 0
+        assert_eq!(app.tree_state.scroll_offset, 0);
         assert_eq!(app.tree_state.selected_index, 0);
     }
 

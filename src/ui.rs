@@ -84,15 +84,23 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         FocusedPanel::Terminal => (unfocused_border, unfocused_border, focused_border),
     };
 
-    // Update scroll offset to keep selected item visible
+    // Update scroll offset to keep selected item visible,
+    // but only if the viewport wasn't explicitly scrolled by mouse/scrollbar.
     let visible_height = tree_area.height.saturating_sub(2) as usize; // account for border
-    app.tree_state.update_scroll(visible_height);
+    app.tree_visible_height = visible_height;
+    if !app.tree_viewport_locked {
+        app.tree_state.update_scroll(visible_height);
+    }
 
     let tree_block = Block::default()
         .title(format!(" {} ", app.tree_state.root.name))
         .borders(Borders::ALL)
         .border_style(tree_border_style);
 
+    let tree_widget =
+        TreeWidget::new(&app.tree_state, &theme, app.config.use_icons()).block(tree_block.clone());
+    // Store scrollbar column for mouse hit testing
+    app.scrollbar_column = tree_widget.scrollbar_x(tree_area);
     let tree_widget =
         TreeWidget::new(&app.tree_state, &theme, app.config.use_icons()).block(tree_block);
     frame.render_widget(tree_widget, tree_area);
