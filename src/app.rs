@@ -2512,96 +2512,135 @@ fn copy_to_system_clipboard(_text: &str) -> std::result::Result<(), String> {
     Ok(())
 }
 
+/// Copy text to the system clipboard via OSC 52 terminal escape sequence.
+///
+/// OSC 52 asks the user's terminal emulator to set its clipboard, which works
+/// over SSH, inside containers, and in any headless/remote session as long as
+/// the terminal (iTerm2, kitty, alacritty, Windows Terminal, tmux, …) supports
+/// it.  This is tried as a **fallback** when native clipboard tools fail.
+#[cfg(not(test))]
+fn copy_via_osc52(text: &str) -> std::result::Result<(), String> {
+    use base64::Engine;
+    use std::io::Write;
+
+    let encoded = base64::engine::general_purpose::STANDARD.encode(text.as_bytes());
+    // OSC 52 ; c ; <base64> ST  —  "c" = clipboard selection
+    let seq = format!("\x1b]52;c;{}\x07", encoded);
+
+    // Write directly to /dev/tty so it reaches the user's terminal even when
+    // stdout/stderr have been redirected by the TUI framework.
+    let mut tty = std::fs::OpenOptions::new()
+        .write(true)
+        .open("/dev/tty")
+        .map_err(|e| format!("OSC 52: cannot open /dev/tty ({})", e))?;
+
+    tty.write_all(seq.as_bytes())
+        .map_err(|e| format!("OSC 52: write failed ({})", e))?;
+    tty.flush()
+        .map_err(|e| format!("OSC 52: flush failed ({})", e))?;
+
+    Ok(())
+}
+
 /// Copy text to the system clipboard using platform-native commands.
 /// Tries (in order): wl-copy, xclip, xsel (Linux/BSD), pbcopy (macOS), clip.exe (Windows).
+/// Falls back to OSC 52 escape sequence for headless/remote sessions.
 /// Returns Ok(()) on success, Err(message) on failure.
 #[cfg(not(test))]
 fn copy_to_system_clipboard(text: &str) -> std::result::Result<(), String> {
     use std::io::{ErrorKind, Write};
     use std::process::{Command, Stdio};
 
-    // List of clipboard commands to try, with args
-    let commands: &[(&str, &[&str])] = &[
-        ("wl-copy", &[]),
-        ("xclip", &["-selection", "clipboard"]),
-        ("xsel", &["--clipboard", "--input"]),
-        ("pbcopy", &[]),
-        ("clip.exe", &[]),
-    ];
+    // ── 1. Check if we even have a graphical display (Linux/BSD) ──
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd"
+    ))]
+    let has_display = std::env::var_os("DISPLAY").is_some()
+        || std::env::var_os("WAYLAND_DISPLAY").is_some();
 
-    let mut found_tool = false;
-    let mut last_error: Option<String> = None;
+    #[cfg(not(any(
+        target_os = "linux",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd"
+    )))]
+    let has_display = true; // macOS / Windows always have a display context
 
-    for (cmd, args) in commands {
-        let mut child = match Command::new(cmd)
-            .args(*args)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::piped())
-            .spawn()
-        {
-            Ok(child) => {
-                found_tool = true;
-                child
-            }
-            Err(err) if err.kind() == ErrorKind::NotFound => continue,
-            Err(err) => {
-                last_error = Some(format!("{}: {}", cmd, err));
-                continue;
-            }
-        };
+    // ── 2. If we have a display, try native clipboard tools first ──
+    if has_display {
+        let commands: &[(&str, &[&str])] = &[
+            ("wl-copy", &[]),
+            ("xclip", &["-selection", "clipboard"]),
+            ("xsel", &["--clipboard", "--input"]),
+            ("pbcopy", &[]),
+            ("clip.exe", &[]),
+        ];
 
-        if let Some(stdin) = child.stdin.as_mut() {
-            if let Err(err) = stdin.write_all(text.as_bytes()) {
-                last_error = Some(format!("{}: failed to write clipboard data ({})", cmd, err));
-                let _ = child.kill();
-                let _ = child.wait();
-                continue;
-            }
-        }
+        let mut found_tool = false;
+        let mut last_error: Option<String> = None;
 
-        drop(child.stdin.take()); // close stdin to signal EOF
+        for (cmd, args) in commands {
+            let mut child = match Command::new(cmd)
+                .args(*args)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::piped())
+                .spawn()
+            {
+                Ok(child) => {
+                    found_tool = true;
+                    child
+                }
+                Err(err) if err.kind() == ErrorKind::NotFound => continue,
+                Err(err) => {
+                    last_error = Some(format!("{}: {}", cmd, err));
+                    continue;
+                }
+            };
 
-        match child.wait_with_output() {
-            Ok(output) if output.status.success() => return Ok(()),
-            Ok(output) => {
-                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-                if stderr.is_empty() {
-                    last_error = Some(format!("{} exited with status {}", cmd, output.status));
-                } else {
-                    last_error = Some(format!("{}: {}", cmd, stderr));
+            if let Some(stdin) = child.stdin.as_mut() {
+                if let Err(err) = stdin.write_all(text.as_bytes()) {
+                    last_error =
+                        Some(format!("{}: failed to write clipboard data ({})", cmd, err));
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    continue;
                 }
             }
-            Err(err) => {
-                last_error = Some(format!("{}: {}", cmd, err));
+
+            drop(child.stdin.take()); // close stdin to signal EOF
+
+            match child.wait_with_output() {
+                Ok(output) if output.status.success() => return Ok(()),
+                Ok(output) => {
+                    let stderr =
+                        String::from_utf8_lossy(&output.stderr).trim().to_string();
+                    if stderr.is_empty() {
+                        last_error =
+                            Some(format!("{} exited with status {}", cmd, output.status));
+                    } else {
+                        last_error = Some(format!("{}: {}", cmd, stderr));
+                    }
+                }
+                Err(err) => {
+                    last_error = Some(format!("{}: {}", cmd, err));
+                }
             }
+        }
+
+        if found_tool {
+            return Err(match last_error {
+                Some(err) => format!("Clipboard command failed: {}", err),
+                None => "Clipboard command failed".to_string(),
+            });
         }
     }
 
-    if found_tool {
-        #[cfg(any(
-            target_os = "linux",
-            target_os = "freebsd",
-            target_os = "openbsd",
-            target_os = "netbsd"
-        ))]
-        {
-            let has_display = std::env::var_os("DISPLAY").is_some()
-                || std::env::var_os("WAYLAND_DISPLAY").is_some();
-            if !has_display {
-                return Err(
-                    "Clipboard tool found, but no graphical clipboard is available (missing DISPLAY/WAYLAND_DISPLAY in this remote/headless session)".to_string(),
-                );
-            }
-        }
-
-        return Err(match last_error {
-            Some(err) => format!("Clipboard command failed: {}", err),
-            None => "Clipboard command failed".to_string(),
-        });
-    }
-
-    Err("No clipboard tool found (install wl-copy, xclip, or xsel)".to_string())
+    // ── 3. No display or no tool → fall back to OSC 52 ──
+    copy_via_osc52(text)
 }
 
 #[cfg(test)]
