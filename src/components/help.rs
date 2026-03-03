@@ -148,6 +148,10 @@ const FILE_OPS_KEYS: &[KeyEntry] = &[
         description: "Open with system default app",
     },
     KeyEntry {
+        key: "T",
+        description: "Open dir in terminal (cd)",
+    },
+    KeyEntry {
         key: "Ctrl+Z",
         description: "Undo last operation",
     },

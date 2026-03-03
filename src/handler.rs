@@ -1036,6 +1036,11 @@ fn handle_tree_keys(app: &mut App, key: KeyEvent, event_tx: &mpsc::UnboundedSend
             app.copy_path_to_system_clipboard(event_tx);
         }
 
+        // Open selected item's directory in the terminal panel
+        KeyCode::Char('T') => {
+            app.open_terminal_at_selected(event_tx);
+        }
+
         // Open file/directory with system default application
         KeyCode::Char('o') => {
             app.open_in_system();

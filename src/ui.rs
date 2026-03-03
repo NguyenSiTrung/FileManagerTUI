@@ -257,9 +257,9 @@ pub fn render(app: &mut App, frame: &mut Frame) {
     let key_hints_str = match app.focused_panel {
         FocusedPanel::Tree => {
             if app.clipboard.is_empty() {
-                " y:cp x:cut Y:path o:open a:new r:ren d:del ".to_string()
+                " y:cp x:cut Y:path T:term o:open a:new r:ren d:del ".to_string()
             } else {
-                " y:cp x:cut p:paste Y:path o:open r:ren d:del ".to_string()
+                " y:cp x:cut p:paste Y:path T:term o:open r:ren d:del ".to_string()
             }
         }
         FocusedPanel::Preview => {

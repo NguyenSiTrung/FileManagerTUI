@@ -2011,6 +2011,61 @@ impl App {
         }
     }
 
+    /// Tree action: open selected item's directory in the embedded terminal.
+    ///
+    /// If the selected item is a directory, cd into it directly.
+    /// If the selected item is a file, cd into its parent directory.
+    pub fn open_terminal_at_selected(
+        &mut self,
+        event_tx: &mpsc::UnboundedSender<crate::event::Event>,
+    ) {
+        let selected = match self.tree_state.flat_items.get(self.tree_state.selected_index) {
+            Some(item) => item,
+            None => return,
+        };
+
+        // Skip virtual nodes (LoadMore, Loading)
+        if matches!(
+            selected.node_type,
+            NodeType::LoadMore | NodeType::Loading
+        ) {
+            return;
+        }
+
+        let target_dir = if selected.node_type == NodeType::Directory {
+            selected.path.clone()
+        } else {
+            selected
+                .path
+                .parent()
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|| selected.path.clone())
+        };
+
+        // Ensure terminal is visible (spawns PTY if needed)
+        if !self.terminal_state.visible && !self.toggle_terminal(event_tx) {
+            self.set_status_message("Cannot open terminal".to_string());
+            return;
+        }
+
+        // Send a safely quoted cd command to PTY.
+        if let Some(ref pty) = self.terminal_state.pty {
+            let quoted = shell_quote_single(target_dir.to_string_lossy().as_ref());
+            let cd_cmd = format!("cd -- {}\n", quoted);
+            if pty.write(cd_cmd.as_bytes()).is_ok() {
+                self.focused_panel = FocusedPanel::Terminal;
+                self.set_status_message(format!(
+                    "Terminal: cd {}",
+                    target_dir.to_string_lossy()
+                ));
+            } else {
+                self.set_status_message("Failed to send command to terminal".to_string());
+            }
+        } else {
+            self.set_status_message("Terminal is not available".to_string());
+        }
+    }
+
     /// Update search results by scoring cached paths against the query.
     fn update_search_results(&mut self) {
         let query = &self.search_state.query;
