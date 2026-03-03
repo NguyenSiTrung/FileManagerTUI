@@ -225,29 +225,40 @@ async fn main() -> error::Result<()> {
                 app.set_status_message(message);
             }
             Event::ShowCopyableText(text) => {
-                // Try OSC 52 through ratatui's backend (works on terminals that support it)
-                {
-                    use base64::Engine;
-                    use std::io::Write;
-                    let encoded =
-                        base64::engine::general_purpose::STANDARD.encode(text.as_bytes());
-                    let backend = tui.terminal_mut().backend_mut();
-                    let _ = write!(backend, "\x1b]52;c;{}\x07", encoded);
-                    let _ = write!(backend, "\x1b]52;c;{}\x1b\\", encoded);
-                    let _ = backend.flush();
-                }
-
                 // Save to temp file as backup
                 let _ = std::fs::write("/tmp/.fm_clipboard", &text);
 
-                // Suspend the TUI so the browser can handle native text selection.
-                // This is the only reliable method for web terminals (xterm.js in
-                // Kubeflow/JupyterHub) where OSC 52 is not supported.
+                // Suspend the TUI — exit alternate screen, disable mouse, disable raw mode.
                 let _ = tui.suspend();
+
+                // Try OSC 52 in normal screen mode (outside alternate screen).
+                // Some xterm.js deployments process OSC 52 differently when not
+                // in alternate screen. This is our best shot at auto-clipboard.
+                {
+                    use base64::Engine;
+                    let encoded =
+                        base64::engine::general_purpose::STANDARD.encode(text.as_bytes());
+                    // Print OSC 52 with both BEL and ST terminators
+                    print!("\x1b]52;c;{}\x07", encoded);
+                    print!("\x1b]52;c;{}\x1b\\", encoded);
+                    // Also try via /dev/tty for SSH-like setups
+                    if let Ok(mut tty) = std::fs::OpenOptions::new()
+                        .write(true)
+                        .open("/dev/tty")
+                    {
+                        use std::io::Write;
+                        let _ = write!(tty, "\x1b]52;c;{}\x07", encoded);
+                        let _ = write!(tty, "\x1b]52;c;{}\x1b\\", encoded);
+                        let _ = tty.flush();
+                    }
+                }
+
+                // Show the text for manual selection as fallback
                 println!();
                 println!("{}", text);
                 println!();
-                println!("\x1b[90mSelect the path above → Ctrl+C → then press Enter\x1b[0m");
+                println!("\x1b[90mAuto-copied if terminal supports it. Otherwise select above → Ctrl+C\x1b[0m");
+                println!("\x1b[90mPress Enter to return to fm\x1b[0m");
 
                 // Wait for Enter
                 let mut buf = String::new();
