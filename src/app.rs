@@ -2799,9 +2799,6 @@ fn copy_to_system_clipboard(text: &str) -> std::result::Result<bool, String> {
             ("clip.exe", &[]),
         ];
 
-        let mut found_tool = false;
-        let mut last_error: Option<String> = None;
-
         for (cmd, args) in commands {
             let mut child = match Command::new(cmd)
                 .args(*args)
@@ -2810,20 +2807,13 @@ fn copy_to_system_clipboard(text: &str) -> std::result::Result<bool, String> {
                 .stderr(Stdio::piped())
                 .spawn()
             {
-                Ok(child) => {
-                    found_tool = true;
-                    child
-                }
+                Ok(child) => child,
                 Err(err) if err.kind() == ErrorKind::NotFound => continue,
-                Err(err) => {
-                    last_error = Some(format!("{}: {}", cmd, err));
-                    continue;
-                }
+                Err(_) => continue,
             };
 
             if let Some(stdin) = child.stdin.as_mut() {
-                if let Err(err) = stdin.write_all(text.as_bytes()) {
-                    last_error = Some(format!("{}: failed to write clipboard data ({})", cmd, err));
+                if stdin.write_all(text.as_bytes()).is_err() {
                     let _ = child.kill();
                     let _ = child.wait();
                     continue;
@@ -2834,29 +2824,13 @@ fn copy_to_system_clipboard(text: &str) -> std::result::Result<bool, String> {
 
             match child.wait_with_output() {
                 Ok(output) if output.status.success() => return Ok(true),
-                Ok(output) => {
-                    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-                    if stderr.is_empty() {
-                        last_error = Some(format!("{} exited with status {}", cmd, output.status));
-                    } else {
-                        last_error = Some(format!("{}: {}", cmd, stderr));
-                    }
-                }
-                Err(err) => {
-                    last_error = Some(format!("{}: {}", cmd, err));
-                }
+                _ => continue, // tool failed → try next or fall through to OSC 52
             }
         }
-
-        if found_tool {
-            return Err(match last_error {
-                Some(err) => format!("Clipboard command failed: {}", err),
-                None => "Clipboard command failed".to_string(),
-            });
-        }
+        // All native tools failed or none found → fall through to OSC 52
     }
 
-    // ── 3. No display or no tool → fall back to OSC 52 ──
+    // ── 3. No display or no tool or all tools failed → fall back to OSC 52 ──
     copy_via_osc52(text).map(|()| false)
 }
 
