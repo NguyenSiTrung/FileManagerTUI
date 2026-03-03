@@ -44,6 +44,29 @@ impl Tui {
         Ok(())
     }
 
+    /// Temporarily leave the alternate screen and disable raw mode + mouse.
+    /// This lets the browser handle native text selection (for clipboard copy).
+    pub fn suspend(&mut self) -> Result<()> {
+        if self.mouse_enabled {
+            execute!(self.terminal.backend_mut(), DisableMouseCapture)?;
+        }
+        execute!(self.terminal.backend_mut(), LeaveAlternateScreen)?;
+        terminal::disable_raw_mode()?;
+        Ok(())
+    }
+
+    /// Re-enter the alternate screen and restore raw mode + mouse.
+    /// Call after `suspend()` to return to the TUI.
+    pub fn resume(&mut self) -> Result<()> {
+        terminal::enable_raw_mode()?;
+        execute!(self.terminal.backend_mut(), EnterAlternateScreen)?;
+        if self.mouse_enabled {
+            execute!(self.terminal.backend_mut(), EnableMouseCapture)?;
+        }
+        self.terminal.clear()?;
+        Ok(())
+    }
+
     /// Get a mutable reference to the underlying terminal for drawing.
     pub fn terminal_mut(&mut self) -> &mut Terminal<CrosstermBackend<Stdout>> {
         &mut self.terminal

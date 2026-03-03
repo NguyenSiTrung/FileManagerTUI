@@ -224,6 +224,23 @@ async fn main() -> error::Result<()> {
             Event::ClipboardCopyComplete(message) => {
                 app.set_status_message(message);
             }
+            Event::ShowCopyableText(text) => {
+                // Temporarily leave the TUI so the browser can handle native text selection.
+                let _ = tui.suspend();
+                println!("\n\x1b[1;36m── Copy the text below ─────────────────────────\x1b[0m");
+                println!("\x1b[1;33m{}\x1b[0m", text);
+                println!("\x1b[1;36m────────────────────────────────────────────────\x1b[0m");
+                println!("\x1b[90mSelect the path above with mouse, then Ctrl+C to copy.\x1b[0m");
+                println!("\x1b[90mPress Enter to return to fm...\x1b[0m");
+
+                // Block until the user presses Enter (stdin is in cooked mode now).
+                let mut buf = String::new();
+                let _ = std::io::stdin().read_line(&mut buf);
+
+                // Return to the TUI.
+                let _ = tui.resume();
+                app.set_status_message("📋 Returned to fm".to_string());
+            }
             Event::WatcherInitFailed(msg) => {
                 app.watcher_active = false;
                 app.set_status_message(format!("⚠ Watcher unavailable: {}", msg));

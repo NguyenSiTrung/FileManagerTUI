@@ -83,6 +83,9 @@ pub enum Event {
     },
     /// Async system clipboard copy completed.
     ClipboardCopyComplete(String),
+    /// Native clipboard failed — show text for manual browser copy.
+    /// The main loop will temporarily exit the TUI so the user can select + Ctrl+C.
+    ShowCopyableText(String),
     /// Filesystem watcher initialization failed.
     WatcherInitFailed(String),
 }

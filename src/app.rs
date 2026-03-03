@@ -677,38 +677,36 @@ impl App {
                 use crate::event::Event;
 
                 let path_for_task = path_str.clone();
-                let message = match tokio::task::spawn_blocking(move || {
+                match tokio::task::spawn_blocking(move || {
                     copy_to_system_clipboard(&path_for_task)
                 })
                 .await
                 {
-                    Ok(Ok(true)) => format!("📋 Path copied: {}", path_str),
-                    Ok(Ok(false)) => format!(
-                        "📋 Copied to {} — run: cat {} | Shift+select to copy",
-                        CLIPBOARD_FALLBACK_FILE, CLIPBOARD_FALLBACK_FILE
-                    ),
-                    Ok(Err(err)) => format!("⚠ {}: {}", err, path_str),
-                    Err(err) => {
-                        format!("⚠ Clipboard copy task failed ({}): {}", err, path_str)
+                    Ok(Ok(true)) => {
+                        let _ = tx.send(Event::ClipboardCopyComplete(
+                            format!("📋 Path copied: {}", path_str),
+                        ));
+                    }
+                    Ok(Ok(false)) | Ok(Err(_)) | Err(_) => {
+                        // Native clipboard failed — show the path for manual browser copy
+                        let _ = tx.send(Event::ShowCopyableText(path_str));
                     }
                 };
-
-                let _ = tx.send(Event::ClipboardCopyComplete(message));
             });
         } else {
             std::thread::spawn(move || {
                 use crate::event::Event;
 
-                let message = match copy_to_system_clipboard(&path_str) {
-                    Ok(true) => format!("📋 Path copied: {}", path_str),
-                    Ok(false) => format!(
-                        "📋 Copied to {} — run: cat {} | Shift+select to copy",
-                        CLIPBOARD_FALLBACK_FILE, CLIPBOARD_FALLBACK_FILE
-                    ),
-                    Err(err) => format!("⚠ {}: {}", err, path_str),
+                match copy_to_system_clipboard(&path_str) {
+                    Ok(true) => {
+                        let _ = tx.send(Event::ClipboardCopyComplete(
+                            format!("📋 Path copied: {}", path_str),
+                        ));
+                    }
+                    Ok(false) | Err(_) => {
+                        let _ = tx.send(Event::ShowCopyableText(path_str));
+                    }
                 };
-
-                let _ = tx.send(Event::ClipboardCopyComplete(message));
             });
         }
     }
@@ -1866,38 +1864,35 @@ impl App {
                     use crate::event::Event;
 
                     let path_for_task = path_str.clone();
-                    let message = match tokio::task::spawn_blocking(move || {
+                    match tokio::task::spawn_blocking(move || {
                         copy_to_system_clipboard(&path_for_task)
                     })
                     .await
                     {
-                        Ok(Ok(true)) => format!("📋 Path copied: {}", path_str),
-                        Ok(Ok(false)) => format!(
-                            "📋 Copied to {} — run: cat {} | Shift+select to copy",
-                            CLIPBOARD_FALLBACK_FILE, CLIPBOARD_FALLBACK_FILE
-                        ),
-                        Ok(Err(err)) => format!("⚠ {}: {}", err, path_str),
-                        Err(err) => {
-                            format!("⚠ Clipboard copy task failed ({}): {}", err, path_str)
+                        Ok(Ok(true)) => {
+                            let _ = tx.send(Event::ClipboardCopyComplete(
+                                format!("📋 Path copied: {}", path_str),
+                            ));
+                        }
+                        Ok(Ok(false)) | Ok(Err(_)) | Err(_) => {
+                            let _ = tx.send(Event::ShowCopyableText(path_str));
                         }
                     };
-
-                    let _ = tx.send(Event::ClipboardCopyComplete(message));
                 });
             } else {
                 std::thread::spawn(move || {
                     use crate::event::Event;
 
-                    let message = match copy_to_system_clipboard(&path_str) {
-                        Ok(true) => format!("📋 Path copied: {}", path_str),
-                        Ok(false) => format!(
-                            "📋 Copied to {} — run: cat {} | Shift+select to copy",
-                            CLIPBOARD_FALLBACK_FILE, CLIPBOARD_FALLBACK_FILE
-                        ),
-                        Err(err) => format!("⚠ {}: {}", err, path_str),
+                    match copy_to_system_clipboard(&path_str) {
+                        Ok(true) => {
+                            let _ = tx.send(Event::ClipboardCopyComplete(
+                                format!("📋 Path copied: {}", path_str),
+                            ));
+                        }
+                        Ok(false) | Err(_) => {
+                            let _ = tx.send(Event::ShowCopyableText(path_str));
+                        }
                     };
-
-                    let _ = tx.send(Event::ClipboardCopyComplete(message));
                 });
             }
         }
@@ -2567,25 +2562,21 @@ impl App {
                 let line_count = text.lines().count();
                 let byte_count = text.len();
                 match copy_to_system_clipboard(&text) {
-                    Ok(native) => {
-                        let message = if native {
-                            format!(
-                                "📋 Copied {} bytes ({} line{})",
-                                byte_count,
-                                line_count,
-                                if line_count == 1 { "" } else { "s" }
-                            )
-                        } else {
-                            format!(
-                                "📋 Copied to {} — run: cat {}",
-                                CLIPBOARD_FALLBACK_FILE, CLIPBOARD_FALLBACK_FILE
-                            )
-                        };
-                        self.set_status_message(message);
+                    Ok(true) => {
+                        self.set_status_message(format!(
+                            "📋 Copied {} bytes ({} line{})",
+                            byte_count,
+                            line_count,
+                            if line_count == 1 { "" } else { "s" }
+                        ));
                         self.preview_selection.clear();
                     }
-                    Err(err) => {
-                        self.set_status_message(format!("⚠ Clipboard error: {}", err));
+                    Ok(false) | Err(_) => {
+                        self.set_status_message(format!(
+                            "📋 Saved to {} — cat to copy",
+                            CLIPBOARD_FALLBACK_FILE
+                        ));
+                        self.preview_selection.clear();
                     }
                 }
             }
@@ -2604,26 +2595,21 @@ impl App {
                 let line_count = text.lines().count();
                 let byte_count = text.len();
                 match copy_to_system_clipboard(&text) {
-                    Ok(native) => {
-                        let message = if native {
-                            format!(
-                                "📋 Copied {} bytes ({} line{})",
-                                byte_count,
-                                line_count,
-                                if line_count == 1 { "" } else { "s" }
-                            )
-                        } else {
-                            format!(
-                                "📋 Copied to {} — run: cat {}",
-                                CLIPBOARD_FALLBACK_FILE, CLIPBOARD_FALLBACK_FILE
-                            )
-                        };
-                        self.set_status_message(message);
-                        // Clear selection after successful copy
+                    Ok(true) => {
+                        self.set_status_message(format!(
+                            "📋 Copied {} bytes ({} line{})",
+                            byte_count,
+                            line_count,
+                            if line_count == 1 { "" } else { "s" }
+                        ));
                         self.terminal_state.selection.clear();
                     }
-                    Err(err) => {
-                        self.set_status_message(format!("⚠ Clipboard error: {}", err));
+                    Ok(false) | Err(_) => {
+                        self.set_status_message(format!(
+                            "📋 Saved to {} — cat to copy",
+                            CLIPBOARD_FALLBACK_FILE
+                        ));
+                        self.terminal_state.selection.clear();
                     }
                 }
             }
