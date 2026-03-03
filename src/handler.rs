@@ -124,10 +124,10 @@ pub fn handle_mouse_event(
         MouseEventKind::Down(MouseButton::Right) => {
             if app.terminal_state.visible && is_in_rect(col, row, app.terminal_area) {
                 app.focused_panel = FocusedPanel::Terminal;
-                app.copy_terminal_selection();
+                app.copy_terminal_selection(event_tx);
             } else if is_in_rect(col, row, app.preview_area) {
                 app.focused_panel = FocusedPanel::Preview;
-                app.copy_preview_selection();
+                app.copy_preview_selection(event_tx);
             }
         }
         MouseEventKind::Drag(MouseButton::Left) => {
@@ -829,7 +829,7 @@ fn handle_normal_mode(app: &mut App, key: KeyEvent, event_tx: &mpsc::UnboundedSe
 
     // If terminal is focused, forward all other keys to the PTY
     if app.focused_panel == FocusedPanel::Terminal {
-        handle_terminal_keys(app, key);
+        handle_terminal_keys(app, key, event_tx);
         return;
     }
 
@@ -842,7 +842,7 @@ fn handle_normal_mode(app: &mut App, key: KeyEvent, event_tx: &mpsc::UnboundedSe
                 && (key.modifiers.contains(KeyModifiers::CONTROL)
                     || key.modifiers.contains(KeyModifiers::SUPER)) =>
         {
-            app.copy_preview_selection();
+            app.copy_preview_selection(event_tx);
             return;
         }
         KeyCode::Char('c')
@@ -852,14 +852,14 @@ fn handle_normal_mode(app: &mut App, key: KeyEvent, event_tx: &mpsc::UnboundedSe
                         || app.preview_selection.is_active()))
                     || key.modifiers.contains(KeyModifiers::SUPER)) =>
         {
-            app.copy_preview_selection();
+            app.copy_preview_selection(event_tx);
             return;
         }
         KeyCode::Insert
             if app.focused_panel == FocusedPanel::Preview
                 && key.modifiers.contains(KeyModifiers::CONTROL) =>
         {
-            app.copy_preview_selection();
+            app.copy_preview_selection(event_tx);
             return;
         }
         KeyCode::Char('q') => {
@@ -1089,7 +1089,7 @@ fn handle_preview_keys(app: &mut App, key: KeyEvent, event_tx: &mpsc::UnboundedS
 
 /// Handle keys when terminal panel is focused.
 /// All non-reserved keys are forwarded to the PTY as raw bytes.
-fn handle_terminal_keys(app: &mut App, key: KeyEvent) {
+fn handle_terminal_keys(app: &mut App, key: KeyEvent, event_tx: &mpsc::UnboundedSender<Event>) {
     match key.code {
         // Esc: if selection active, clear it first; otherwise return focus to tree
         KeyCode::Esc => {
@@ -1107,7 +1107,7 @@ fn handle_terminal_keys(app: &mut App, key: KeyEvent) {
             if key.modifiers.contains(KeyModifiers::CONTROL)
                 || key.modifiers.contains(KeyModifiers::SUPER) =>
         {
-            app.copy_terminal_selection();
+            app.copy_terminal_selection(event_tx);
             return;
         }
         KeyCode::Char('c')
@@ -1116,12 +1116,12 @@ fn handle_terminal_keys(app: &mut App, key: KeyEvent) {
                     || app.terminal_state.selection.is_active()))
                 || key.modifiers.contains(KeyModifiers::SUPER) =>
         {
-            app.copy_terminal_selection();
+            app.copy_terminal_selection(event_tx);
             return;
         }
         // Legacy terminal copy shortcut.
         KeyCode::Insert if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            app.copy_terminal_selection();
+            app.copy_terminal_selection(event_tx);
             return;
         }
         // Note: Tab is NOT intercepted here — it is forwarded to the PTY

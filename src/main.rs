@@ -225,21 +225,24 @@ async fn main() -> error::Result<()> {
                 app.set_status_message(message);
             }
             Event::ShowCopyableText(text) => {
-                // Temporarily leave the TUI so the browser can handle native text selection.
-                let _ = tui.suspend();
-                println!("\n\x1b[1;36m── Copy the text below ─────────────────────────\x1b[0m");
-                println!("\x1b[1;33m{}\x1b[0m", text);
-                println!("\x1b[1;36m────────────────────────────────────────────────\x1b[0m");
-                println!("\x1b[90mSelect the path above with mouse, then Ctrl+C to copy.\x1b[0m");
-                println!("\x1b[90mPress Enter to return to fm...\x1b[0m");
+                // Write OSC 52 synchronously from the main thread, through the
+                // same stdout handle that ratatui uses for rendering. This
+                // ensures the escape sequence is properly framed between render
+                // frames and not interleaved/corrupted by concurrent writes.
+                use base64::Engine;
+                use std::io::Write;
+                let encoded =
+                    base64::engine::general_purpose::STANDARD.encode(text.as_bytes());
+                let backend = tui.terminal_mut().backend_mut();
+                // Try both BEL and ST terminators for max compatibility
+                let _ = write!(backend, "\x1b]52;c;{}\x07", encoded);
+                let _ = write!(backend, "\x1b]52;c;{}\x1b\\", encoded);
+                let _ = backend.flush();
 
-                // Block until the user presses Enter (stdin is in cooked mode now).
-                let mut buf = String::new();
-                let _ = std::io::stdin().read_line(&mut buf);
+                // Also save to temp file as a backup
+                let _ = std::fs::write("/tmp/.fm_clipboard", &text);
 
-                // Return to the TUI.
-                let _ = tui.resume();
-                app.set_status_message("📋 Returned to fm".to_string());
+                app.set_status_message(format!("📋 Path copied: {}", text));
             }
             Event::WatcherInitFailed(msg) => {
                 app.watcher_active = false;

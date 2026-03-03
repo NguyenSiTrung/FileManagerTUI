@@ -2556,7 +2556,10 @@ impl App {
     /// Copy the current preview selection to the system clipboard.
     ///
     /// Shows a status message with the result (success/failure/no-selection).
-    pub fn copy_preview_selection(&mut self) {
+    pub fn copy_preview_selection(
+        &mut self,
+        event_tx: &mpsc::UnboundedSender<crate::event::Event>,
+    ) {
         match self.extract_preview_selected_text() {
             Some(text) if !text.is_empty() => {
                 let line_count = text.lines().count();
@@ -2569,16 +2572,12 @@ impl App {
                             line_count,
                             if line_count == 1 { "" } else { "s" }
                         ));
-                        self.preview_selection.clear();
                     }
-                    Ok(false) | Err(_) => {
-                        self.set_status_message(format!(
-                            "📋 Saved to {} — cat to copy",
-                            CLIPBOARD_FALLBACK_FILE
-                        ));
-                        self.preview_selection.clear();
+                    _ => {
+                        let _ = event_tx.send(crate::event::Event::ShowCopyableText(text));
                     }
                 }
+                self.preview_selection.clear();
             }
             _ => {
                 self.set_status_message("No preview text selected — drag to select".to_string());
@@ -2589,7 +2588,10 @@ impl App {
     /// Copy the current terminal selection to the system clipboard.
     ///
     /// Shows a status message with the result (success/failure/no-selection).
-    pub fn copy_terminal_selection(&mut self) {
+    pub fn copy_terminal_selection(
+        &mut self,
+        event_tx: &mpsc::UnboundedSender<crate::event::Event>,
+    ) {
         match self.terminal_state.extract_selected_text() {
             Some(text) if !text.is_empty() => {
                 let line_count = text.lines().count();
@@ -2602,16 +2604,12 @@ impl App {
                             line_count,
                             if line_count == 1 { "" } else { "s" }
                         ));
-                        self.terminal_state.selection.clear();
                     }
-                    Ok(false) | Err(_) => {
-                        self.set_status_message(format!(
-                            "📋 Saved to {} — cat to copy",
-                            CLIPBOARD_FALLBACK_FILE
-                        ));
-                        self.terminal_state.selection.clear();
+                    _ => {
+                        let _ = event_tx.send(crate::event::Event::ShowCopyableText(text));
                     }
                 }
+                self.terminal_state.selection.clear();
             }
             _ => {
                 self.set_status_message("No terminal text selected — drag to select".to_string());
@@ -2666,100 +2664,12 @@ fn copy_to_system_clipboard(_text: &str) -> std::result::Result<bool, String> {
     Ok(true)
 }
 
-/// Path to the clipboard fallback file for terminals that don't support OSC 52.
-const CLIPBOARD_FALLBACK_FILE: &str = "/tmp/.fm_clipboard";
-
-/// Copy text to the system clipboard via OSC 52 terminal escape sequence.
-///
-/// OSC 52 asks the user's terminal emulator to set its clipboard, which works
-/// over SSH, inside containers, and in any headless/remote session as long as
-/// the terminal (iTerm2, kitty, alacritty, Windows Terminal, tmux, …) supports
-/// it.  This is tried as a **fallback** when native clipboard tools fail.
-///
-/// Also writes the text to `/tmp/.fm_clipboard` as a last-resort fallback for
-/// web terminals (xterm.js / Kubeflow) that don't support OSC 52.
-///
-/// Writes through both stdout and /dev/tty, and tries both BEL and ST
-/// terminators for maximum compatibility with web-based terminals (xterm.js).
-#[cfg(not(test))]
-fn copy_via_osc52(text: &str) -> std::result::Result<(), String> {
-    use std::io::Write;
-
-    let sequences = osc52_sequences(text);
-
-    let mut any_success = false;
-
-    // Method 1: Write through stdout (same pipe as the TUI framework).
-    // This is more reliable for web-based terminals (xterm.js / Kubeflow)
-    // because the escape sequence travels the same path as all other output.
-    if let Ok(()) = (|| -> std::result::Result<(), std::io::Error> {
-        let mut stdout = std::io::stdout().lock();
-        for seq in &sequences {
-            stdout.write_all(seq.as_bytes())?;
-        }
-        stdout.flush()?;
-        Ok(())
-    })() {
-        any_success = true;
-    }
-
-    // Method 2: Write directly to /dev/tty as a second attempt.
-    // This works in SSH sessions where stdout may be captured.
-    if let Ok(mut tty) = std::fs::OpenOptions::new().write(true).open("/dev/tty") {
-        let mut wrote_all = true;
-        for seq in &sequences {
-            if tty.write_all(seq.as_bytes()).is_err() {
-                wrote_all = false;
-                break;
-            }
-        }
-        if wrote_all && tty.flush().is_ok() {
-            any_success = true;
-        }
-    }
-
-    // Method 3: Always write to a temp file as a last-resort fallback.
-    // Web terminals (xterm.js in Kubeflow/JupyterHub) often don't support
-    // OSC 52 at all — this gives users a reliable way to retrieve the
-    // copied content via `cat /tmp/.fm_clipboard`.
-    let _ = std::fs::write(CLIPBOARD_FALLBACK_FILE, text);
-
-    if any_success {
-        Ok(())
-    } else {
-        Err("OSC 52: failed to write to both stdout and /dev/tty".to_string())
-    }
-}
-
-#[cfg(not(test))]
-fn osc52_sequences(text: &str) -> Vec<String> {
-    use base64::Engine;
-
-    let encoded = base64::engine::general_purpose::STANDARD.encode(text.as_bytes());
-    let bel = format!("\x1b]52;c;{}\x07", encoded);
-    let st = format!("\x1b]52;c;{}\x1b\\", encoded);
-
-    // tmux often blocks raw OSC 52 unless wrapped with DCS passthrough.
-    if std::env::var_os("TMUX").is_some() {
-        return vec![wrap_osc52_for_tmux(&bel), wrap_osc52_for_tmux(&st), bel, st];
-    }
-
-    vec![bel, st]
-}
-
-#[cfg(not(test))]
-fn wrap_osc52_for_tmux(seq: &str) -> String {
-    let escaped = seq.replace('\x1b', "\x1b\x1b");
-    format!("\x1bPtmux;{}\x1b\\", escaped)
-}
-
 /// Copy text to the system clipboard using platform-native commands.
 /// Tries (in order): wl-copy, xclip, xsel (Linux/BSD), pbcopy (macOS), clip.exe (Windows).
 /// Falls back to OSC 52 escape sequence for headless/remote sessions.
 ///
-/// Returns Ok(true) if native clipboard succeeded, Ok(false) if OSC 52 fallback
-/// was used (clipboard may or may not be set depending on terminal support),
-/// Err(message) on complete failure.
+/// Returns Ok(true) if native clipboard succeeded, Ok(false) if native tools
+/// failed and the caller should use the main-thread OSC 52 fallback.
 #[cfg(not(test))]
 fn copy_to_system_clipboard(text: &str) -> std::result::Result<bool, String> {
     use std::io::{ErrorKind, Write};
@@ -2818,14 +2728,13 @@ fn copy_to_system_clipboard(text: &str) -> std::result::Result<bool, String> {
 
             match child.wait_with_output() {
                 Ok(output) if output.status.success() => return Ok(true),
-                _ => continue, // tool failed → try next or fall through to OSC 52
+                _ => continue,
             }
         }
-        // All native tools failed or none found → fall through to OSC 52
     }
 
-    // ── 3. No display or no tool or all tools failed → fall back to OSC 52 ──
-    copy_via_osc52(text).map(|()| false)
+    // ── 3. No native tool worked → caller will use main-thread OSC 52 ──
+    Ok(false)
 }
 
 #[cfg(test)]
