@@ -2597,8 +2597,8 @@ fn copy_to_system_clipboard(text: &str) -> std::result::Result<bool, String> {
         target_os = "openbsd",
         target_os = "netbsd"
     ))]
-    let has_display = std::env::var_os("DISPLAY").is_some()
-        || std::env::var_os("WAYLAND_DISPLAY").is_some();
+    let has_display =
+        std::env::var_os("DISPLAY").is_some() || std::env::var_os("WAYLAND_DISPLAY").is_some();
 
     #[cfg(not(any(
         target_os = "linux",
@@ -2642,8 +2642,7 @@ fn copy_to_system_clipboard(text: &str) -> std::result::Result<bool, String> {
 
             if let Some(stdin) = child.stdin.as_mut() {
                 if let Err(err) = stdin.write_all(text.as_bytes()) {
-                    last_error =
-                        Some(format!("{}: failed to write clipboard data ({})", cmd, err));
+                    last_error = Some(format!("{}: failed to write clipboard data ({})", cmd, err));
                     let _ = child.kill();
                     let _ = child.wait();
                     continue;
@@ -2655,11 +2654,9 @@ fn copy_to_system_clipboard(text: &str) -> std::result::Result<bool, String> {
             match child.wait_with_output() {
                 Ok(output) if output.status.success() => return Ok(true),
                 Ok(output) => {
-                    let stderr =
-                        String::from_utf8_lossy(&output.stderr).trim().to_string();
+                    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
                     if stderr.is_empty() {
-                        last_error =
-                            Some(format!("{} exited with status {}", cmd, output.status));
+                        last_error = Some(format!("{} exited with status {}", cmd, output.status));
                     } else {
                         last_error = Some(format!("{}: {}", cmd, stderr));
                     }
