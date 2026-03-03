@@ -684,8 +684,8 @@ impl App {
                 {
                     Ok(Ok(true)) => format!("📋 Path copied: {}", path_str),
                     Ok(Ok(false)) => format!(
-                        "📋 OSC 52 copy requested (terminal must allow clipboard writes): {}",
-                        path_str
+                        "📋 Copied to {} — run: cat {} | Shift+select to copy",
+                        CLIPBOARD_FALLBACK_FILE, CLIPBOARD_FALLBACK_FILE
                     ),
                     Ok(Err(err)) => format!("⚠ {}: {}", err, path_str),
                     Err(err) => {
@@ -702,8 +702,8 @@ impl App {
                 let message = match copy_to_system_clipboard(&path_str) {
                     Ok(true) => format!("📋 Path copied: {}", path_str),
                     Ok(false) => format!(
-                        "📋 OSC 52 copy requested (terminal must allow clipboard writes): {}",
-                        path_str
+                        "📋 Copied to {} — run: cat {} | Shift+select to copy",
+                        CLIPBOARD_FALLBACK_FILE, CLIPBOARD_FALLBACK_FILE
                     ),
                     Err(err) => format!("⚠ {}: {}", err, path_str),
                 };
@@ -1873,8 +1873,8 @@ impl App {
                     {
                         Ok(Ok(true)) => format!("📋 Path copied: {}", path_str),
                         Ok(Ok(false)) => format!(
-                            "📋 OSC 52 copy requested (terminal must allow clipboard writes): {}",
-                            path_str
+                            "📋 Copied to {} — run: cat {} | Shift+select to copy",
+                            CLIPBOARD_FALLBACK_FILE, CLIPBOARD_FALLBACK_FILE
                         ),
                         Ok(Err(err)) => format!("⚠ {}: {}", err, path_str),
                         Err(err) => {
@@ -1891,8 +1891,8 @@ impl App {
                     let message = match copy_to_system_clipboard(&path_str) {
                         Ok(true) => format!("📋 Path copied: {}", path_str),
                         Ok(false) => format!(
-                            "📋 OSC 52 copy requested (terminal must allow clipboard writes): {}",
-                            path_str
+                            "📋 Copied to {} — run: cat {} | Shift+select to copy",
+                            CLIPBOARD_FALLBACK_FILE, CLIPBOARD_FALLBACK_FILE
                         ),
                         Err(err) => format!("⚠ {}: {}", err, path_str),
                     };
@@ -2577,10 +2577,8 @@ impl App {
                             )
                         } else {
                             format!(
-                                "📋 OSC 52 copy requested: {} bytes ({} line{}). Paste to verify.",
-                                byte_count,
-                                line_count,
-                                if line_count == 1 { "" } else { "s" }
+                                "📋 Copied to {} — run: cat {}",
+                                CLIPBOARD_FALLBACK_FILE, CLIPBOARD_FALLBACK_FILE
                             )
                         };
                         self.set_status_message(message);
@@ -2616,10 +2614,8 @@ impl App {
                             )
                         } else {
                             format!(
-                                "📋 OSC 52 copy requested: {} bytes ({} line{}). Paste to verify.",
-                                byte_count,
-                                line_count,
-                                if line_count == 1 { "" } else { "s" }
+                                "📋 Copied to {} — run: cat {}",
+                                CLIPBOARD_FALLBACK_FILE, CLIPBOARD_FALLBACK_FILE
                             )
                         };
                         self.set_status_message(message);
@@ -2684,12 +2680,18 @@ fn copy_to_system_clipboard(_text: &str) -> std::result::Result<bool, String> {
     Ok(true)
 }
 
+/// Path to the clipboard fallback file for terminals that don't support OSC 52.
+const CLIPBOARD_FALLBACK_FILE: &str = "/tmp/.fm_clipboard";
+
 /// Copy text to the system clipboard via OSC 52 terminal escape sequence.
 ///
 /// OSC 52 asks the user's terminal emulator to set its clipboard, which works
 /// over SSH, inside containers, and in any headless/remote session as long as
 /// the terminal (iTerm2, kitty, alacritty, Windows Terminal, tmux, …) supports
 /// it.  This is tried as a **fallback** when native clipboard tools fail.
+///
+/// Also writes the text to `/tmp/.fm_clipboard` as a last-resort fallback for
+/// web terminals (xterm.js / Kubeflow) that don't support OSC 52.
 ///
 /// Writes through both stdout and /dev/tty, and tries both BEL and ST
 /// terminators for maximum compatibility with web-based terminals (xterm.js).
@@ -2729,6 +2731,12 @@ fn copy_via_osc52(text: &str) -> std::result::Result<(), String> {
             any_success = true;
         }
     }
+
+    // Method 3: Always write to a temp file as a last-resort fallback.
+    // Web terminals (xterm.js in Kubeflow/JupyterHub) often don't support
+    // OSC 52 at all — this gives users a reliable way to retrieve the
+    // copied content via `cat /tmp/.fm_clipboard`.
+    let _ = std::fs::write(CLIPBOARD_FALLBACK_FILE, text);
 
     if any_success {
         Ok(())
