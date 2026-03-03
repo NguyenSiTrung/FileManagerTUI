@@ -684,7 +684,7 @@ impl App {
                 {
                     Ok(Ok(true)) => format!("📋 Path copied: {}", path_str),
                     Ok(Ok(false)) => format!(
-                        "📋 Copied via OSC 52 (requires terminal support): {}",
+                        "📋 OSC 52 copy requested (terminal must allow clipboard writes): {}",
                         path_str
                     ),
                     Ok(Err(err)) => format!("⚠ {}: {}", err, path_str),
@@ -702,7 +702,7 @@ impl App {
                 let message = match copy_to_system_clipboard(&path_str) {
                     Ok(true) => format!("📋 Path copied: {}", path_str),
                     Ok(false) => format!(
-                        "📋 Copied via OSC 52 (requires terminal support): {}",
+                        "📋 OSC 52 copy requested (terminal must allow clipboard writes): {}",
                         path_str
                     ),
                     Err(err) => format!("⚠ {}: {}", err, path_str),
@@ -1873,7 +1873,7 @@ impl App {
                     {
                         Ok(Ok(true)) => format!("📋 Path copied: {}", path_str),
                         Ok(Ok(false)) => format!(
-                            "📋 Copied via OSC 52 (requires terminal support): {}",
+                            "📋 OSC 52 copy requested (terminal must allow clipboard writes): {}",
                             path_str
                         ),
                         Ok(Err(err)) => format!("⚠ {}: {}", err, path_str),
@@ -1891,7 +1891,7 @@ impl App {
                     let message = match copy_to_system_clipboard(&path_str) {
                         Ok(true) => format!("📋 Path copied: {}", path_str),
                         Ok(false) => format!(
-                            "📋 Copied via OSC 52 (requires terminal support): {}",
+                            "📋 OSC 52 copy requested (terminal must allow clipboard writes): {}",
                             path_str
                         ),
                         Err(err) => format!("⚠ {}: {}", err, path_str),
@@ -2568,14 +2568,22 @@ impl App {
                 let byte_count = text.len();
                 match copy_to_system_clipboard(&text) {
                     Ok(native) => {
-                        let method = if native { "" } else { " via OSC 52" };
-                        self.set_status_message(format!(
-                            "📋 Copied{} {} bytes ({} line{})",
-                            method,
-                            byte_count,
-                            line_count,
-                            if line_count == 1 { "" } else { "s" }
-                        ));
+                        let message = if native {
+                            format!(
+                                "📋 Copied {} bytes ({} line{})",
+                                byte_count,
+                                line_count,
+                                if line_count == 1 { "" } else { "s" }
+                            )
+                        } else {
+                            format!(
+                                "📋 OSC 52 copy requested: {} bytes ({} line{}). Paste to verify.",
+                                byte_count,
+                                line_count,
+                                if line_count == 1 { "" } else { "s" }
+                            )
+                        };
+                        self.set_status_message(message);
                         self.preview_selection.clear();
                     }
                     Err(err) => {
@@ -2599,14 +2607,22 @@ impl App {
                 let byte_count = text.len();
                 match copy_to_system_clipboard(&text) {
                     Ok(native) => {
-                        let method = if native { "" } else { " via OSC 52" };
-                        self.set_status_message(format!(
-                            "📋 Copied{} {} bytes ({} line{})",
-                            method,
-                            byte_count,
-                            line_count,
-                            if line_count == 1 { "" } else { "s" }
-                        ));
+                        let message = if native {
+                            format!(
+                                "📋 Copied {} bytes ({} line{})",
+                                byte_count,
+                                line_count,
+                                if line_count == 1 { "" } else { "s" }
+                            )
+                        } else {
+                            format!(
+                                "📋 OSC 52 copy requested: {} bytes ({} line{}). Paste to verify.",
+                                byte_count,
+                                line_count,
+                                if line_count == 1 { "" } else { "s" }
+                            )
+                        };
+                        self.set_status_message(message);
                         // Clear selection after successful copy
                         self.terminal_state.selection.clear();
                     }
@@ -2679,15 +2695,9 @@ fn copy_to_system_clipboard(_text: &str) -> std::result::Result<bool, String> {
 /// terminators for maximum compatibility with web-based terminals (xterm.js).
 #[cfg(not(test))]
 fn copy_via_osc52(text: &str) -> std::result::Result<(), String> {
-    use base64::Engine;
     use std::io::Write;
 
-    let encoded = base64::engine::general_purpose::STANDARD.encode(text.as_bytes());
-
-    // Try both terminators: BEL (\x07) is traditional, ST (\x1b\\) is more correct.
-    // Some terminals (xterm.js, tmux) only accept one of the two.
-    let seq_bel = format!("\x1b]52;c;{}\x07", encoded);
-    let seq_st = format!("\x1b]52;c;{}\x1b\\", encoded);
+    let sequences = osc52_sequences(text);
 
     let mut any_success = false;
 
@@ -2696,8 +2706,9 @@ fn copy_via_osc52(text: &str) -> std::result::Result<(), String> {
     // because the escape sequence travels the same path as all other output.
     if let Ok(()) = (|| -> std::result::Result<(), std::io::Error> {
         let mut stdout = std::io::stdout().lock();
-        stdout.write_all(seq_bel.as_bytes())?;
-        stdout.write_all(seq_st.as_bytes())?;
+        for seq in &sequences {
+            stdout.write_all(seq.as_bytes())?;
+        }
         stdout.flush()?;
         Ok(())
     })() {
@@ -2707,10 +2718,14 @@ fn copy_via_osc52(text: &str) -> std::result::Result<(), String> {
     // Method 2: Write directly to /dev/tty as a second attempt.
     // This works in SSH sessions where stdout may be captured.
     if let Ok(mut tty) = std::fs::OpenOptions::new().write(true).open("/dev/tty") {
-        if tty.write_all(seq_bel.as_bytes()).is_ok()
-            && tty.write_all(seq_st.as_bytes()).is_ok()
-            && tty.flush().is_ok()
-        {
+        let mut wrote_all = true;
+        for seq in &sequences {
+            if tty.write_all(seq.as_bytes()).is_err() {
+                wrote_all = false;
+                break;
+            }
+        }
+        if wrote_all && tty.flush().is_ok() {
             any_success = true;
         }
     }
@@ -2720,6 +2735,28 @@ fn copy_via_osc52(text: &str) -> std::result::Result<(), String> {
     } else {
         Err("OSC 52: failed to write to both stdout and /dev/tty".to_string())
     }
+}
+
+#[cfg(not(test))]
+fn osc52_sequences(text: &str) -> Vec<String> {
+    use base64::Engine;
+
+    let encoded = base64::engine::general_purpose::STANDARD.encode(text.as_bytes());
+    let bel = format!("\x1b]52;c;{}\x07", encoded);
+    let st = format!("\x1b]52;c;{}\x1b\\", encoded);
+
+    // tmux often blocks raw OSC 52 unless wrapped with DCS passthrough.
+    if std::env::var_os("TMUX").is_some() {
+        return vec![wrap_osc52_for_tmux(&bel), wrap_osc52_for_tmux(&st), bel, st];
+    }
+
+    vec![bel, st]
+}
+
+#[cfg(not(test))]
+fn wrap_osc52_for_tmux(seq: &str) -> String {
+    let escaped = seq.replace('\x1b', "\x1b\x1b");
+    format!("\x1bPtmux;{}\x1b\\", escaped)
 }
 
 /// Copy text to the system clipboard using platform-native commands.
