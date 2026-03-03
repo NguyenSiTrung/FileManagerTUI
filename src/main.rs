@@ -225,24 +225,36 @@ async fn main() -> error::Result<()> {
                 app.set_status_message(message);
             }
             Event::ShowCopyableText(text) => {
-                // Write OSC 52 synchronously from the main thread, through the
-                // same stdout handle that ratatui uses for rendering. This
-                // ensures the escape sequence is properly framed between render
-                // frames and not interleaved/corrupted by concurrent writes.
-                use base64::Engine;
-                use std::io::Write;
-                let encoded =
-                    base64::engine::general_purpose::STANDARD.encode(text.as_bytes());
-                let backend = tui.terminal_mut().backend_mut();
-                // Try both BEL and ST terminators for max compatibility
-                let _ = write!(backend, "\x1b]52;c;{}\x07", encoded);
-                let _ = write!(backend, "\x1b]52;c;{}\x1b\\", encoded);
-                let _ = backend.flush();
+                // Try OSC 52 through ratatui's backend (works on terminals that support it)
+                {
+                    use base64::Engine;
+                    use std::io::Write;
+                    let encoded =
+                        base64::engine::general_purpose::STANDARD.encode(text.as_bytes());
+                    let backend = tui.terminal_mut().backend_mut();
+                    let _ = write!(backend, "\x1b]52;c;{}\x07", encoded);
+                    let _ = write!(backend, "\x1b]52;c;{}\x1b\\", encoded);
+                    let _ = backend.flush();
+                }
 
-                // Also save to temp file as a backup
+                // Save to temp file as backup
                 let _ = std::fs::write("/tmp/.fm_clipboard", &text);
 
-                app.set_status_message(format!("📋 Path copied: {}", text));
+                // Suspend the TUI so the browser can handle native text selection.
+                // This is the only reliable method for web terminals (xterm.js in
+                // Kubeflow/JupyterHub) where OSC 52 is not supported.
+                let _ = tui.suspend();
+                println!();
+                println!("{}", text);
+                println!();
+                println!("\x1b[90mSelect the path above → Ctrl+C → then press Enter\x1b[0m");
+
+                // Wait for Enter
+                let mut buf = String::new();
+                let _ = std::io::stdin().read_line(&mut buf);
+
+                let _ = tui.resume();
+                app.set_status_message(format!("📋 Path: {}", text));
             }
             Event::WatcherInitFailed(msg) => {
                 app.watcher_active = false;
