@@ -192,29 +192,14 @@ pub fn load_highlighted_content(
     }
 
     for (i, line_str) in lines_text.iter().enumerate() {
-        let mut spans: Vec<Span<'static>> = Vec::new();
-
-        // Line number
-        let num = format!("{:>width$} │ ", i + 1, width = line_num_width);
-        spans.push(Span::styled(
-            num,
-            Style::default().fg(colors.preview_line_nr_fg),
+        result_lines.push(highlight_single_line(
+            line_str,
+            i + 1,
+            line_num_width,
+            &mut highlighter,
+            ss,
+            colors,
         ));
-
-        // Highlighted content
-        match highlighter.highlight_line(line_str, ss) {
-            Ok(ranges) => {
-                for (style, text) in ranges {
-                    let fg = syntect_color_to_ratatui(style.foreground);
-                    spans.push(Span::styled(text.to_string(), Style::default().fg(fg)));
-                }
-            }
-            Err(_) => {
-                spans.push(Span::raw(line_str.to_string()));
-            }
-        }
-
-        result_lines.push(Line::from(spans));
     }
 
     if result_lines.is_empty() {
