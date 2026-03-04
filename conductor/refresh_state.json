@@ -1,16 +1,12 @@
 {
-    "last_refresh": "2026-03-03T15:37:15+07:00",
+    "last_refresh": "2026-03-04T17:13:38+07:00",
     "changes": [
-        "product.md: Updated Feature #1 — added viewport scrolling, visual scrollbar, PageUp/PageDown, scroll_lines config",
-        "product.md: Updated Feature #4 — added copy path via 'y' key",
-        "product.md: Updated Feature #8 — added mouse text selection and Ctrl+Shift+C copy",
-        "product.md: Added Feature #13 (Clipboard) — OSC 52 fallback for headless/remote/web terminals",
-        "product.md: Added Feature #14 (Status Bar) — context-aware hints, copy path, preview mouse copy",
-        "tech-stack.md: Added base64 0.22 crate for OSC 52 encoding",
-        "tech-stack.md: Updated module structure — added fs/mod.rs",
-        "patterns.md: Elevated terminal-mouse-copy patterns — OSC 52 fallback, bordered-panel offset mapping, Ctrl+Shift+C bitflag matching, preview view-mode selection reuse",
-        "Beads: Closed 16 orphaned tree-scroll_20260303 tasks (epic + 15 subtasks)",
-        "tracks.md: Clean — no active tracks, 20 archived tracks total"
+        "product.md: Updated Feature #1 — added T keybinding for terminal-cd at selected path",
+        "product.md: Updated Feature #13 (Clipboard) — added in-TUI copy overlay with disabled mouse capture, async clipboard operations to prevent UI freeze",
+        "patterns.md: Elevated CopyOverlay AppMode pattern (browser-native selection in web terminals)",
+        "patterns.md: Elevated async clipboard copy pattern (tokio::spawn + event channel)",
+        "patterns.md: Elevated open_terminal_at_selected() pattern (terminal-cd from tree)",
+        "tracks.md: Clean — no active tracks, 21 archived tracks total"
     ],
-    "drift_source": "terminal-mouse-copy_20260302 and tree-scroll_20260303 archived since last refresh; standalone commits for OSC 52 clipboard, status bar enhancements, preview mouse copy"
+    "drift_source": "preview-hardening_20260304 archived, clipboard UX standalone commits, UI freeze fix (80243ef), terminal-cd feature (c3f0924)"
 }

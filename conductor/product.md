@@ -25,7 +25,7 @@ A single static binary that provides a VS Code-like file explorer experience in 
 - macOS Terminal / iTerm2
 
 ## Key Features
-1. **Tree Navigation** — Folder tree with lazy loading, expand/collapse, multi-select, inline filter (`/`), viewport mouse-wheel scrolling with visual scrollbar (drag-to-scroll, click-to-jump), PageUp/PageDown, configurable `scroll_lines`
+1. **Tree Navigation** — Folder tree with lazy loading, expand/collapse, multi-select, inline filter (`/`), viewport mouse-wheel scrolling with visual scrollbar (drag-to-scroll, click-to-jump), PageUp/PageDown, configurable `scroll_lines`, `T` to open terminal at selected path
 2. **File Preview** — Syntax-highlighted preview panel with theme-aware defaults (auto-selects `InspiredGitHub` for light scheme, `base16-ocean.dark` for dark), streaming head/tail for large files, shallow directory summaries (depth-1) by default with on-demand deep scan (`D` key), cancel-on-navigate, configurable `preview_timeout_ms`, and semantic `ThemeColors` for consistent contrast across themes
 3. **File Operations** — Create, rename, delete, copy, cut, paste with confirmation dialogs and async progress
 4. **Fuzzy Search + Action Menu** — Ctrl+P fuzzy finder overlay with context-aware action menu (navigate, preview, edit, copy path via `y`, rename, delete, open in terminal)
@@ -37,7 +37,7 @@ A single static binary that provides a VS Code-like file explorer experience in 
 10. **Large Directory Performance** — Paginated directory loading, async expansion with Loading... placeholder, snapshot-based sorting, configurable page size
 11. **Large File Handling** — Streaming head/tail preview, editor hard block for >10MB / >100K lines, backward newline scanning for O(N) tail reads
 12. **Install Script** — One-command setup (`scripts/install.sh`) — installs Rust if missing, builds, and installs the `fm` binary
-13. **Clipboard** — OSC 52 clipboard fallback for headless/remote/web terminal environments; graceful degradation when system clipboard unavailable
+13. **Clipboard** — OSC 52 clipboard fallback for headless/remote/web terminal environments; in-TUI copy overlay with disabled mouse capture for browser-native text selection; async clipboard operations to prevent UI freeze; graceful degradation when system clipboard unavailable
 14. **Status Bar** — Context-aware key hints per focus panel, copy path to system clipboard (`y`), mouse text selection copy in preview view mode
 
 ## Non-Functional Requirements

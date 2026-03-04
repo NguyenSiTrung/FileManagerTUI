@@ -155,4 +155,8 @@ This file is the project's institutional knowledge - learnings extracted from co
 - `Ctrl+W` handler toggles `line_wrap` state but has no visual effect — dead code (from: preview-hardening_20260304, archived 2026-03-04)
 - `epoch_days_to_date` casts `u64` to `i64` without bounds checking (from: preview-hardening_20260304, archived 2026-03-04)
 
-Last refreshed: 2026-03-04 (preview-hardening patterns elevated)
+- `CopyOverlay` AppMode: disable mouse capture → render text overlay → user selects with browser-native Ctrl+C → any key dismisses and re-enables mouse; used for web terminals (xterm.js) where OSC 52 is unsupported (from: clipboard-ux standalone commits, 2026-03-03–04)
+- Async clipboard copy: spawn `tokio::spawn` task for `copy_selected_text` / `copy_path` with result sent via `event_tx` channel — prevents UI freeze on slow clipboard IPC (from: 80243ef, 2026-03-04)
+- `open_terminal_at_selected()`: resolve selected tree item's parent dir, show terminal panel if hidden, send `cd <dir> && clear` bytes to PTY — reuses existing PTY write path (from: c3f0924, 2026-03-03)
+
+Last refreshed: 2026-03-04 (clipboard UX, async copy, terminal-cd patterns elevated)
