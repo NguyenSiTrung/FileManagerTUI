@@ -100,9 +100,13 @@ impl<'a> Widget for EditorWidget<'a> {
 
         // If we're scrolling, we need to process lines before the viewport
         // to get correct syntax state. Process up to scroll offset.
+        // NOTE: The SyntaxSet is loaded with `load_defaults_newlines()`, so
+        // `highlight_line` expects each line to end with '\n'. The editor
+        // buffer stores lines without trailing newlines, so we must append
+        // one to avoid corrupting the parser state across lines.
         for i in 0..scroll.min(self.editor.buffer.len()) {
-            let line = &self.editor.buffer[i];
-            let _ = highlight_state.highlight_line(line, self.syntax_set);
+            let line_with_nl = format!("{}\n", &self.editor.buffer[i]);
+            let _ = highlight_state.highlight_line(&line_with_nl, self.syntax_set);
         }
 
         // Render visible lines
@@ -135,13 +139,19 @@ impl<'a> Widget for EditorWidget<'a> {
                 let code_x = inner.x + gutter_w;
 
                 // Apply syntax highlighting
+                // Append '\n' for syntect (see note above about newline SyntaxSet).
+                let line_with_nl = format!("{}\n", line_content);
                 let highlighted = highlight_state
-                    .highlight_line(line_content, self.syntax_set)
+                    .highlight_line(&line_with_nl, self.syntax_set)
                     .unwrap_or_default();
 
                 let mut col_offset = 0u16;
                 for (style, text) in &highlighted {
                     for ch in text.chars() {
+                        // Skip the trailing '\n' we appended for syntect
+                        if ch == '\n' || ch == '\r' {
+                            continue;
+                        }
                         if col_offset >= code_width {
                             break;
                         }
