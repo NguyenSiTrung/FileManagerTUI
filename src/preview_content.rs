@@ -18,8 +18,19 @@ pub const LINE_COUNT_STEP: usize = 10;
 /// Files larger than this are handled via head+tail mode instead.
 const MAX_PREVIEW_SIZE: u64 = 5 * 1024 * 1024;
 
-/// Detect the syntax name for a file based on its extension.
+/// Detect the syntax name for a file based on its extension or filename.
 pub fn detect_syntax_name(path: &Path) -> &str {
+    // Filename-based detection (for files without meaningful extensions)
+    if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+        match name {
+            "Dockerfile" | "dockerfile" => return "Dockerfile",
+            "Makefile" | "makefile" | "GNUmakefile" => return "Makefile",
+            ".env" => return "Bash",
+            ".gitignore" | ".dockerignore" | ".hgignore" => return "Plain Text",
+            _ => {}
+        }
+    }
+
     match path.extension().and_then(|e| e.to_str()) {
         Some("py") => "Python",
         Some("rs") => "Rust",
@@ -38,6 +49,18 @@ pub fn detect_syntax_name(path: &Path) -> &str {
         Some("java") => "Java",
         Some("go") => "Go",
         Some("rb") => "Ruby",
+        // Expanded coverage (FR-5)
+        Some("lua") => "Lua",
+        Some("php") => "PHP",
+        Some("swift") => "Swift",
+        Some("kt" | "kts") => "Kotlin",
+        Some("scala") => "Scala",
+        Some("r" | "R") => "R",
+        Some("tf") => "Terraform",
+        Some("nix") => "Nix",
+        Some("zig") => "Zig",
+        Some("glsl") => "GLSL",
+        Some("xml" | "xsl" | "xslt" | "svg") => "XML",
         Some("txt" | "log" | "csv" | "cfg" | "conf" | "ini") => "Plain Text",
         Some("ipynb") => "Python",
         None => detect_from_shebang(path),
@@ -516,8 +539,23 @@ fn highlight_single_line(
 
 /// Known binary file extensions.
 const BINARY_EXTENSIONS: &[&str] = &[
-    "pt", "pth", "h5", "hdf5", "pkl", "pickle", "onnx", "zip", "tar", "gz", "bz2", "xz", "so",
-    "dylib", "exe", "bin", "img", "iso",
+    // ML model formats
+    "pt", "pth", "h5", "hdf5", "pkl", "pickle", "onnx",
+    "safetensors", "parquet", "arrow", "avro",
+    // Archives
+    "zip", "tar", "gz", "bz2", "xz", "7z", "rar", "lz4", "zst",
+    // Shared libraries / executables
+    "so", "dylib", "exe", "bin", "img", "iso",
+    // Compiled / object files
+    "wasm", "pyc", "pyo", "class", "o", "a", "lib", "dll",
+    // System packages
+    "deb", "rpm",
+    // Images
+    "png", "jpg", "jpeg", "gif", "bmp", "ico", "webp",
+    // Audio / video
+    "mp3", "mp4", "wav", "flac",
+    // Documents (binary)
+    "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx",
 ];
 
 /// Check if a file is binary by extension or null-byte scan.
@@ -1165,8 +1203,35 @@ mod tests {
         assert_eq!(detect_syntax_name(Path::new("style.css")), "CSS");
         assert_eq!(detect_syntax_name(Path::new("page.html")), "HTML");
         assert_eq!(detect_syntax_name(Path::new("app.tsx")), "TypeScript");
-        assert_eq!(detect_syntax_name(Path::new("Makefile")), "Plain Text");
+        assert_eq!(detect_syntax_name(Path::new("Makefile")), "Makefile");
         assert_eq!(detect_syntax_name(Path::new("readme.md")), "Markdown");
+    }
+
+    #[test]
+    fn detect_syntax_new_extensions() {
+        // FR-5: expanded coverage
+        assert_eq!(detect_syntax_name(Path::new("script.lua")), "Lua");
+        assert_eq!(detect_syntax_name(Path::new("app.php")), "PHP");
+        assert_eq!(detect_syntax_name(Path::new("main.swift")), "Swift");
+        assert_eq!(detect_syntax_name(Path::new("Main.kt")), "Kotlin");
+        assert_eq!(detect_syntax_name(Path::new("build.kts")), "Kotlin");
+        assert_eq!(detect_syntax_name(Path::new("App.scala")), "Scala");
+        assert_eq!(detect_syntax_name(Path::new("script.r")), "R");
+        assert_eq!(detect_syntax_name(Path::new("main.tf")), "Terraform");
+        assert_eq!(detect_syntax_name(Path::new("flake.nix")), "Nix");
+        assert_eq!(detect_syntax_name(Path::new("main.zig")), "Zig");
+        assert_eq!(detect_syntax_name(Path::new("shader.glsl")), "GLSL");
+        assert_eq!(detect_syntax_name(Path::new("data.xml")), "XML");
+        assert_eq!(detect_syntax_name(Path::new("icon.svg")), "XML");
+    }
+
+    #[test]
+    fn detect_syntax_by_filename() {
+        // FR-5: filename-based detection
+        assert_eq!(detect_syntax_name(Path::new("Dockerfile")), "Dockerfile");
+        assert_eq!(detect_syntax_name(Path::new("makefile")), "Makefile");
+        assert_eq!(detect_syntax_name(Path::new(".env")), "Bash");
+        assert_eq!(detect_syntax_name(Path::new(".gitignore")), "Plain Text");
     }
 
     #[test]
@@ -1396,6 +1461,38 @@ mod tests {
         assert!(is_binary_file(Path::new("data.bin")));
         assert!(is_binary_file(Path::new("disk.img")));
         assert!(is_binary_file(Path::new("disk.iso")));
+    }
+
+    #[test]
+    fn binary_detection_new_extensions() {
+        // FR-6: expanded coverage
+        // ML formats
+        assert!(is_binary_file(Path::new("model.safetensors")));
+        assert!(is_binary_file(Path::new("data.parquet")));
+        assert!(is_binary_file(Path::new("data.arrow")));
+        assert!(is_binary_file(Path::new("data.avro")));
+        // Compiled
+        assert!(is_binary_file(Path::new("module.wasm")));
+        assert!(is_binary_file(Path::new("cache.pyc")));
+        assert!(is_binary_file(Path::new("App.class")));
+        assert!(is_binary_file(Path::new("main.o")));
+        assert!(is_binary_file(Path::new("lib.dll")));
+        // Packages
+        assert!(is_binary_file(Path::new("pkg.deb")));
+        assert!(is_binary_file(Path::new("pkg.rpm")));
+        assert!(is_binary_file(Path::new("file.7z")));
+        assert!(is_binary_file(Path::new("file.rar")));
+        // Images
+        assert!(is_binary_file(Path::new("photo.png")));
+        assert!(is_binary_file(Path::new("photo.jpg")));
+        assert!(is_binary_file(Path::new("icon.ico")));
+        // Media
+        assert!(is_binary_file(Path::new("song.mp3")));
+        assert!(is_binary_file(Path::new("video.mp4")));
+        // Documents
+        assert!(is_binary_file(Path::new("doc.pdf")));
+        assert!(is_binary_file(Path::new("doc.docx")));
+        assert!(is_binary_file(Path::new("sheet.xlsx")));
     }
 
     #[test]
