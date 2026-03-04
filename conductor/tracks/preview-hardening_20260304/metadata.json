@@ -1,0 +1,28 @@
+{
+    "track_id": "preview-hardening_20260304",
+    "type": "improvement",
+    "status": "new",
+    "priority": "high",
+    "depends_on": [],
+    "estimated_hours": null,
+    "created_at": "2026-03-04T14:34:44+07:00",
+    "updated_at": "2026-03-04T14:34:44+07:00",
+    "description": "Comprehensive code quality pass on preview panel file content handling — bug fixes, file type coverage expansion, dead code cleanup, and DRY refactoring",
+    "beads_epic": "FileManagerTUI-u9c",
+    "beads_tasks": {
+        "phase1": "FileManagerTUI-u9c.1",
+        "phase1_task1": "FileManagerTUI-u9c.1.1",
+        "phase1_task2": "FileManagerTUI-u9c.1.2",
+        "phase1_task3": "FileManagerTUI-u9c.1.3",
+        "phase1_task4": "FileManagerTUI-u9c.1.4",
+        "phase1_task5": "FileManagerTUI-u9c.1.5",
+        "phase2": "FileManagerTUI-u9c.2",
+        "phase2_task1": "FileManagerTUI-u9c.2.1",
+        "phase2_task2": "FileManagerTUI-u9c.2.2",
+        "phase3": "FileManagerTUI-u9c.3",
+        "phase3_task1": "FileManagerTUI-u9c.3.1",
+        "phase3_task2": "FileManagerTUI-u9c.3.2",
+        "phase4": "FileManagerTUI-u9c.4",
+        "phase4_task1": "FileManagerTUI-u9c.4.1"
+    }
+}

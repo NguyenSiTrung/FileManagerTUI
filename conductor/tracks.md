@@ -53,3 +53,8 @@
 <!-- Archived: terminal-mouse-copy_20260302 (2026-03-03) → conductor/archive/ -->
 
 <!-- Archived: tree-scroll_20260303 (2026-03-03) → conductor/archive/ -->
+
+---
+
+## [ ] Track: Preview Content Deep Analysis & Hardening
+*Link: [./conductor/tracks/preview-hardening_20260304/](./conductor/tracks/preview-hardening_20260304/)*
