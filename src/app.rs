@@ -2650,8 +2650,7 @@ impl App {
                                     .send(crate::event::Event::ClipboardCopyComplete(success_msg));
                             }
                             _ => {
-                                let _ =
-                                    tx.send(crate::event::Event::ShowCopyableText(text));
+                                let _ = tx.send(crate::event::Event::ShowCopyableText(text));
                             }
                         }
                     });
@@ -2709,8 +2708,7 @@ impl App {
                                     .send(crate::event::Event::ClipboardCopyComplete(success_msg));
                             }
                             _ => {
-                                let _ =
-                                    tx.send(crate::event::Event::ShowCopyableText(text));
+                                let _ = tx.send(crate::event::Event::ShowCopyableText(text));
                             }
                         }
                     });

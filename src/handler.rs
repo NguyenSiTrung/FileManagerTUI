@@ -2488,7 +2488,11 @@ mod tests {
         assert!(!app.should_quit);
         assert!(app.status_message.is_some());
         let (msg, _) = app.status_message.as_ref().unwrap();
-        assert!(msg.contains("Copying selection"), "expected 'Copying selection' but got: {}", msg);
+        assert!(
+            msg.contains("Copying selection"),
+            "expected 'Copying selection' but got: {}",
+            msg
+        );
     }
 
     #[test]
@@ -2528,7 +2532,6 @@ mod tests {
         handle_key(&mut app, make_key(KeyCode::Char('G')));
         assert_eq!(app.preview_state.scroll_offset, 99);
     }
-
 
     #[test]
     fn preview_j_does_not_navigate_tree() {
@@ -3823,7 +3826,11 @@ mod tests {
 
         assert!(app.status_message.is_some());
         let (msg, _) = app.status_message.as_ref().unwrap();
-        assert!(msg.contains("Copying selection"), "expected 'Copying selection' but got: {}", msg);
+        assert!(
+            msg.contains("Copying selection"),
+            "expected 'Copying selection' but got: {}",
+            msg
+        );
     }
 
     #[test]
@@ -3849,7 +3856,11 @@ mod tests {
 
         assert!(app.status_message.is_some());
         let (msg, _) = app.status_message.as_ref().unwrap();
-        assert!(msg.contains("Copying selection"), "expected 'Copying selection' but got: {}", msg);
+        assert!(
+            msg.contains("Copying selection"),
+            "expected 'Copying selection' but got: {}",
+            msg
+        );
     }
 
     #[test]
