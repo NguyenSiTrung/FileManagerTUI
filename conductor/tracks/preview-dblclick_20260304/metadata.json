@@ -1,0 +1,20 @@
+{
+    "track_id": "preview-dblclick_20260304",
+    "type": "feature",
+    "status": "new",
+    "priority": "high",
+    "depends_on": [],
+    "estimated_hours": null,
+    "created_at": "2026-03-04T19:16:42+07:00",
+    "updated_at": "2026-03-04T19:16:42+07:00",
+    "description": "Double-click line selection in preview panel — select entire line content with visual highlight, reusing existing TerminalSelection mechanism",
+    "beads_epic": "FileManagerTUI-egm",
+    "beads_tasks": {
+        "phase1": "FileManagerTUI-egm.1",
+        "phase1_task1": "FileManagerTUI-egm.1.1",
+        "phase1_task2": "FileManagerTUI-egm.1.2",
+        "phase2": "FileManagerTUI-egm.2",
+        "phase2_task1": "FileManagerTUI-egm.2.1",
+        "phase2_task2": "FileManagerTUI-egm.2.2"
+    }
+}
