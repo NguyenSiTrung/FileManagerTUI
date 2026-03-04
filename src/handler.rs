@@ -2488,7 +2488,7 @@ mod tests {
         assert!(!app.should_quit);
         assert!(app.status_message.is_some());
         let (msg, _) = app.status_message.as_ref().unwrap();
-        assert!(msg.contains("Copied"));
+        assert!(msg.contains("Copying selection"), "expected 'Copying selection' but got: {}", msg);
     }
 
     #[test]
@@ -3823,7 +3823,7 @@ mod tests {
 
         assert!(app.status_message.is_some());
         let (msg, _) = app.status_message.as_ref().unwrap();
-        assert!(msg.contains("Copied"));
+        assert!(msg.contains("Copying selection"), "expected 'Copying selection' but got: {}", msg);
     }
 
     #[test]
@@ -3849,7 +3849,7 @@ mod tests {
 
         assert!(app.status_message.is_some());
         let (msg, _) = app.status_message.as_ref().unwrap();
-        assert!(msg.contains("Copied"));
+        assert!(msg.contains("Copying selection"), "expected 'Copying selection' but got: {}", msg);
     }
 
     #[test]

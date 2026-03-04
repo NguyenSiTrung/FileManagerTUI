@@ -2616,6 +2616,7 @@ impl App {
 
     /// Copy the current preview selection to the system clipboard.
     ///
+    /// Runs the clipboard operation asynchronously to avoid blocking the UI.
     /// Shows a status message with the result (success/failure/no-selection).
     pub fn copy_preview_selection(
         &mut self,
@@ -2625,20 +2626,46 @@ impl App {
             Some(text) if !text.is_empty() => {
                 let line_count = text.lines().count();
                 let byte_count = text.len();
-                match copy_to_system_clipboard(&text) {
-                    Ok(true) => {
-                        self.set_status_message(format!(
-                            "📋 Copied {} bytes ({} line{})",
-                            byte_count,
-                            line_count,
-                            if line_count == 1 { "" } else { "s" }
-                        ));
-                    }
-                    _ => {
-                        let _ = event_tx.send(crate::event::Event::ShowCopyableText(text));
-                    }
-                }
+                self.set_status_message("📋 Copying selection...".to_string());
                 self.preview_selection.clear();
+
+                let tx = event_tx.clone();
+                let success_msg = format!(
+                    "📋 Copied {} bytes ({} line{})",
+                    byte_count,
+                    line_count,
+                    if line_count == 1 { "" } else { "s" }
+                );
+
+                if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                    let text_for_clipboard = text.clone();
+                    handle.spawn(async move {
+                        match tokio::task::spawn_blocking(move || {
+                            copy_to_system_clipboard(&text_for_clipboard)
+                        })
+                        .await
+                        {
+                            Ok(Ok(true)) => {
+                                let _ = tx
+                                    .send(crate::event::Event::ClipboardCopyComplete(success_msg));
+                            }
+                            _ => {
+                                let _ =
+                                    tx.send(crate::event::Event::ShowCopyableText(text));
+                            }
+                        }
+                    });
+                } else {
+                    std::thread::spawn(move || match copy_to_system_clipboard(&text) {
+                        Ok(true) => {
+                            let _ =
+                                tx.send(crate::event::Event::ClipboardCopyComplete(success_msg));
+                        }
+                        _ => {
+                            let _ = tx.send(crate::event::Event::ShowCopyableText(text));
+                        }
+                    });
+                }
             }
             _ => {
                 self.set_status_message("No preview text selected — drag to select".to_string());
@@ -2648,6 +2675,7 @@ impl App {
 
     /// Copy the current terminal selection to the system clipboard.
     ///
+    /// Runs the clipboard operation asynchronously to avoid blocking the UI.
     /// Shows a status message with the result (success/failure/no-selection).
     pub fn copy_terminal_selection(
         &mut self,
@@ -2657,20 +2685,46 @@ impl App {
             Some(text) if !text.is_empty() => {
                 let line_count = text.lines().count();
                 let byte_count = text.len();
-                match copy_to_system_clipboard(&text) {
-                    Ok(true) => {
-                        self.set_status_message(format!(
-                            "📋 Copied {} bytes ({} line{})",
-                            byte_count,
-                            line_count,
-                            if line_count == 1 { "" } else { "s" }
-                        ));
-                    }
-                    _ => {
-                        let _ = event_tx.send(crate::event::Event::ShowCopyableText(text));
-                    }
-                }
+                self.set_status_message("📋 Copying selection...".to_string());
                 self.terminal_state.selection.clear();
+
+                let tx = event_tx.clone();
+                let success_msg = format!(
+                    "📋 Copied {} bytes ({} line{})",
+                    byte_count,
+                    line_count,
+                    if line_count == 1 { "" } else { "s" }
+                );
+
+                if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                    let text_for_clipboard = text.clone();
+                    handle.spawn(async move {
+                        match tokio::task::spawn_blocking(move || {
+                            copy_to_system_clipboard(&text_for_clipboard)
+                        })
+                        .await
+                        {
+                            Ok(Ok(true)) => {
+                                let _ = tx
+                                    .send(crate::event::Event::ClipboardCopyComplete(success_msg));
+                            }
+                            _ => {
+                                let _ =
+                                    tx.send(crate::event::Event::ShowCopyableText(text));
+                            }
+                        }
+                    });
+                } else {
+                    std::thread::spawn(move || match copy_to_system_clipboard(&text) {
+                        Ok(true) => {
+                            let _ =
+                                tx.send(crate::event::Event::ClipboardCopyComplete(success_msg));
+                        }
+                        _ => {
+                            let _ = tx.send(crate::event::Event::ShowCopyableText(text));
+                        }
+                    });
+                }
             }
             _ => {
                 self.set_status_message("No terminal text selected — drag to select".to_string());
