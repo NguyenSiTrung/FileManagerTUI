@@ -244,10 +244,7 @@ const PREVIEW_KEYS: &[KeyEntry] = &[
         key: "Ctrl+U",
         description: "Half page up",
     },
-    KeyEntry {
-        key: "Ctrl+W",
-        description: "Toggle line wrap",
-    },
+
     KeyEntry {
         key: "Mouse drag",
         description: "Select preview text",

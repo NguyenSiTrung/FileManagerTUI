@@ -1087,10 +1087,7 @@ fn handle_preview_keys(app: &mut App, key: KeyEvent, event_tx: &mpsc::UnboundedS
         KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             app.preview_half_page_up(30);
         }
-        // Toggle line wrap
-        KeyCode::Char('w') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            app.preview_state.line_wrap = !app.preview_state.line_wrap;
-        }
+
         // Adjust head/tail line counts
         KeyCode::Char('+') | KeyCode::Char('=') => {
             app.adjust_preview_lines(crate::preview_content::LINE_COUNT_STEP as isize);
@@ -2532,22 +2529,6 @@ mod tests {
         assert_eq!(app.preview_state.scroll_offset, 99);
     }
 
-    #[test]
-    fn preview_ctrl_w_toggles_wrap() {
-        let (_dir, mut app) = setup_app();
-        app.focused_panel = FocusedPanel::Preview;
-        assert!(!app.preview_state.line_wrap);
-        handle_key(
-            &mut app,
-            make_key_with_modifiers(KeyCode::Char('w'), KeyModifiers::CONTROL),
-        );
-        assert!(app.preview_state.line_wrap);
-        handle_key(
-            &mut app,
-            make_key_with_modifiers(KeyCode::Char('w'), KeyModifiers::CONTROL),
-        );
-        assert!(!app.preview_state.line_wrap);
-    }
 
     #[test]
     fn preview_j_does_not_navigate_tree() {

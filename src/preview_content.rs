@@ -740,6 +740,8 @@ pub fn load_directory_summary(path: &Path, colors: &ThemeColors) -> (Vec<Line<'s
     // Walk directory iteratively with a stack
     let mut stack = vec![path.to_path_buf()];
     let mut capped = false;
+    // Symlink loop protection (same pattern as spawn_async_dir_summary)
+    let mut visited = crate::fs::tree::VisitedDirs::new();
 
     while let Some(current) = stack.pop() {
         let entries = match fs::read_dir(&current) {
@@ -761,7 +763,11 @@ pub fn load_directory_summary(path: &Path, colors: &ThemeColors) -> (Vec<Line<'s
 
             if meta.is_dir() {
                 dir_count += 1;
-                stack.push(entry.path());
+                // Only recurse if we haven't visited this directory before
+                // (prevents infinite loops on circular symlinks)
+                if visited.visit(&entry.path()) {
+                    stack.push(entry.path());
+                }
             } else {
                 file_count += 1;
                 total_size += meta.len();
