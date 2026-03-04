@@ -146,4 +146,13 @@ This file is the project's institutional knowledge - learnings extracted from co
 - Ctrl+Shift+C matching requires `modifiers.contains(CONTROL | SHIFT)` — crossterm combines modifier flags; explicit bitflag checks prevent false positives with plain Ctrl+C (from: terminal-mouse-copy_20260302, archived 2026-03-03)
 - Preview view-mode mouse selection reuses the same coordinate-mapping and selection-rendering patterns as terminal and editor panels (from: terminal-mouse-copy_20260302, archived 2026-03-03)
 
-Last refreshed: 2026-03-03 (terminal-mouse-copy patterns elevated, product.md synced)
+- `load_highlighted_content` reads entire file with `fs::read` — no internal size guard; caller gates via `update_preview` (from: preview-hardening_20260304, archived 2026-03-04)
+- `highlight_single_line` and `load_highlighted_content` share duplicate span-building logic — candidate for extraction (from: preview-hardening_20260304, archived 2026-03-04)
+- `load_directory_summary` (sync deep scan) lacks `VisitedDirs` symlink-loop protection that `spawn_async_dir_summary` has (from: preview-hardening_20260304, archived 2026-03-04)
+- `total_lines` in `load_head_tail_content` returns displayed line count, not actual file line count (from: preview-hardening_20260304, archived 2026-03-04)
+- `read_head_lines` uses `map_while(Result::ok)` which silently drops I/O errors (from: preview-hardening_20260304, archived 2026-03-04)
+- `line_wrap` field exists on `PreviewState` but is never read by `PreviewWidget::render` — dead code (from: preview-hardening_20260304, archived 2026-03-04)
+- `Ctrl+W` handler toggles `line_wrap` state but has no visual effect — dead code (from: preview-hardening_20260304, archived 2026-03-04)
+- `epoch_days_to_date` casts `u64` to `i64` without bounds checking (from: preview-hardening_20260304, archived 2026-03-04)
+
+Last refreshed: 2026-03-04 (preview-hardening patterns elevated)

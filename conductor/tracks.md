@@ -56,5 +56,4 @@
 
 ---
 
-## [x] Track: Preview Content Deep Analysis & Hardening
-*Link: [./conductor/tracks/preview-hardening_20260304/](./conductor/tracks/preview-hardening_20260304/)*
+<!-- Archived: preview-hardening_20260304 (2026-03-04) → conductor/archive/ -->
