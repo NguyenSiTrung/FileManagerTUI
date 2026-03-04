@@ -683,15 +683,14 @@ impl App {
                 use crate::event::Event;
 
                 let path_for_task = path_str.clone();
-                match tokio::task::spawn_blocking(move || {
-                    copy_to_system_clipboard(&path_for_task)
-                })
-                .await
+                match tokio::task::spawn_blocking(move || copy_to_system_clipboard(&path_for_task))
+                    .await
                 {
                     Ok(Ok(true)) => {
-                        let _ = tx.send(Event::ClipboardCopyComplete(
-                            format!("📋 Path copied: {}", path_str),
-                        ));
+                        let _ = tx.send(Event::ClipboardCopyComplete(format!(
+                            "📋 Path copied: {}",
+                            path_str
+                        )));
                     }
                     Ok(Ok(false)) | Ok(Err(_)) | Err(_) => {
                         // Native clipboard failed — show the path for manual browser copy
@@ -705,9 +704,10 @@ impl App {
 
                 match copy_to_system_clipboard(&path_str) {
                     Ok(true) => {
-                        let _ = tx.send(Event::ClipboardCopyComplete(
-                            format!("📋 Path copied: {}", path_str),
-                        ));
+                        let _ = tx.send(Event::ClipboardCopyComplete(format!(
+                            "📋 Path copied: {}",
+                            path_str
+                        )));
                     }
                     Ok(false) | Err(_) => {
                         let _ = tx.send(Event::ShowCopyableText(path_str));
@@ -1876,9 +1876,10 @@ impl App {
                     .await
                     {
                         Ok(Ok(true)) => {
-                            let _ = tx.send(Event::ClipboardCopyComplete(
-                                format!("📋 Path copied: {}", path_str),
-                            ));
+                            let _ = tx.send(Event::ClipboardCopyComplete(format!(
+                                "📋 Path copied: {}",
+                                path_str
+                            )));
                         }
                         Ok(Ok(false)) | Ok(Err(_)) | Err(_) => {
                             let _ = tx.send(Event::ShowCopyableText(path_str));
@@ -1891,9 +1892,10 @@ impl App {
 
                     match copy_to_system_clipboard(&path_str) {
                         Ok(true) => {
-                            let _ = tx.send(Event::ClipboardCopyComplete(
-                                format!("📋 Path copied: {}", path_str),
-                            ));
+                            let _ = tx.send(Event::ClipboardCopyComplete(format!(
+                                "📋 Path copied: {}",
+                                path_str
+                            )));
                         }
                         Ok(false) | Err(_) => {
                             let _ = tx.send(Event::ShowCopyableText(path_str));
@@ -2019,16 +2021,17 @@ impl App {
         &mut self,
         event_tx: &mpsc::UnboundedSender<crate::event::Event>,
     ) {
-        let selected = match self.tree_state.flat_items.get(self.tree_state.selected_index) {
+        let selected = match self
+            .tree_state
+            .flat_items
+            .get(self.tree_state.selected_index)
+        {
             Some(item) => item,
             None => return,
         };
 
         // Skip virtual nodes (LoadMore, Loading)
-        if matches!(
-            selected.node_type,
-            NodeType::LoadMore | NodeType::Loading
-        ) {
+        if matches!(selected.node_type, NodeType::LoadMore | NodeType::Loading) {
             return;
         }
 
@@ -2054,10 +2057,7 @@ impl App {
             let cd_cmd = format!("cd -- {}\n", quoted);
             if pty.write(cd_cmd.as_bytes()).is_ok() {
                 self.focused_panel = FocusedPanel::Terminal;
-                self.set_status_message(format!(
-                    "Terminal: cd {}",
-                    target_dir.to_string_lossy()
-                ));
+                self.set_status_message(format!("Terminal: cd {}", target_dir.to_string_lossy()));
             } else {
                 self.set_status_message("Failed to send command to terminal".to_string());
             }

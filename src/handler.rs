@@ -460,10 +460,7 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent, event_tx: &mpsc::Unbounded
             // Only Esc or Enter close the copy overlay.
             // Mouse capture will be re-enabled by the main loop.
             if matches!(key.code, KeyCode::Esc | KeyCode::Enter) {
-                let path_msg = app
-                    .copy_overlay_text
-                    .take()
-                    .unwrap_or_default();
+                let path_msg = app.copy_overlay_text.take().unwrap_or_default();
                 app.mode = AppMode::Normal;
                 app.set_status_message(format!("📋 Path: {}", path_msg));
                 // Signal the main loop to re-enable mouse capture

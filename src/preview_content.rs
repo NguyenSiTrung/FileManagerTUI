@@ -14,6 +14,10 @@ use crate::theme::ThemeColors;
 /// Line count adjustment step for +/- keys.
 pub const LINE_COUNT_STEP: usize = 10;
 
+/// Hard cap for full-file preview loading (5 MB).
+/// Files larger than this are handled via head+tail mode instead.
+const MAX_PREVIEW_SIZE: u64 = 5 * 1024 * 1024;
+
 /// Detect the syntax name for a file based on its extension.
 pub fn detect_syntax_name(path: &Path) -> &str {
     match path.extension().and_then(|e| e.to_str()) {
@@ -95,12 +99,40 @@ pub fn load_highlighted_content(
     theme: &Theme,
     colors: &ThemeColors,
 ) -> (Vec<Line<'static>>, usize) {
-    let content = match fs::read(path) {
+    // Defense-in-depth: reject files that exceed the hard size cap.
+    // Callers should gate via update_preview(), but this protects against
+    // future callers that skip that check.
+    match fs::metadata(path) {
+        Ok(meta) if meta.len() > MAX_PREVIEW_SIZE => {
+            let size_mb = meta.len() as f64 / (1024.0 * 1024.0);
+            let msg = format!("File too large for full preview ({:.1} MB)", size_mb);
+            return (
+                vec![Line::from(Span::styled(
+                    msg,
+                    Style::default().fg(colors.warning_fg),
+                ))],
+                1,
+            );
+        }
+        Err(e) => {
+            let msg = format!("Error reading file: {}", e);
+            return (
+                vec![Line::from(Span::styled(
+                    msg,
+                    Style::default().fg(colors.error_fg),
+                ))],
+                1,
+            );
+        }
+        _ => {} // size is within limits
+    }
+
+    let (content, is_lossy) = match fs::read(path) {
         Ok(bytes) => match String::from_utf8(bytes) {
-            Ok(s) => s,
+            Ok(s) => (s, false),
             Err(e) => {
                 let lossy = String::from_utf8_lossy(e.as_bytes()).to_string();
-                lossy
+                (lossy, true)
             }
         },
         Err(e) => {
@@ -127,6 +159,15 @@ pub fn load_highlighted_content(
     let line_num_width = total.to_string().len();
 
     let mut result_lines = Vec::with_capacity(total);
+
+    // Prepend UTF-8 lossy warning if applicable
+    if is_lossy {
+        result_lines.push(Line::from(Span::styled(
+            "⚠ File contains non-UTF-8 bytes (showing lossy conversion)".to_string(),
+            Style::default().fg(colors.warning_fg),
+        )));
+    }
+
     for (i, line_str) in lines_text.iter().enumerate() {
         let mut spans: Vec<Span<'static>> = Vec::new();
 
@@ -189,10 +230,18 @@ pub fn fast_line_count(path: &Path) -> std::io::Result<usize> {
 /// Read the first `n` lines from a file using streaming I/O.
 ///
 /// Only reads as many bytes as needed — never loads the entire file.
+/// On I/O error mid-read, returns the lines collected so far (partial success).
 pub fn read_head_lines(path: &Path, n: usize) -> std::io::Result<Vec<String>> {
     let file = fs::File::open(path)?;
     let reader = BufReader::new(file);
-    Ok(reader.lines().take(n).map_while(Result::ok).collect())
+    let mut result = Vec::with_capacity(n);
+    for line_result in reader.lines().take(n) {
+        match line_result {
+            Ok(line) => result.push(line),
+            Err(_) => break, // return partial results on I/O error
+        }
+    }
+    Ok(result)
 }
 
 /// Read the last `n` lines from a file by seeking to the end and scanning backward.
@@ -428,8 +477,9 @@ pub fn load_head_tail_content(
         }
     }
 
-    let displayed = result_lines.len();
-    (result_lines, displayed.max(1))
+    // Return actual file line count, not displayed line count.
+    // PreviewState.total_lines should always mean "total lines in file".
+    (result_lines, total_lines)
 }
 
 /// Highlight a single line with line number prefix.
@@ -624,9 +674,14 @@ pub fn load_binary_metadata(path: &Path, colors: &ThemeColors) -> (Vec<Line<'sta
 }
 
 /// Convert days since Unix epoch to (year, month, day).
+///
+/// Guards against integer overflow when casting large `u64` values to `i64`.
 fn epoch_days_to_date(days: u64) -> (u64, u64, u64) {
-    // Simple algorithm: iterate years/months
-    let mut remaining = days as i64;
+    // Guard against values that would overflow i64
+    let mut remaining = match i64::try_from(days) {
+        Ok(d) => d,
+        Err(_) => return (9999, 12, 31), // fallback for astronomically large values
+    };
     let mut year = 1970u64;
 
     loop {
@@ -1842,8 +1897,9 @@ mod tests {
             5,
             ViewMode::HeadAndTail,
         );
-        // 10 head + 1 separator + 5 tail = 16
-        assert_eq!(total, 16);
+        // 10 head + 1 separator + 5 tail = 16 display lines
+        // But total_lines should be the actual file line count
+        assert_eq!(total, 1000);
         let all_text: String = lines
             .iter()
             .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
@@ -1852,5 +1908,118 @@ mod tests {
         assert!(all_text.contains("content line 9"));
         assert!(all_text.contains("lines omitted"));
         assert!(all_text.contains("content line 999"));
+    }
+
+    // === FR-1: Defense-in-depth size guard tests ===
+
+    #[test]
+    fn size_guard_rejects_large_file() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("huge.txt");
+        // Create a file slightly over 5MB
+        let mut f = File::create(&path).unwrap();
+        let chunk = vec![b'A'; 1024];
+        for _ in 0..(5 * 1024 + 1) {
+            f.write_all(&chunk).unwrap();
+        }
+
+        let ss = SyntaxSet::load_defaults_newlines();
+        let theme = load_theme(None);
+        let (lines, total) = load_highlighted_content(&path, &ss, &theme, &test_colors());
+        assert_eq!(total, 1);
+        let text: String = lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(text.contains("too large"));
+    }
+
+    #[test]
+    fn size_guard_allows_small_file() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("small.rs");
+        let mut f = File::create(&path).unwrap();
+        writeln!(f, "fn main() {{}}").unwrap();
+
+        let ss = SyntaxSet::load_defaults_newlines();
+        let theme = load_theme(None);
+        let (lines, total) = load_highlighted_content(&path, &ss, &theme, &test_colors());
+        assert_eq!(total, 1);
+        assert_eq!(lines.len(), 1);
+        let text: String = lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(!text.contains("too large"));
+    }
+
+    // === FR-2: UTF-8 lossy warning tests ===
+
+    #[test]
+    fn utf8_lossy_shows_warning() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("mixed.txt");
+        let mut f = File::create(&path).unwrap();
+        // Valid UTF-8 followed by invalid bytes followed by more valid text
+        f.write_all(b"hello ").unwrap();
+        f.write_all(&[0x80, 0x81, 0x82]).unwrap();
+        f.write_all(b" world\n").unwrap();
+
+        let ss = SyntaxSet::load_defaults_newlines();
+        let theme = load_theme(None);
+        let (lines, _total) = load_highlighted_content(&path, &ss, &theme, &test_colors());
+        // First line should be the warning
+        let first_text: String = lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(first_text.contains("non-UTF-8"));
+    }
+
+    #[test]
+    fn valid_utf8_no_warning() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("valid.txt");
+        let mut f = File::create(&path).unwrap();
+        writeln!(f, "This is valid UTF-8").unwrap();
+
+        let ss = SyntaxSet::load_defaults_newlines();
+        let theme = load_theme(None);
+        let (lines, _) = load_highlighted_content(&path, &ss, &theme, &test_colors());
+        let first_text: String = lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(!first_text.contains("non-UTF-8"));
+    }
+
+    // === FR-3: total_lines semantics test ===
+
+    #[test]
+    fn head_tail_total_lines_is_actual_count() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("hundred.txt");
+        let mut f = File::create(&path).unwrap();
+        for i in 1..=100 {
+            writeln!(f, "line {}", i).unwrap();
+        }
+        let ss = SyntaxSet::load_defaults_newlines();
+        let theme = load_theme(None);
+        let (_lines, total) = load_head_tail_content(
+            &path,
+            &ss,
+            &theme,
+            &test_colors(),
+            10,
+            5,
+            ViewMode::HeadAndTail,
+        );
+        // total_lines should be the actual file line count, not displayed lines
+        assert_eq!(total, 100);
+    }
+
+    // === FR-10: safe epoch date tests ===
+
+    #[test]
+    fn epoch_days_overflow_does_not_panic() {
+        // u64::MAX is far beyond i64 range — should return fallback
+        let (y, m, d) = epoch_days_to_date(u64::MAX);
+        assert_eq!((y, m, d), (9999, 12, 31));
+    }
+
+    #[test]
+    fn epoch_days_normal_dates() {
+        // Day 0 = 1970-01-01
+        assert_eq!(epoch_days_to_date(0), (1970, 1, 1));
+        // Day 365 = 1971-01-01 (1970 is not a leap year)
+        assert_eq!(epoch_days_to_date(365), (1971, 1, 1));
     }
 }

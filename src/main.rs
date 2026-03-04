@@ -241,8 +241,7 @@ async fn main() -> error::Result<()> {
                 {
                     use base64::Engine;
                     use std::io::Write;
-                    let encoded =
-                        base64::engine::general_purpose::STANDARD.encode(text.as_bytes());
+                    let encoded = base64::engine::general_purpose::STANDARD.encode(text.as_bytes());
                     let backend = tui.terminal_mut().backend_mut();
                     let _ = write!(backend, "\x1b]52;c;{}\x07", encoded);
                     let _ = write!(backend, "\x1b]52;c;{}\x1b\\", encoded);
