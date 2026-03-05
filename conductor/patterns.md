@@ -164,4 +164,6 @@ This file is the project's institutional knowledge - learnings extracted from co
 - Double-click detection must use screen coordinates (col, row) not content coordinates — screen coords are stable across scrolls while content coords shift (from: preview-dblclick_20260304, archived 2026-03-05)
 - `set_anchor` + `set_endpoint` (without `begin_drag`) creates a non-dragging programmatic selection — useful for selections that shouldn't be cleared by mouse-up anchor==endpoint logic (from: preview-dblclick_20260304, archived 2026-03-05)
 
-Last refreshed: 2026-03-05 (double-click detection patterns elevated)
+- `syntect` `load_defaults_newlines()` expects each line to end with `\n`; editor buffer stores lines without trailing newlines, causing the parser to carry incorrect scope contexts (e.g. unterminated comment scopes from `#`) into all subsequent lines — must append `\n` before `highlight_line()` and filter newline chars in render output (from: standalone fix f9658df, 2026-03-04)
+
+Last refreshed: 2026-03-05 (syntect newline gotcha elevated, product.md updated with double-click and editor robustness)

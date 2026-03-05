@@ -1,12 +1,10 @@
 {
-    "last_refresh": "2026-03-04T17:13:38+07:00",
+    "last_refresh": "2026-03-05T17:30:55+07:00",
     "changes": [
-        "product.md: Updated Feature #1 — added T keybinding for terminal-cd at selected path",
-        "product.md: Updated Feature #13 (Clipboard) — added in-TUI copy overlay with disabled mouse capture, async clipboard operations to prevent UI freeze",
-        "patterns.md: Elevated CopyOverlay AppMode pattern (browser-native selection in web terminals)",
-        "patterns.md: Elevated async clipboard copy pattern (tokio::spawn + event channel)",
-        "patterns.md: Elevated open_terminal_at_selected() pattern (terminal-cd from tree)",
-        "tracks.md: Clean — no active tracks, 21 archived tracks total"
+        "product.md: Updated Feature #2 — added double-click line selection and mouse text selection support",
+        "product.md: Updated Feature #9 — added newline-aware syntax highlighting note",
+        "patterns.md: Elevated syntect newline gotcha (load_defaults_newlines requires \\n-terminated lines)",
+        "tracks.md: Clean — no active tracks, 22 archived tracks total"
     ],
-    "drift_source": "preview-hardening_20260304 archived, clipboard UX standalone commits, UI freeze fix (80243ef), terminal-cd feature (c3f0924)"
+    "drift_source": "preview-dblclick_20260304 archived, editor syntax highlighting fix (f9658df)"
 }
