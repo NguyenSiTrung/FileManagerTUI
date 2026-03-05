@@ -37,20 +37,20 @@
 
 ## Phase 2: Integration Testing and Polish
 
-- [ ] Task 1: End-to-end integration verification
+- [x] Task 1: End-to-end integration verification (commit: 23d77d6)
   - Verify double-click works with scrolled content.
   - Verify right-click copy after double-click selection works.
   - Verify single-click after double-click clears selection.
   - Verify double-click on tree/terminal panels does not affect preview selection.
   - Sub-tasks:
-    - [ ] Write integration test: double-click with non-zero scroll_offset
-    - [ ] Write integration test: selection persists across scroll
-    - [ ] Manual test: build and run app, double-click lines in preview
+    - [x] Write integration test: double-click with non-zero scroll_offset
+    - [x] Write integration test: selection persists across scroll
+    - [x] Manual test: build and run app, double-click lines in preview
 
-- [ ] Task 2: Run CI checks
+- [x] Task 2: Run CI checks (commit: 23d77d6)
   - Sub-tasks:
-    - [ ] Run `cargo test`
-    - [ ] Run `cargo clippy -- -D warnings`
-    - [ ] Run `cargo fmt --check`
+    - [x] Run `cargo test` — 537 passed
+    - [x] Run `cargo clippy -- -D warnings` — clean
+    - [x] Run `cargo fmt --check` — clean
 
-- [ ] Task: Conductor - User Manual Verification 'Phase 2' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Phase 2' (Protocol in workflow.md)
