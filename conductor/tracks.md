@@ -60,5 +60,4 @@
 
 ---
 
-## [x] Track: Double-Click Line Selection in Preview Panel
-*Link: [./conductor/tracks/preview-dblclick_20260304/](./conductor/tracks/preview-dblclick_20260304/)*
+<!-- Archived: preview-dblclick_20260304 (2026-03-05) → conductor/archive/ -->

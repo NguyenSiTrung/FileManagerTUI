@@ -159,4 +159,9 @@ This file is the project's institutional knowledge - learnings extracted from co
 - Async clipboard copy: spawn `tokio::spawn` task for `copy_selected_text` / `copy_path` with result sent via `event_tx` channel — prevents UI freeze on slow clipboard IPC (from: 80243ef, 2026-03-04)
 - `open_terminal_at_selected()`: resolve selected tree item's parent dir, show terminal panel if hidden, send `cd <dir> && clear` bytes to PTY — reuses existing PTY write path (from: c3f0924, 2026-03-03)
 
-Last refreshed: 2026-03-04 (clipboard UX, async copy, terminal-cd patterns elevated)
+- Double-click detection: `Option<(Instant, u16, u16)>` with `.take()` for one-shot state consumption — `.take()` atomically reads and clears, preventing stale state (from: preview-dblclick_20260304, archived 2026-03-05)
+- Line content length from `Line<'static>` spans: `l.spans.iter().map(|s| s.content.len()).sum::<usize>()` — accounts for multi-span syntax-highlighted content (from: preview-dblclick_20260304, archived 2026-03-05)
+- Double-click detection must use screen coordinates (col, row) not content coordinates — screen coords are stable across scrolls while content coords shift (from: preview-dblclick_20260304, archived 2026-03-05)
+- `set_anchor` + `set_endpoint` (without `begin_drag`) creates a non-dragging programmatic selection — useful for selections that shouldn't be cleared by mouse-up anchor==endpoint logic (from: preview-dblclick_20260304, archived 2026-03-05)
+
+Last refreshed: 2026-03-05 (double-click detection patterns elevated)
