@@ -238,6 +238,9 @@ pub struct App {
     pub tree_viewport_locked: bool,
     /// Text shown in the copy overlay (mouse capture disabled for browser clipboard).
     pub copy_overlay_text: Option<String>,
+    /// Last left-click in the preview panel: (timestamp, screen_col, screen_row).
+    /// Used to detect double-clicks for full-line selection.
+    pub last_preview_click: Option<(Instant, u16, u16)>,
 }
 
 fn shell_quote_single(input: &str) -> String {
@@ -301,6 +304,7 @@ impl App {
             scrollbar_dragging: false,
             tree_viewport_locked: false,
             copy_overlay_text: None,
+            last_preview_click: None,
         })
     }
 

@@ -106,10 +106,54 @@ pub fn handle_mouse_event(
                 app.terminal_state.selection.clear();
                 // Switch focus to preview
                 app.focused_panel = FocusedPanel::Preview;
-                if let Some(coord) = mouse_to_preview_coord(app, col, row, false) {
-                    app.preview_selection.begin_drag(coord);
+
+                // Double-click detection: check if this click is within 500ms
+                // and at the same screen position as the last preview click.
+                let now = std::time::Instant::now();
+                let is_double_click = app
+                    .last_preview_click
+                    .take()
+                    .map(|(ts, prev_col, prev_row)| {
+                        now.duration_since(ts).as_millis() <= 500
+                            && prev_col == col
+                            && prev_row == row
+                    })
+                    .unwrap_or(false);
+
+                if is_double_click {
+                    // Double-click: select entire line
+                    if let Some(coord) = mouse_to_preview_coord(app, col, row, false) {
+                        let line_len = app
+                            .preview_state
+                            .content_lines
+                            .get(coord.line)
+                            .map(|l| {
+                                // Get the plain text width of the line
+                                l.spans.iter().map(|s| s.content.len()).sum::<usize>()
+                            })
+                            .unwrap_or(0);
+                        app.preview_selection
+                            .set_anchor(crate::terminal::TerminalCoord {
+                                line: coord.line,
+                                col: 0,
+                            });
+                        app.preview_selection
+                            .set_endpoint(crate::terminal::TerminalCoord {
+                                line: coord.line,
+                                col: line_len,
+                            });
+                        // Don't store last_preview_click — consumed
+                    } else {
+                        app.preview_selection.clear();
+                    }
                 } else {
-                    app.preview_selection.clear();
+                    // Single click: start drag selection
+                    app.last_preview_click = Some((now, col, row));
+                    if let Some(coord) = mouse_to_preview_coord(app, col, row, false) {
+                        app.preview_selection.begin_drag(coord);
+                    } else {
+                        app.preview_selection.clear();
+                    }
                 }
             } else if app.terminal_state.visible && is_in_rect(col, row, app.terminal_area) {
                 // Switch focus to terminal and start/clear selection
@@ -3881,5 +3925,159 @@ mod tests {
         // Type a character — should clear selection
         handle_key(&mut app, make_key(KeyCode::Char('a')));
         assert!(!app.terminal_state.selection.is_active());
+    }
+
+    // === Double-click line selection tests ===
+
+    #[test]
+    fn last_preview_click_initializes_to_none() {
+        let (_dir, app) = setup_app();
+        assert!(app.last_preview_click.is_none());
+    }
+
+    /// Helper: create a MouseEvent (Down/Left) at (col, row).
+    fn make_mouse_down_left(col: u16, row: u16) -> MouseEvent {
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: col,
+            row: row,
+            modifiers: KeyModifiers::NONE,
+        }
+    }
+
+    /// Helper: create a MouseEvent (Up/Left) at (col, row).
+    fn make_mouse_up_left(col: u16, row: u16) -> MouseEvent {
+        MouseEvent {
+            kind: MouseEventKind::Up(MouseButton::Left),
+            column: col,
+            row: row,
+            modifiers: KeyModifiers::NONE,
+        }
+    }
+
+    /// Set up an App with a fake preview area and content for mouse tests.
+    fn setup_app_with_preview() -> (TempDir, App) {
+        let (dir, mut app) = setup_app();
+        // Set a preview area that encompasses clickable content.
+        // preview_area starts at (20, 0) with width=40, height=10
+        // Inner area is (21, 1) to (58, 8) — accounting for borders
+        app.preview_area = ratatui::layout::Rect::new(20, 0, 40, 10);
+        // Add some content lines to preview
+        use ratatui::text::{Line, Span};
+        app.preview_state.content_lines = vec![
+            Line::from(Span::raw("Hello World")),      // 11 chars
+            Line::from(Span::raw("Second Line Here")), // 16 chars
+            Line::from(Span::raw("fn main() {}")),     // 12 chars
+        ];
+        app.preview_state.scroll_offset = 0;
+        (dir, app)
+    }
+
+    #[test]
+    fn double_click_within_timeout_selects_full_line() {
+        let (_dir, mut app) = setup_app_with_preview();
+        let tx = make_event_tx();
+
+        // Click position inside preview inner area:
+        // preview_area is (20, 0, 40, 10), inner starts at (21, 1)
+        let click_col = 25;
+        let click_row = 1; // inner_y=0 → line 0
+
+        // First click
+        handle_mouse_event(&mut app, make_mouse_down_left(click_col, click_row), &tx);
+        // First click should store last_preview_click (not yet consumed)
+        // and begin_drag (which sets anchor+endpoint at same point, dragging=true)
+        assert!(app.preview_selection.dragging);
+
+        // Simulate mouse up
+        handle_mouse_event(&mut app, make_mouse_up_left(click_col, click_row), &tx);
+        // After up at same spot, anchor==endpoint → selection gets cleared
+        assert!(!app.preview_selection.is_active());
+
+        // Second click at same position (within timeout — immediate)
+        handle_mouse_event(&mut app, make_mouse_down_left(click_col, click_row), &tx);
+
+        // Should have selected the full line
+        assert!(app.preview_selection.is_active());
+        let (start, end) = app.preview_selection.normalized().unwrap();
+        assert_eq!(start.line, 0);
+        assert_eq!(start.col, 0);
+        assert_eq!(end.line, 0);
+        assert_eq!(end.col, 11); // "Hello World" = 11 chars
+                                 // last_preview_click should be consumed (None)
+        assert!(app.last_preview_click.is_none());
+    }
+
+    #[test]
+    fn clicks_beyond_timeout_treated_as_single_clicks() {
+        let (_dir, mut app) = setup_app_with_preview();
+        let tx = make_event_tx();
+
+        let click_col = 25;
+        let click_row = 1;
+
+        // Simulate a first click that happened long ago by manually setting
+        // last_preview_click to an old timestamp.
+        app.last_preview_click = Some((
+            std::time::Instant::now() - std::time::Duration::from_millis(1000),
+            click_col,
+            click_row,
+        ));
+
+        // Second click at same position but >500ms later
+        handle_mouse_event(&mut app, make_mouse_down_left(click_col, click_row), &tx);
+
+        // Should NOT be a double-click — should be a regular drag start
+        assert!(app.preview_selection.dragging);
+        // last_preview_click should be set to the new click
+        assert!(app.last_preview_click.is_some());
+    }
+
+    #[test]
+    fn double_click_at_different_positions_treated_as_single_clicks() {
+        let (_dir, mut app) = setup_app_with_preview();
+        let tx = make_event_tx();
+
+        // First click at position A
+        let col_a = 25;
+        let row_a = 1;
+        handle_mouse_event(&mut app, make_mouse_down_left(col_a, row_a), &tx);
+        handle_mouse_event(&mut app, make_mouse_up_left(col_a, row_a), &tx);
+
+        // Second click at different position B (within timeout but different coord)
+        let col_b = 30;
+        let row_b = 2;
+        handle_mouse_event(&mut app, make_mouse_down_left(col_b, row_b), &tx);
+
+        // Should NOT be a double-click — should be a regular drag start
+        assert!(app.preview_selection.dragging);
+        // last_preview_click should record position B
+        let (_, stored_col, stored_row) = app.last_preview_click.unwrap();
+        assert_eq!(stored_col, col_b);
+        assert_eq!(stored_row, row_b);
+    }
+
+    #[test]
+    fn double_click_selects_second_line() {
+        let (_dir, mut app) = setup_app_with_preview();
+        let tx = make_event_tx();
+
+        // Click on row 2 → inner_y=1 → line 1 ("Second Line Here", 16 chars)
+        let click_col = 25;
+        let click_row = 2;
+
+        // First click + release
+        handle_mouse_event(&mut app, make_mouse_down_left(click_col, click_row), &tx);
+        handle_mouse_event(&mut app, make_mouse_up_left(click_col, click_row), &tx);
+
+        // Second click (double-click)
+        handle_mouse_event(&mut app, make_mouse_down_left(click_col, click_row), &tx);
+
+        assert!(app.preview_selection.is_active());
+        let (start, end) = app.preview_selection.normalized().unwrap();
+        assert_eq!(start.line, 1);
+        assert_eq!(start.col, 0);
+        assert_eq!(end.line, 1);
+        assert_eq!(end.col, 16); // "Second Line Here" = 16 chars
     }
 }
