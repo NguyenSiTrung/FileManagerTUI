@@ -4080,4 +4080,119 @@ mod tests {
         assert_eq!(end.line, 1);
         assert_eq!(end.col, 16); // "Second Line Here" = 16 chars
     }
+
+    // === Phase 2: Integration tests ===
+
+    #[test]
+    fn double_click_with_nonzero_scroll_offset() {
+        let (dir, mut app) = setup_app();
+        let tx = make_event_tx();
+
+        // Set up preview area and content with many lines
+        app.preview_area = ratatui::layout::Rect::new(20, 0, 40, 10);
+        use ratatui::text::{Line, Span};
+        app.preview_state.content_lines = (0..20)
+            .map(|i| Line::from(Span::raw(format!("Line number {:02}", i))))
+            .collect();
+
+        // Scroll down so line 0 is no longer visible
+        // inner_h = 10 - 2 = 8 visible lines
+        // With scroll_offset = 5, visible lines are 5..12
+        app.preview_state.scroll_offset = 5;
+
+        // Click on row 1 (inner_y=0) → should map to line 5 (scroll_offset + 0)
+        let click_col = 25;
+        let click_row = 1;
+
+        // First click + release
+        handle_mouse_event(&mut app, make_mouse_down_left(click_col, click_row), &tx);
+        handle_mouse_event(&mut app, make_mouse_up_left(click_col, click_row), &tx);
+        // Second click (double-click)
+        handle_mouse_event(&mut app, make_mouse_down_left(click_col, click_row), &tx);
+
+        assert!(app.preview_selection.is_active());
+        let (start, end) = app.preview_selection.normalized().unwrap();
+        assert_eq!(start.line, 5); // scroll_offset + inner_row 0
+        assert_eq!(start.col, 0);
+        assert_eq!(end.line, 5);
+        assert_eq!(end.col, 14); // "Line number 05" = 14 chars
+    }
+
+    #[test]
+    fn double_click_selection_persists_across_scroll() {
+        let (_dir, mut app) = setup_app_with_preview();
+        let tx = make_event_tx();
+
+        // Double-click to select line 0
+        let click_col = 25;
+        let click_row = 1;
+        handle_mouse_event(&mut app, make_mouse_down_left(click_col, click_row), &tx);
+        handle_mouse_event(&mut app, make_mouse_up_left(click_col, click_row), &tx);
+        handle_mouse_event(&mut app, make_mouse_down_left(click_col, click_row), &tx);
+
+        assert!(app.preview_selection.is_active());
+        let (start, end) = app.preview_selection.normalized().unwrap();
+        assert_eq!(start.line, 0);
+        assert_eq!(end.line, 0);
+
+        // Scroll the preview panel (simulate ScrollDown event on preview area)
+        let scroll_event = MouseEvent {
+            kind: MouseEventKind::ScrollDown,
+            column: 25,
+            row: 2,
+            modifiers: KeyModifiers::NONE,
+        };
+        handle_mouse_event(&mut app, scroll_event, &tx);
+
+        // Selection should still be active after scroll
+        assert!(app.preview_selection.is_active());
+        let (start2, end2) = app.preview_selection.normalized().unwrap();
+        assert_eq!(start2.line, 0);
+        assert_eq!(end2.line, 0);
+        assert_eq!(end2.col, 11);
+    }
+
+    #[test]
+    fn single_click_after_double_click_clears_selection() {
+        let (_dir, mut app) = setup_app_with_preview();
+        let tx = make_event_tx();
+
+        // Double-click to select line 0
+        let click_col = 25;
+        let click_row = 1;
+        handle_mouse_event(&mut app, make_mouse_down_left(click_col, click_row), &tx);
+        handle_mouse_event(&mut app, make_mouse_up_left(click_col, click_row), &tx);
+        handle_mouse_event(&mut app, make_mouse_down_left(click_col, click_row), &tx);
+        assert!(app.preview_selection.is_active());
+
+        // Now single-click somewhere else (a different row to avoid triple-click)
+        let new_row = 3;
+        handle_mouse_event(&mut app, make_mouse_down_left(click_col, new_row), &tx);
+        handle_mouse_event(&mut app, make_mouse_up_left(click_col, new_row), &tx);
+
+        // Single click + release at same point → selection should be cleared
+        assert!(!app.preview_selection.is_active());
+    }
+
+    #[test]
+    fn double_click_on_tree_does_not_affect_preview_selection() {
+        let (_dir, mut app) = setup_app_with_preview();
+        let tx = make_event_tx();
+
+        // Set up a tree area
+        app.tree_area = ratatui::layout::Rect::new(0, 0, 20, 10);
+
+        // Pre-set a preview selection
+        app.preview_selection
+            .set_anchor(crate::terminal::TerminalCoord { line: 0, col: 0 });
+        app.preview_selection
+            .set_endpoint(crate::terminal::TerminalCoord { line: 0, col: 5 });
+        assert!(app.preview_selection.is_active());
+
+        // Click in tree area — should clear preview selection (existing behavior)
+        handle_mouse_event(&mut app, make_mouse_down_left(5, 2), &tx);
+        assert!(!app.preview_selection.is_active());
+        // But last_preview_click should NOT be set (click was on tree)
+        assert!(app.last_preview_click.is_none());
+    }
 }
