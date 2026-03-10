@@ -166,4 +166,11 @@ This file is the project's institutional knowledge - learnings extracted from co
 
 - `syntect` `load_defaults_newlines()` expects each line to end with `\n`; editor buffer stores lines without trailing newlines, causing the parser to carry incorrect scope contexts (e.g. unterminated comment scopes from `#`) into all subsequent lines — must append `\n` before `highlight_line()` and filter newline chars in render output (from: standalone fix f9658df, 2026-03-04)
 
-Last refreshed: 2026-03-05 (syntect newline gotcha elevated, product.md updated with double-click and editor robustness)
+- S3 runtime state (`s3_backend`, `s3_config`) stored on App struct, not in AppConfig — it's runtime state not user configuration (from: s3-browse_20260310, archived 2026-03-10)
+- Virtual TreeNode construction without `fs::metadata` by directly setting struct fields (no `TreeNode::new()`) — used for S3 entries that have no local filesystem metadata (from: s3-browse_20260310, archived 2026-03-10)
+- `TreeState::find_node_mut` is private; use `find_node_mut_pub` for access from app.rs (from: s3-browse_20260310, archived 2026-03-10)
+- `aws s3 ls` output uses leading whitespace before `PRE` — parser must handle both trimmed and untrimmed input (from: s3-browse_20260310, archived 2026-03-10)
+- S3 paths stored as `PathBuf` (`PathBuf::from(s3_uri)`) for compatibility with existing tree code that expects `PathBuf` throughout (from: s3-browse_20260310, archived 2026-03-10)
+- `S3ListingComplete` event for both initial and subdirectory listings; routing in main.rs checks `is_root` flag to dispatch correctly (from: s3-browse_20260310, archived 2026-03-10)
+
+Last refreshed: 2026-03-10 (S3 browse patterns elevated from s3-browse_20260310)

@@ -64,5 +64,4 @@
 
 ---
 
-## [~] Track: AWS S3 Browse Mode (Read-Only via CLI)
-*Link: [./conductor/tracks/s3-browse_20260310/](./conductor/tracks/s3-browse_20260310/)*
+<!-- Archived: s3-browse_20260310 (2026-03-10) → conductor/archive/ -->
