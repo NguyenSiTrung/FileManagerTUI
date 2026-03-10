@@ -1,8 +1,8 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
-use std::collections::HashMap;
 
 use fuzzy_matcher::skim::SkimMatcherV2;
 use fuzzy_matcher::FuzzyMatcher;
@@ -247,6 +247,7 @@ pub struct App {
     /// S3 config (None when in local mode).
     pub s3_config: Option<crate::s3::S3Config>,
     /// Cache of downloaded S3 files: S3 URI -> local cache path.
+    #[allow(dead_code)]
     pub s3_download_cache: HashMap<String, PathBuf>,
 }
 
@@ -677,10 +678,7 @@ impl App {
     }
 
     /// Spawn the initial S3 listing to populate the tree.
-    pub fn spawn_s3_initial_load(
-        &mut self,
-        event_tx: &mpsc::UnboundedSender<crate::event::Event>,
-    ) {
+    pub fn spawn_s3_initial_load(&mut self, event_tx: &mpsc::UnboundedSender<crate::event::Event>) {
         let config = match &self.s3_config {
             Some(c) => c.clone(),
             None => return,
@@ -708,20 +706,17 @@ impl App {
                         entries: vec![],
                     });
                     // Also send an error status
-                    let _ = tx.send(crate::event::Event::WatcherInitFailed(
-                        format!("S3 listing failed: {}", e),
-                    ));
+                    let _ = tx.send(crate::event::Event::WatcherInitFailed(format!(
+                        "S3 listing failed: {}",
+                        e
+                    )));
                 }
             }
         });
     }
 
     /// Handle S3 listing completion — build tree nodes from entries.
-    pub fn handle_s3_listing_complete(
-        &mut self,
-        s3_uri: &str,
-        entries: Vec<crate::s3::S3Entry>,
-    ) {
+    pub fn handle_s3_listing_complete(&mut self, s3_uri: &str, entries: Vec<crate::s3::S3Entry>) {
         let s3_path = match crate::s3::S3Path::parse(s3_uri) {
             Some(p) => p,
             None => return,
@@ -814,9 +809,7 @@ impl App {
                         s3_uri: s3_path.to_uri(),
                         entries: vec![],
                     });
-                    let _ = tx.send(crate::event::Event::WatcherInitFailed(
-                        format!("S3: {}", e),
-                    ));
+                    let _ = tx.send(crate::event::Event::WatcherInitFailed(format!("S3: {}", e)));
                 }
             }
         });
@@ -1667,8 +1660,7 @@ impl App {
             if node_type == NodeType::Directory {
                 let info = format!(
                     "☁  S3 Prefix\n\n  {}  {}\n\n  Press Enter to expand",
-                    "📁",
-                    path_str,
+                    "📁", path_str,
                 );
                 self.preview_state = PreviewState {
                     current_path: Some(item.path.clone()),

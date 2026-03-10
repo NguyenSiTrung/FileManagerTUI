@@ -1,8 +1,7 @@
-/// Parser for `aws s3 ls` CLI output.
-///
-/// Converts the text output of `aws s3 ls s3://bucket/prefix/` into
-/// structured `S3Entry` values.
-
+//! Parser for `aws s3 ls` CLI output.
+//!
+//! Converts the text output of `aws s3 ls s3://bucket/prefix/` into
+//! structured `S3Entry` values.
 use super::types::S3Entry;
 
 /// Parse the stdout of `aws s3 ls` into a list of S3 entries.
@@ -138,8 +137,7 @@ pub fn parse_error_output(stderr: &str) -> String {
     if trimmed.contains("NoSuchKey") {
         return "S3 key not found.".to_string();
     }
-    if trimmed.contains("Unable to locate credentials")
-        || trimmed.contains("NoCredentialProviders")
+    if trimmed.contains("Unable to locate credentials") || trimmed.contains("NoCredentialProviders")
     {
         return "No AWS credentials found. Configure via `aws configure` or environment variables."
             .to_string();
@@ -150,11 +148,7 @@ pub fn parse_error_output(stderr: &str) -> String {
     }
 
     // Fall back to the raw error, trimmed to first line
-    trimmed
-        .lines()
-        .next()
-        .unwrap_or(trimmed)
-        .to_string()
+    trimmed.lines().next().unwrap_or(trimmed).to_string()
 }
 
 #[cfg(test)]

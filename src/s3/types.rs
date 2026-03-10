@@ -1,8 +1,7 @@
-/// S3 path and entry types for the S3 browse mode.
-///
-/// These types represent parsed S3 URIs and directory listing entries
-/// without any AWS SDK dependency — the backend shells out to the `aws` CLI.
-
+//! S3 path and entry types for the S3 browse mode.
+//!
+//! These types represent parsed S3 URIs and directory listing entries
+//! without any AWS SDK dependency — the backend shells out to the `aws` CLI.
 use std::fmt;
 
 /// A parsed S3 URI, split into bucket name and optional key prefix.
@@ -59,11 +58,13 @@ impl S3Path {
     /// Returns whether this path represents a "directory" (prefix).
     ///
     /// In S3 terms, a prefix ends with `/` or is empty (bucket root).
+    #[allow(dead_code)]
     pub fn is_prefix(&self) -> bool {
         self.key.is_empty() || self.key.ends_with('/')
     }
 
     /// Returns the display name for this path (last component or bucket name).
+    #[allow(dead_code)]
     pub fn display_name(&self) -> &str {
         if self.key.is_empty() {
             &self.bucket
@@ -90,6 +91,7 @@ impl S3Path {
     }
 
     /// Returns the parent prefix, or `None` if already at bucket root.
+    #[allow(dead_code)]
     pub fn parent(&self) -> Option<Self> {
         if self.key.is_empty() {
             return None;
@@ -128,6 +130,7 @@ pub struct S3Entry {
     pub size: u64,
     /// Last modified date/time as a string (e.g., "2026-03-10 12:34:56").
     /// Empty for directories (S3 prefixes have no modification time).
+    #[allow(dead_code)]
     pub modified: String,
 }
 
@@ -205,7 +208,9 @@ mod tests {
             "my-bucket"
         );
         assert_eq!(
-            S3Path::parse("s3://bucket/experiments/").unwrap().display_name(),
+            S3Path::parse("s3://bucket/experiments/")
+                .unwrap()
+                .display_name(),
             "experiments"
         );
         assert_eq!(

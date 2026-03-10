@@ -137,14 +137,13 @@ async fn main() -> error::Result<()> {
     // Detect S3 mode: PATH starts with "s3://"
     let path_str = cli.path.to_string_lossy();
     let s3_config = if path_str.starts_with("s3://") {
-        let s3_path = s3::S3Path::parse(&path_str).ok_or_else(|| {
-            error::AppError::InvalidPath(format!("Invalid S3 URI: {}", path_str))
-        })?;
+        let s3_path = s3::S3Path::parse(&path_str)
+            .ok_or_else(|| error::AppError::InvalidPath(format!("Invalid S3 URI: {}", path_str)))?;
 
         // Validate AWS CLI is available
-        s3::S3Backend::check_cli().await.map_err(|e| {
-            error::AppError::InvalidPath(e)
-        })?;
+        s3::S3Backend::check_cli()
+            .await
+            .map_err(error::AppError::InvalidPath)?;
 
         Some(s3::S3Config {
             path: s3_path,
@@ -302,7 +301,9 @@ async fn main() -> error::Result<()> {
             }
             Event::S3ListingComplete { s3_uri, entries } => {
                 // Check if this is the root listing or a subdirectory
-                let is_root = app.s3_config.as_ref()
+                let is_root = app
+                    .s3_config
+                    .as_ref()
                     .map(|c| c.path.to_uri() == s3_uri || format!("{}/", c.path.to_uri()) == s3_uri)
                     .unwrap_or(false);
                 // Also check if root is still loading (initial load)

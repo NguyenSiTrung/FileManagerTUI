@@ -1,8 +1,7 @@
-/// Async S3 backend that shells out to the `aws` CLI.
-///
-/// No AWS SDK dependency — all operations are performed by spawning
-/// `aws s3 ls` / `aws s3 cp` subprocesses via `tokio::process::Command`.
-
+//! Async S3 backend that shells out to the `aws` CLI.
+//!
+//! No AWS SDK dependency — all operations are performed by spawning
+//! `aws s3 ls` / `aws s3 cp` subprocesses via `tokio::process::Command`.
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -17,8 +16,10 @@ pub struct S3Backend {
     /// Optional AWS profile name.
     profile: Option<String>,
     /// Cache directory for downloaded files.
+    #[allow(dead_code)]
     cache_dir: PathBuf,
     /// Map of S3 key → local cache path for already-downloaded files.
+    #[allow(dead_code)]
     download_cache: HashMap<String, PathBuf>,
 }
 
@@ -40,12 +41,10 @@ impl S3Backend {
     pub async fn check_cli() -> Result<(), String> {
         match Command::new("which").arg("aws").output().await {
             Ok(output) if output.status.success() => Ok(()),
-            _ => Err(
-                "AWS CLI (`aws`) not found on $PATH.\n\
+            _ => Err("AWS CLI (`aws`) not found on $PATH.\n\
                  Install it: https://docs.aws.amazon.com/cli/latest/userguide/install-cliv2.html\n\
                  Or: pip install awscli"
-                    .to_string(),
-            ),
+                .to_string()),
         }
     }
 
@@ -67,9 +66,10 @@ impl S3Backend {
         }
         cmd.arg("s3").arg("ls").arg(&uri);
 
-        let output = cmd.output().await.map_err(|e| {
-            format!("Failed to run `aws s3 ls`: {}", e)
-        })?;
+        let output = cmd
+            .output()
+            .await
+            .map_err(|e| format!("Failed to run `aws s3 ls`: {}", e))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -84,6 +84,7 @@ impl S3Backend {
     ///
     /// Returns the local path to the downloaded file.
     /// Skips download if already cached for this session.
+    #[allow(dead_code)]
     pub async fn download_to_cache(&mut self, s3_path: &S3Path) -> Result<PathBuf, String> {
         let cache_key = format!("{}/{}", s3_path.bucket, s3_path.key);
 
@@ -117,27 +118,29 @@ impl S3Backend {
             .arg(&s3_uri)
             .arg(local_path.to_string_lossy().as_ref());
 
-        let output = cmd.output().await.map_err(|e| {
-            format!("Failed to run `aws s3 cp`: {}", e)
-        })?;
+        let output = cmd
+            .output()
+            .await
+            .map_err(|e| format!("Failed to run `aws s3 cp`: {}", e))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(parser::parse_error_output(&stderr));
         }
 
-        self.download_cache
-            .insert(cache_key, local_path.clone());
+        self.download_cache.insert(cache_key, local_path.clone());
         Ok(local_path)
     }
 
     /// Check if an S3 object is already cached locally.
+    #[allow(dead_code)]
     pub fn is_cached(&self, s3_path: &S3Path) -> Option<&PathBuf> {
         let cache_key = format!("{}/{}", s3_path.bucket, s3_path.key);
         self.download_cache.get(&cache_key).filter(|p| p.exists())
     }
 
     /// Get the cache directory path.
+    #[allow(dead_code)]
     pub fn cache_dir(&self) -> &Path {
         &self.cache_dir
     }
@@ -148,11 +151,13 @@ impl S3Backend {
     }
 
     /// Get the configured AWS profile.
+    #[allow(dead_code)]
     pub fn profile(&self) -> Option<&str> {
         self.profile.as_deref()
     }
 
     /// Build the base aws command with profile flag if set.
+    #[allow(dead_code)]
     fn base_command(&self) -> Command {
         let mut cmd = Command::new("aws");
         if let Some(ref profile) = self.profile {

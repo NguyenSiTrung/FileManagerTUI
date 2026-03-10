@@ -97,12 +97,14 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         .borders(Borders::ALL)
         .border_style(tree_border_style);
 
-    let tree_widget =
-        TreeWidget::new(&app.tree_state, &theme, app.config.use_icons()).s3_mode(app.is_s3_mode()).block(tree_block.clone());
+    let tree_widget = TreeWidget::new(&app.tree_state, &theme, app.config.use_icons())
+        .s3_mode(app.is_s3_mode())
+        .block(tree_block.clone());
     // Store scrollbar column for mouse hit testing
     app.scrollbar_column = tree_widget.scrollbar_x(tree_area);
-    let tree_widget =
-        TreeWidget::new(&app.tree_state, &theme, app.config.use_icons()).s3_mode(app.is_s3_mode()).block(tree_block);
+    let tree_widget = TreeWidget::new(&app.tree_state, &theme, app.config.use_icons())
+        .s3_mode(app.is_s3_mode())
+        .block(tree_block);
     frame.render_widget(tree_widget, tree_area);
 
     // Render preview panel (or editor if in edit mode)

@@ -977,8 +977,12 @@ fn handle_tree_keys(app: &mut App, key: KeyEvent, event_tx: &mpsc::UnboundedSend
     // S3 mode: block write operations with user-friendly message
     if app.is_s3_mode() {
         match key.code {
-            KeyCode::Char('a') | KeyCode::Char('A') | KeyCode::Char('d') | KeyCode::Char('r')
-            | KeyCode::Char('p') | KeyCode::Char('x') => {
+            KeyCode::Char('a')
+            | KeyCode::Char('A')
+            | KeyCode::Char('d')
+            | KeyCode::Char('r')
+            | KeyCode::Char('p')
+            | KeyCode::Char('x') => {
                 app.set_status_message("☁ S3 mode is read-only".to_string());
                 return;
             }

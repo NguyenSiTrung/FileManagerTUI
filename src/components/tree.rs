@@ -216,9 +216,9 @@ impl<'a> Widget for TreeWidget<'a> {
                 // S3 mode: amber/peach color for S3 entries
                 let s3_color = ratatui::style::Color::Rgb(250, 179, 135); // #fab387 (peach)
                 match item.node_type {
-                    NodeType::Directory => Style::default()
-                        .fg(s3_color)
-                        .add_modifier(Modifier::BOLD),
+                    NodeType::Directory => {
+                        Style::default().fg(s3_color).add_modifier(Modifier::BOLD)
+                    }
                     NodeType::Loading => Style::default()
                         .fg(self.theme.info_fg)
                         .add_modifier(Modifier::DIM),
