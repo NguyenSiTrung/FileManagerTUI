@@ -61,3 +61,8 @@
 ---
 
 <!-- Archived: preview-dblclick_20260304 (2026-03-05) → conductor/archive/ -->
+
+---
+
+## [ ] Track: AWS S3 Browse Mode (Read-Only via CLI)
+*Link: [./conductor/tracks/s3-browse_20260310/](./conductor/tracks/s3-browse_20260310/)*
