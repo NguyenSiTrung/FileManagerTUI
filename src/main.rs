@@ -7,6 +7,7 @@ mod event;
 mod fs;
 mod handler;
 mod preview_content;
+mod s3;
 mod terminal;
 mod theme;
 mod tui;
@@ -72,6 +73,10 @@ struct Cli {
     /// Color theme: dark, light
     #[arg(long)]
     theme: Option<String>,
+
+    /// AWS profile for S3 mode (used when PATH is an s3:// URI)
+    #[arg(long = "aws-profile")]
+    aws_profile: Option<String>,
 }
 
 impl Cli {
@@ -129,9 +134,34 @@ impl Cli {
 async fn main() -> error::Result<()> {
     let cli = Cli::parse();
 
-    let path = cli.path.canonicalize().map_err(|_| {
-        error::AppError::InvalidPath(format!("{} does not exist", cli.path.display()))
-    })?;
+    // Detect S3 mode: PATH starts with "s3://"
+    let path_str = cli.path.to_string_lossy();
+    let s3_config = if path_str.starts_with("s3://") {
+        let s3_path = s3::S3Path::parse(&path_str).ok_or_else(|| {
+            error::AppError::InvalidPath(format!("Invalid S3 URI: {}", path_str))
+        })?;
+
+        // Validate AWS CLI is available
+        s3::S3Backend::check_cli().await.map_err(|e| {
+            error::AppError::InvalidPath(e)
+        })?;
+
+        Some(s3::S3Config {
+            path: s3_path,
+            profile: cli.aws_profile.clone(),
+        })
+    } else {
+        None
+    };
+
+    // For S3 mode, use CWD as the local path (the tree is virtual)
+    let path = if s3_config.is_some() {
+        std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+    } else {
+        cli.path.canonicalize().map_err(|_| {
+            error::AppError::InvalidPath(format!("{} does not exist", cli.path.display()))
+        })?
+    };
 
     // Load configuration: file sources + CLI overrides
     let cli_overrides = cli.as_config_overrides();
@@ -140,6 +170,12 @@ async fn main() -> error::Result<()> {
     install_panic_hook();
 
     let mut app = App::new(&path, config)?;
+
+    // Initialize S3 mode if configured
+    if let Some(ref s3_cfg) = s3_config {
+        app.init_s3_mode(s3_cfg.clone());
+    }
+
     let mut tui = Tui::new(app.config.mouse_enabled())?;
     let mut events = EventHandler::new(Duration::from_millis(16));
     let event_tx = events.sender();
@@ -151,7 +187,8 @@ async fn main() -> error::Result<()> {
 
     // Initialize filesystem watcher in the background so startup stays responsive
     // even for very deep/large directory trees.
-    let _watcher_thread = if !app.config.watcher_enabled() {
+    // Watcher is disabled in S3 mode (no local filesystem to watch).
+    let _watcher_thread = if !app.config.watcher_enabled() || app.is_s3_mode() {
         app.watcher_active = false;
         None
     } else {
@@ -186,8 +223,12 @@ async fn main() -> error::Result<()> {
     };
 
     // Kick off async loading of root directory contents.
-    // The UI renders immediately with a "Loading..." placeholder.
-    app.spawn_initial_load(&event_tx);
+    // In S3 mode, this loads the S3 prefix listing instead.
+    if app.is_s3_mode() {
+        app.spawn_s3_initial_load(&event_tx);
+    } else {
+        app.spawn_initial_load(&event_tx);
+    }
 
     loop {
         tui.terminal_mut().draw(|frame| {
@@ -259,6 +300,20 @@ async fn main() -> error::Result<()> {
                 app.copy_overlay_text = Some(text);
                 app.mode = AppMode::CopyOverlay;
             }
+            Event::S3ListingComplete { s3_uri, entries } => {
+                // Check if this is the root listing or a subdirectory
+                let is_root = app.s3_config.as_ref()
+                    .map(|c| c.path.to_uri() == s3_uri || format!("{}/", c.path.to_uri()) == s3_uri)
+                    .unwrap_or(false);
+                // Also check if root is still loading (initial load)
+                let root_loading = app.tree_state.root.is_loading;
+
+                if is_root || root_loading {
+                    app.handle_s3_listing_complete(&s3_uri, entries);
+                } else {
+                    app.handle_s3_subdirectory_complete(&s3_uri, entries);
+                }
+            }
             Event::WatcherInitFailed(msg) => {
                 app.watcher_active = false;
                 app.set_status_message(format!("⚠ Watcher unavailable: {}", msg));
@@ -290,6 +345,8 @@ async fn main() -> error::Result<()> {
     }
 
     app.shutdown_terminal();
+    // Clean up S3 cache
+    app.cleanup_s3();
     tui.restore()?;
     Ok(())
 }

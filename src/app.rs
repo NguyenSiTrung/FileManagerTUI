@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
+use std::collections::HashMap;
 
 use fuzzy_matcher::skim::SkimMatcherV2;
 use fuzzy_matcher::FuzzyMatcher;
@@ -241,6 +242,12 @@ pub struct App {
     /// Last left-click in the preview panel: (timestamp, screen_col, screen_row).
     /// Used to detect double-clicks for full-line selection.
     pub last_preview_click: Option<(Instant, u16, u16)>,
+    /// S3 backend (None when in local mode).
+    pub s3_backend: Option<crate::s3::S3Backend>,
+    /// S3 config (None when in local mode).
+    pub s3_config: Option<crate::s3::S3Config>,
+    /// Cache of downloaded S3 files: S3 URI -> local cache path.
+    pub s3_download_cache: HashMap<String, PathBuf>,
 }
 
 fn shell_quote_single(input: &str) -> String {
@@ -305,6 +312,9 @@ impl App {
             tree_viewport_locked: false,
             copy_overlay_text: None,
             last_preview_click: None,
+            s3_backend: None,
+            s3_config: None,
+            s3_download_cache: HashMap::new(),
         })
     }
 
@@ -612,6 +622,273 @@ impl App {
             pty.shutdown();
         }
         self.terminal_state.pty = None;
+    }
+
+    // ── S3 Mode ─────────────────────────────────────────────────────────────
+
+    /// Initialize S3 browse mode.
+    ///
+    /// Sets up the S3 backend and replaces the tree with a virtual S3 root node.
+    pub fn init_s3_mode(&mut self, config: crate::s3::S3Config) {
+        let backend = crate::s3::S3Backend::new(&config);
+
+        // Create a virtual root node for the S3 path
+        let s3_path = &config.path;
+        let display_name = format!("☁ {}", s3_path.to_uri());
+        let s3_uri_path = PathBuf::from(s3_path.to_uri());
+
+        // Build a minimal root TreeNode (virtual — no filesystem stat)
+        let root = crate::fs::tree::TreeNode {
+            name: display_name,
+            path: s3_uri_path,
+            node_type: crate::fs::tree::NodeType::Directory,
+            children: None,
+            is_expanded: true,
+            depth: 0,
+            meta: crate::fs::tree::FileMeta {
+                size: 0,
+                modified: None,
+                is_hidden: false,
+            },
+            total_child_count: None,
+            loaded_child_count: 0,
+            has_more_children: false,
+            snapshot: None,
+            loaded_offset: 0,
+            is_stale: false,
+            is_loading: true,
+        };
+
+        self.tree_state.root = root;
+        self.tree_state.flatten();
+
+        self.s3_backend = Some(backend);
+        self.s3_config = Some(config);
+
+        // Disable features not applicable in S3 mode
+        self.watcher_active = false;
+
+        self.set_status_message("☁ S3 mode — loading...".to_string());
+    }
+
+    /// Check whether the app is in S3 browse mode.
+    pub fn is_s3_mode(&self) -> bool {
+        self.s3_backend.is_some()
+    }
+
+    /// Spawn the initial S3 listing to populate the tree.
+    pub fn spawn_s3_initial_load(
+        &mut self,
+        event_tx: &mpsc::UnboundedSender<crate::event::Event>,
+    ) {
+        let config = match &self.s3_config {
+            Some(c) => c.clone(),
+            None => return,
+        };
+
+        let backend = match &self.s3_backend {
+            Some(b) => b.clone(),
+            None => return,
+        };
+
+        let tx = event_tx.clone();
+        let s3_path = config.path.clone();
+
+        tokio::spawn(async move {
+            match backend.list_prefix(&s3_path).await {
+                Ok(entries) => {
+                    let _ = tx.send(crate::event::Event::S3ListingComplete {
+                        s3_uri: s3_path.to_uri(),
+                        entries,
+                    });
+                }
+                Err(e) => {
+                    let _ = tx.send(crate::event::Event::S3ListingComplete {
+                        s3_uri: s3_path.to_uri(),
+                        entries: vec![],
+                    });
+                    // Also send an error status
+                    let _ = tx.send(crate::event::Event::WatcherInitFailed(
+                        format!("S3 listing failed: {}", e),
+                    ));
+                }
+            }
+        });
+    }
+
+    /// Handle S3 listing completion — build tree nodes from entries.
+    pub fn handle_s3_listing_complete(
+        &mut self,
+        s3_uri: &str,
+        entries: Vec<crate::s3::S3Entry>,
+    ) {
+        let s3_path = match crate::s3::S3Path::parse(s3_uri) {
+            Some(p) => p,
+            None => return,
+        };
+
+        // Build child TreeNodes from S3 entries
+        let children: Vec<crate::fs::tree::TreeNode> = entries
+            .iter()
+            .map(|entry| {
+                let child_s3 = s3_path.child(&entry.name);
+                let child_uri = child_s3.to_uri();
+                crate::fs::tree::TreeNode {
+                    name: entry.name.clone(),
+                    path: PathBuf::from(&child_uri),
+                    node_type: if entry.is_dir {
+                        crate::fs::tree::NodeType::Directory
+                    } else {
+                        crate::fs::tree::NodeType::File
+                    },
+                    children: None,
+                    is_expanded: false,
+                    depth: 1, // children of root
+                    meta: crate::fs::tree::FileMeta {
+                        size: entry.size,
+                        modified: None, // S3 modified dates are strings, not SystemTime
+                        is_hidden: entry.name.starts_with('.'),
+                    },
+                    total_child_count: None,
+                    loaded_child_count: 0,
+                    has_more_children: false,
+                    snapshot: None,
+                    loaded_offset: 0,
+                    is_stale: false,
+                    is_loading: false,
+                }
+            })
+            .collect();
+
+        let count = children.len();
+        self.tree_state.root.children = Some(children);
+        self.tree_state.root.total_child_count = Some(count);
+        self.tree_state.root.loaded_child_count = count;
+        self.tree_state.root.is_loading = false;
+        self.tree_state.flatten();
+
+        if count == 0 {
+            self.set_status_message("☁ S3: Empty prefix".to_string());
+        } else {
+            self.set_status_message(format!("☁ S3: {} items loaded", count));
+        }
+    }
+
+    /// Expand an S3 directory by listing its prefix.
+    pub fn spawn_s3_expand(
+        &mut self,
+        s3_uri: String,
+        event_tx: &mpsc::UnboundedSender<crate::event::Event>,
+    ) {
+        let backend = match &self.s3_backend {
+            Some(b) => b.clone(),
+            None => return,
+        };
+
+        let s3_path = match crate::s3::S3Path::parse(&s3_uri) {
+            Some(p) => p,
+            None => return,
+        };
+
+        // Mark the node as loading
+        if let Some(node) = crate::fs::tree::TreeState::find_node_mut_pub(
+            &mut self.tree_state.root,
+            &PathBuf::from(&s3_uri),
+        ) {
+            node.is_loading = true;
+            node.is_expanded = true;
+        }
+        self.tree_state.flatten();
+
+        let tx = event_tx.clone();
+        tokio::spawn(async move {
+            match backend.list_prefix(&s3_path).await {
+                Ok(entries) => {
+                    let _ = tx.send(crate::event::Event::S3ListingComplete {
+                        s3_uri: s3_path.to_uri(),
+                        entries,
+                    });
+                }
+                Err(e) => {
+                    let _ = tx.send(crate::event::Event::S3ListingComplete {
+                        s3_uri: s3_path.to_uri(),
+                        entries: vec![],
+                    });
+                    let _ = tx.send(crate::event::Event::WatcherInitFailed(
+                        format!("S3: {}", e),
+                    ));
+                }
+            }
+        });
+    }
+
+    /// Handle completion of an S3 subdirectory listing.
+    pub fn handle_s3_subdirectory_complete(
+        &mut self,
+        s3_uri: &str,
+        entries: Vec<crate::s3::S3Entry>,
+    ) {
+        let s3_path = match crate::s3::S3Path::parse(s3_uri) {
+            Some(p) => p,
+            None => return,
+        };
+
+        let node_path = PathBuf::from(s3_uri);
+        let node = match crate::fs::tree::TreeState::find_node_mut_pub(
+            &mut self.tree_state.root,
+            &node_path,
+        ) {
+            Some(n) => n,
+            None => return,
+        };
+
+        let depth = node.depth + 1;
+        let children: Vec<crate::fs::tree::TreeNode> = entries
+            .iter()
+            .map(|entry| {
+                let child_s3 = s3_path.child(&entry.name);
+                let child_uri = child_s3.to_uri();
+                crate::fs::tree::TreeNode {
+                    name: entry.name.clone(),
+                    path: PathBuf::from(&child_uri),
+                    node_type: if entry.is_dir {
+                        crate::fs::tree::NodeType::Directory
+                    } else {
+                        crate::fs::tree::NodeType::File
+                    },
+                    children: None,
+                    is_expanded: false,
+                    depth,
+                    meta: crate::fs::tree::FileMeta {
+                        size: entry.size,
+                        modified: None,
+                        is_hidden: entry.name.starts_with('.'),
+                    },
+                    total_child_count: None,
+                    loaded_child_count: 0,
+                    has_more_children: false,
+                    snapshot: None,
+                    loaded_offset: 0,
+                    is_stale: false,
+                    is_loading: false,
+                }
+            })
+            .collect();
+
+        let count = children.len();
+        node.children = Some(children);
+        node.total_child_count = Some(count);
+        node.loaded_child_count = count;
+        node.is_loading = false;
+
+        self.tree_state.flatten();
+    }
+
+    /// Clean up S3 cache directory on exit.
+    pub fn cleanup_s3(&self) {
+        if let Some(ref backend) = self.s3_backend {
+            backend.cleanup_cache();
+        }
     }
 
     /// Collect paths for clipboard: multi-selected if any, else focused item.

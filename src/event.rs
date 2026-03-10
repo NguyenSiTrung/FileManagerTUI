@@ -86,6 +86,11 @@ pub enum Event {
     /// Native clipboard failed — show text for manual browser copy.
     /// The main loop will temporarily exit the TUI so the user can select + Ctrl+C.
     ShowCopyableText(String),
+    /// Async S3 directory listing completed.
+    S3ListingComplete {
+        s3_uri: String,
+        entries: Vec<crate::s3::S3Entry>,
+    },
     /// Filesystem watcher initialization failed.
     WatcherInitFailed(String),
 }
