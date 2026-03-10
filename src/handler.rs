@@ -1121,9 +1121,13 @@ fn handle_tree_keys(app: &mut App, key: KeyEvent, event_tx: &mpsc::UnboundedSend
 
 fn handle_preview_keys(app: &mut App, key: KeyEvent, event_tx: &mpsc::UnboundedSender<Event>) {
     match key.code {
-        // Enter edit mode
+        // Enter edit mode (not available in S3 mode)
         KeyCode::Char('e') => {
-            app.enter_edit_mode();
+            if app.is_s3_mode() {
+                app.set_status_message("☁ Editing unavailable in S3 mode".to_string());
+            } else {
+                app.enter_edit_mode();
+            }
         }
         // Deep scan trigger (only when showing shallow preview)
         KeyCode::Char('D') => {

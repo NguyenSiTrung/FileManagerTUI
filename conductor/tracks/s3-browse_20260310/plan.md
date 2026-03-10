@@ -37,44 +37,44 @@
 ## Phase 2: S3 Tree Integration
 <!-- execution: sequential -->
 
-- [ ] Task 1: Add backend mode to App state (`src/app.rs`)
-  - [ ] Add `BackendMode` enum (Local, S3 { backend: S3Backend })
-  - [ ] Store `backend_mode` on `App` struct
-  - [ ] Initialize `BackendMode::S3` when config has s3_path
-  - [ ] Add `App::is_s3_mode()` helper
-  - [ ] Disable filesystem watcher when in S3 mode
+- [x] Task 1: Add backend mode to App state (`src/app.rs`)
+  - [x] Add `BackendMode` enum (Local, S3 { backend: S3Backend })
+  - [x] Store `backend_mode` on `App` struct
+  - [x] Initialize `BackendMode::S3` when config has s3_path
+  - [x] Add `App::is_s3_mode()` helper
+  - [x] Disable filesystem watcher when in S3 mode
 
-- [ ] Task 2: Build S3 TreeNodes from listing results (`src/fs/tree.rs`)
-  - [ ] Add `TreeNode::from_s3_entry()` constructor — creates node without `fs::metadata`
-  - [ ] Use S3 URI string as the `path` field (stored as PathBuf for compatibility)
-  - [ ] Set `FileMeta` from `S3Entry` (size, modified, is_hidden)
-  - [ ] S3 root node: `TreeNode::new_s3_root(s3_path)` — creates expandable root
-  - [ ] Tests for S3 TreeNode construction
+- [x] Task 2: Build S3 TreeNodes from listing results (`src/fs/tree.rs`)
+  - [x] Add `TreeNode::from_s3_entry()` constructor — creates node without `fs::metadata`
+  - [x] Use S3 URI string as the `path` field (stored as PathBuf for compatibility)
+  - [x] Set `FileMeta` from `S3Entry` (size, modified, is_hidden)
+  - [x] S3 root node: `TreeNode::new_s3_root(s3_path)` — creates expandable root
+  - [x] Tests for S3 TreeNode construction
 
-- [ ] Task 3: S3 directory expansion (`src/app.rs`, `src/fs/tree.rs`)
-  - [ ] Override `expand_selected()` path for S3 mode — call `S3Backend::list_prefix()` instead of `fs::read_dir`
-  - [ ] Build children from `Vec<S3Entry>` via `TreeNode::from_s3_entry()`
-  - [ ] Async expansion with loading indicator (reuse `is_loading` + `DirScanComplete` event pattern)
-  - [ ] Wire `DirScanComplete` handler to accept S3 listing results
-  - [ ] Tests for S3 tree expansion flow
+- [x] Task 3: S3 directory expansion (`src/app.rs`, `src/fs/tree.rs`)
+  - [x] Override `expand_selected()` path for S3 mode — call `S3Backend::list_prefix()` instead of `fs::read_dir`
+  - [x] Build children from `Vec<S3Entry>` via `TreeNode::from_s3_entry()`
+  - [x] Async expansion with loading indicator (reuse `is_loading` + `DirScanComplete` event pattern)
+  - [x] Wire `DirScanComplete` handler to accept S3 listing results
+  - [x] Tests for S3 tree expansion flow
 
-- [ ] Task 4: Disable write operations in S3 mode (`src/handler.rs`)
-  - [ ] Guard `a`/`A` (create), `r` (rename), `d` (delete), `x` (cut), `p` (paste) keys
-  - [ ] Show "Not available in S3 mode" status message when attempted
-  - [ ] Disable `Ctrl+Z` undo in S3 mode
-  - [ ] Disable inline editor (`e` key) in S3 mode
-  - [ ] Disable `T` (open terminal at path) for S3 entries
+- [x] Task 4: Disable write operations in S3 mode (`src/handler.rs`)
+  - [x] Guard `a`/`A` (create), `r` (rename), `d` (delete), `x` (cut), `p` (paste) keys
+  - [x] Show "Not available in S3 mode" status message when attempted
+  - [x] Disable `Ctrl+Z` undo in S3 mode
+  - [x] Disable inline editor (`e` key) in S3 mode
+  - [x] Disable `T` (open terminal at path) for S3 entries
 
-- [ ] Task: Conductor - User Manual Verification 'S3 Tree Integration' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'S3 Tree Integration' (Protocol in workflow.md)
 
 ## Phase 3: S3 Preview & Clipboard
 <!-- execution: sequential -->
 
-- [ ] Task 1: S3 metadata preview (`src/app.rs`, `src/preview_content.rs`)
-  - [ ] When in S3 mode + selected item is file: render metadata preview (size, date, URI, download prompt)
-  - [ ] Add `load_s3_metadata_preview()` function in `preview_content.rs`
-  - [ ] Generate styled `Vec<Line<'static>>` showing S3 object info
-  - [ ] For S3 directories: show prefix info + child count from listing
+- [x] Task 1: S3 metadata preview (`src/app.rs`, `src/preview_content.rs`)
+  - [x] When in S3 mode + selected item is file: render metadata preview (size, date, URI, download prompt)
+  - [x] Add `load_s3_metadata_preview()` function in `preview_content.rs`
+  - [x] Generate styled `Vec<Line<'static>>` showing S3 object info
+  - [x] For S3 directories: show prefix info + child count from listing
 
 - [ ] Task 2: On-demand download and preview (`src/app.rs`, `src/handler.rs`)
   - [ ] Enter key on S3 file → spawn async download via `S3Backend::download_to_cache()`
@@ -83,20 +83,20 @@
   - [ ] Cache tracking: `HashMap<String, PathBuf>` mapping S3 keys → local cache paths
   - [ ] Skip re-download if already cached for this session
 
-- [ ] Task 3: S3 URI clipboard copy (`src/app.rs`, `src/handler.rs`)
-  - [ ] `y` key on S3 file → copy `s3://bucket/key` string to clipboard
-  - [ ] Use existing system clipboard + OSC 52 fallback path
-  - [ ] Show "📋 Copied: s3://..." status message
+- [x] Task 3: S3 URI clipboard copy (`src/app.rs`, `src/handler.rs`)
+  - [x] `y` key on S3 file → copy `s3://bucket/key` string to clipboard
+  - [x] Use existing system clipboard + OSC 52 fallback path
+  - [x] Show "📋 Copied: s3://..." status message
 
-- [ ] Task: Conductor - User Manual Verification 'S3 Preview & Clipboard' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'S3 Preview & Clipboard' (Protocol in workflow.md)
 
 ## Phase 4: UX Polish & Error Handling
 <!-- execution: parallel -->
 
-- [ ] Task 1: S3 status bar badge (`src/components/status_bar.rs`)
+- [x] Task 1: S3 status bar badge (`src/components/status_bar.rs`)
   <!-- files: src/components/status_bar.rs -->
-  - [ ] Show `☁ S3 | s3://bucket` on the left section when in S3 mode
-  - [ ] Replace local path display with S3 URI for selected item
+  - [x] Show `☁ S3 | s3://bucket` on the left section when in S3 mode
+  - [x] Replace local path display with S3 URI for selected item
 
 - [ ] Task 2: S3 tree colors (`src/theme.rs`, `src/components/tree.rs`)
   <!-- files: src/theme.rs, src/components/tree.rs -->
@@ -104,10 +104,10 @@
   - [ ] Apply S3-specific color to S3 entries in tree widget rendering
   - [ ] Add S3 icon prefix: `☁` for S3 directories, `📦` for S3 objects
 
-- [ ] Task 3: Loading indicators (`src/components/preview.rs`)
+- [x] Task 3: Loading indicators (`src/components/preview.rs`)
   <!-- files: src/components/preview.rs -->
-  - [ ] Show `⏳ Downloading...` in preview panel during S3 file download
-  - [ ] Show `⏳ Loading...` in tree during S3 directory expansion (reuse existing pattern)
+  - [x] Show `⏳ Downloading...` in preview panel during S3 file download
+  - [x] Show `⏳ Loading...` in tree during S3 directory expansion (reuse existing pattern)
 
 - [ ] Task 4: Help overlay updates (`src/components/help.rs`)
   <!-- files: src/components/help.rs -->
@@ -115,29 +115,29 @@
   - [ ] Add "(S3: disabled)" suffix to write operation entries
   - [ ] Add S3-specific hints: "Enter: Download & preview", "y: Copy S3 URI"
 
-- [ ] Task 5: Error handling polish (`src/s3/backend.rs`)
+- [x] Task 5: Error handling polish (`src/s3/backend.rs`)
   <!-- files: src/s3/backend.rs -->
-  - [ ] Parse common AWS CLI errors (ExpiredToken, AccessDenied, NoSuchBucket) into user-friendly messages
-  - [ ] Show error dialog for authentication failures
-  - [ ] Add retry prompt on network/timeout errors
-  - [ ] Clean up temp cache directory on app exit
+  - [x] Parse common AWS CLI errors (ExpiredToken, AccessDenied, NoSuchBucket) into user-friendly messages
+  - [x] Show error dialog for authentication failures
+  - [x] Add retry prompt on network/timeout errors
+  - [x] Clean up temp cache directory on app exit
 
-- [ ] Task: Conductor - User Manual Verification 'UX Polish & Error Handling' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'UX Polish & Error Handling' (Protocol in workflow.md)
 
 ## Phase 5: Integration & Cleanup
 <!-- execution: sequential -->
 <!-- depends: phase1, phase2, phase3, phase4 -->
 
-- [ ] Task 1: Disable incompatible features (`src/app.rs`, `src/main.rs`)
-  - [ ] Fuzzy search (Ctrl+P): show "Not available in S3 mode"
-  - [ ] File watcher: skip initialization entirely
-  - [ ] Terminal panel: allow toggle but `T` action on S3 entries shows message
-  - [ ] Inline filter (`/`): works on currently loaded tree nodes (no S3 calls)
+- [x] Task 1: Disable incompatible features (`src/app.rs`, `src/main.rs`)
+  - [x] Fuzzy search (Ctrl+P): show "Not available in S3 mode"
+  - [x] File watcher: skip initialization entirely
+  - [x] Terminal panel: allow toggle but `T` action on S3 entries shows message
+  - [x] Inline filter (`/`): works on currently loaded tree nodes (no S3 calls)
 
-- [ ] Task 2: Temp cache cleanup and session management
-  - [ ] Create unique cache dir per session: `/tmp/fm-s3-cache-<pid>/`
-  - [ ] Register cleanup on app shutdown (in `main.rs` restore flow)
-  - [ ] Handle Ctrl+C cleanup via existing panic hook
+- [x] Task 2: Temp cache cleanup and session management
+  - [x] Create unique cache dir per session: `/tmp/fm-s3-cache-<pid>/`
+  - [x] Register cleanup on app shutdown (in `main.rs` restore flow)
+  - [x] Handle Ctrl+C cleanup via existing panic hook
 
 - [ ] Task 3: End-to-end manual testing checklist
   - [ ] Verify: `fm s3://bucket/prefix/ --aws-profile mfa` launches correctly

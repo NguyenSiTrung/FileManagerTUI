@@ -14,6 +14,7 @@ pub struct TreeWidget<'a> {
     tree_state: &'a TreeState,
     theme: &'a ThemeColors,
     use_icons: bool,
+    s3_mode: bool,
     block: Option<Block<'a>>,
 }
 
@@ -23,8 +24,14 @@ impl<'a> TreeWidget<'a> {
             tree_state,
             theme,
             use_icons,
+            s3_mode: false,
             block: None,
         }
+    }
+
+    pub fn s3_mode(mut self, s3: bool) -> Self {
+        self.s3_mode = s3;
+        self
     }
 
     pub fn block(mut self, block: Block<'a>) -> Self {
@@ -77,6 +84,15 @@ impl<'a> TreeWidget<'a> {
 
     /// Get the directory/file indicator.
     fn item_indicator(&self, item: &FlatItem) -> &'static str {
+        if self.s3_mode {
+            // S3 mode: use cloud/package icons
+            return match item.node_type {
+                NodeType::Directory => "\u{2601}  ",
+                NodeType::File => "\u{1f4e6} ",
+                NodeType::Loading => "\u{23f3} ",
+                _ => "",
+            };
+        }
         if self.use_icons {
             match item.node_type {
                 NodeType::Directory if item.is_expanded => " ",
@@ -196,6 +212,18 @@ impl<'a> Widget for TreeWidget<'a> {
                     .add_modifier(Modifier::BOLD)
             } else if item.is_hidden {
                 Style::default().fg(self.theme.tree_hidden_fg)
+            } else if self.s3_mode {
+                // S3 mode: amber/peach color for S3 entries
+                let s3_color = ratatui::style::Color::Rgb(250, 179, 135); // #fab387 (peach)
+                match item.node_type {
+                    NodeType::Directory => Style::default()
+                        .fg(s3_color)
+                        .add_modifier(Modifier::BOLD),
+                    NodeType::Loading => Style::default()
+                        .fg(self.theme.info_fg)
+                        .add_modifier(Modifier::DIM),
+                    _ => Style::default().fg(s3_color),
+                }
             } else {
                 match item.node_type {
                     NodeType::Directory => Style::default()
