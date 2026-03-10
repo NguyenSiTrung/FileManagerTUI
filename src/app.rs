@@ -1658,6 +1658,68 @@ impl App {
         // Preview content is about to be replaced; clear stale selection.
         self.preview_selection.clear();
 
+        // S3 mode: show S3 metadata instead of reading local filesystem
+        if self.is_s3_mode() {
+            let path_str = item.path.to_string_lossy().to_string();
+            let name = &item.name;
+            let node_type = item.node_type.clone();
+
+            if node_type == NodeType::Directory {
+                let info = format!(
+                    "☁  S3 Prefix\n\n  {}  {}\n\n  Press Enter to expand",
+                    "📁",
+                    path_str,
+                );
+                self.preview_state = PreviewState {
+                    current_path: Some(item.path.clone()),
+                    content_lines: info
+                        .lines()
+                        .map(|l| ratatui::text::Line::raw(l.to_string()))
+                        .collect(),
+                    scroll_offset: preserved_scroll,
+                    view_mode: ViewMode::default(),
+                    line_wrap: false,
+                    total_lines: 5,
+                    is_large_file: false,
+                    is_shallow_preview: false,
+                    head_lines: self.config.head_lines(),
+                    tail_lines: self.config.tail_lines(),
+                };
+            } else {
+                // File: show S3 object metadata
+                let size = if let Some(node) = crate::fs::tree::TreeState::find_node_mut_pub(
+                    &mut self.tree_state.root,
+                    &item.path,
+                ) {
+                    node.meta.size
+                } else {
+                    0
+                };
+                let size_str = format_size_bytes(size);
+                let info = format!(
+                    "☁  S3 Object\n\n  {}  {}\n\n  Size: {}\n  URI:  {}\n\n  Press Y to copy S3 URI",
+                    "📄", name, size_str, path_str,
+                );
+                self.preview_state = PreviewState {
+                    current_path: Some(item.path.clone()),
+                    content_lines: info
+                        .lines()
+                        .map(|l| ratatui::text::Line::raw(l.to_string()))
+                        .collect(),
+                    scroll_offset: preserved_scroll,
+                    view_mode: ViewMode::default(),
+                    line_wrap: false,
+                    total_lines: 8,
+                    is_large_file: false,
+                    is_shallow_preview: false,
+                    head_lines: self.config.head_lines(),
+                    tail_lines: self.config.tail_lines(),
+                };
+            }
+            self.clamp_preview_scroll();
+            return;
+        }
+
         // Directory preview: use async scan if event_tx is available
         if item.node_type == NodeType::Directory {
             let path = item.path.clone();

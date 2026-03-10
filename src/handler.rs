@@ -973,6 +973,19 @@ fn handle_normal_mode(app: &mut App, key: KeyEvent, event_tx: &mpsc::UnboundedSe
 fn handle_tree_keys(app: &mut App, key: KeyEvent, event_tx: &mpsc::UnboundedSender<Event>) {
     // Any keyboard action in the tree unlocks the viewport so it follows selection
     app.tree_viewport_locked = false;
+
+    // S3 mode: block write operations with user-friendly message
+    if app.is_s3_mode() {
+        match key.code {
+            KeyCode::Char('a') | KeyCode::Char('A') | KeyCode::Char('d') | KeyCode::Char('r')
+            | KeyCode::Char('p') | KeyCode::Char('x') => {
+                app.set_status_message("☁ S3 mode is read-only".to_string());
+                return;
+            }
+            _ => {}
+        }
+    }
+
     match key.code {
         // Navigation
         KeyCode::Char('j') | KeyCode::Down => app.select_next(),
@@ -994,6 +1007,10 @@ fn handle_tree_keys(app: &mut App, key: KeyEvent, event_tx: &mpsc::UnboundedSend
                             app.invalidate_search_cache();
                         }
                     }
+                } else if app.is_s3_mode() && item.node_type == NodeType::Directory {
+                    // S3 expand: use S3 listing instead of filesystem
+                    let s3_uri = item.path.to_string_lossy().to_string();
+                    app.spawn_s3_expand(s3_uri, event_tx);
                 } else {
                     app.expand_selected_async(event_tx);
                 }
@@ -1011,6 +1028,7 @@ fn handle_tree_keys(app: &mut App, key: KeyEvent, event_tx: &mpsc::UnboundedSend
         KeyCode::Esc => app.tree_state.clear_multi_select(),
 
         // Clipboard operations (skip LoadMore nodes)
+        // Note: y (copy) works in S3 mode — copies S3 URI to internal clipboard
         KeyCode::Char('y') => {
             if app
                 .tree_state
@@ -1034,6 +1052,7 @@ fn handle_tree_keys(app: &mut App, key: KeyEvent, event_tx: &mpsc::UnboundedSend
         KeyCode::Char('p') => app.paste_clipboard_async(event_tx.clone()),
 
         // File operations — open dialogs
+        // Note: these are unreachable in S3 mode (blocked by guard above)
         KeyCode::Char('a') => app.open_dialog(DialogKind::CreateFile),
         KeyCode::Char('A') => app.open_dialog(DialogKind::CreateDirectory),
         KeyCode::Char('r') => {
@@ -1073,18 +1092,27 @@ fn handle_tree_keys(app: &mut App, key: KeyEvent, event_tx: &mpsc::UnboundedSend
         }
 
         // Copy path to system clipboard
+        // In S3 mode, copies the S3 URI
         KeyCode::Char('Y') => {
             app.copy_path_to_system_clipboard(event_tx);
         }
 
         // Open selected item's directory in the terminal panel
         KeyCode::Char('T') => {
-            app.open_terminal_at_selected(event_tx);
+            if app.is_s3_mode() {
+                app.set_status_message("☁ Terminal unavailable in S3 mode".to_string());
+            } else {
+                app.open_terminal_at_selected(event_tx);
+            }
         }
 
         // Open file/directory with system default application
         KeyCode::Char('o') => {
-            app.open_in_system();
+            if app.is_s3_mode() {
+                app.set_status_message("☁ System open unavailable in S3 mode".to_string());
+            } else {
+                app.open_in_system();
+            }
         }
 
         _ => {}

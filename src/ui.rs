@@ -256,7 +256,9 @@ pub fn render(app: &mut App, frame: &mut Frame) {
     // Context-aware key hints based on focused panel
     let key_hints_str = match app.focused_panel {
         FocusedPanel::Tree => {
-            if app.clipboard.is_empty() {
+            if app.is_s3_mode() {
+                " ↵:expand Y:uri y:cp s:sort ?:help ".to_string()
+            } else if app.clipboard.is_empty() {
                 " y:cp x:cut Y:path T:term o:open a:new r:ren d:del ".to_string()
             } else {
                 " y:cp x:cut p:paste Y:path T:term o:open r:ren d:del ".to_string()
@@ -292,7 +294,9 @@ pub fn render(app: &mut App, frame: &mut Frame) {
     }
 
     // Show watcher status indicator
-    let watcher_indicator = if app.watcher_active {
+    let watcher_indicator = if app.is_s3_mode() {
+        "☁ S3".to_string()
+    } else if app.watcher_active {
         "👁 Auto".to_string()
     } else {
         "⏸ Manual".to_string()

@@ -3,36 +3,36 @@
 ## Phase 1: S3 Backend Module
 <!-- execution: sequential -->
 
-- [ ] Task 1: Create S3 types and path parsing (`src/s3/mod.rs`, `src/s3/types.rs`)
-  - [ ] Define `S3Path` struct (bucket, prefix/key)
-  - [ ] Parse `s3://bucket/prefix/key` URIs into `S3Path`
-  - [ ] Define `S3Entry` struct (name, is_dir, size, modified)
-  - [ ] Define `S3Backend` struct (profile: Option<String>)
-  - [ ] Unit tests for URI parsing (edge cases: root bucket, trailing slash, no prefix)
+- [x] Task 1: Create S3 types and path parsing (`src/s3/mod.rs`, `src/s3/types.rs`)
+  - [x] Define `S3Path` struct (bucket, prefix/key)
+  - [x] Parse `s3://bucket/prefix/key` URIs into `S3Path`
+  - [x] Define `S3Entry` struct (name, is_dir, size, modified)
+  - [x] Define `S3Backend` struct (profile: Option<String>)
+  - [x] Unit tests for URI parsing (edge cases: root bucket, trailing slash, no prefix)
 
-- [ ] Task 2: Implement `aws s3 ls` output parser (`src/s3/parser.rs`)
-  - [ ] Parse `PRE <name>/` lines as directory entries
-  - [ ] Parse `<date> <time> <size> <name>` lines as file entries
-  - [ ] Handle empty output (empty prefix)
-  - [ ] Handle error output from stderr
-  - [ ] Unit tests with sample `aws s3 ls` output (dirs, files, mixed, empty, errors)
+- [x] Task 2: Implement `aws s3 ls` output parser (`src/s3/parser.rs`)
+  - [x] Parse `PRE <name>/` lines as directory entries
+  - [x] Parse `<date> <time> <size> <name>` lines as file entries
+  - [x] Handle empty output (empty prefix)
+  - [x] Handle error output from stderr
+  - [x] Unit tests with sample `aws s3 ls` output (dirs, files, mixed, empty, errors)
 
-- [ ] Task 3: Implement async S3 listing via CLI (`src/s3/backend.rs`)
-  - [ ] `S3Backend::list_prefix()` — spawn `aws [--profile] s3 ls s3://...` via `tokio::process::Command`
-  - [ ] Capture stdout → parse with parser; capture stderr → error handling
-  - [ ] `S3Backend::check_cli()` — verify `aws` exists on PATH
-  - [ ] `S3Backend::download_to_cache()` — `aws s3 cp` to temp cache dir
-  - [ ] Manage temp cache directory lifecycle (`/tmp/fm-s3-cache-<pid>/`)
-  - [ ] Unit tests for command construction (verify args are correct)
+- [x] Task 3: Implement async S3 listing via CLI (`src/s3/backend.rs`)
+  - [x] `S3Backend::list_prefix()` — spawn `aws [--profile] s3 ls s3://...` via `tokio::process::Command`
+  - [x] Capture stdout → parse with parser; capture stderr → error handling
+  - [x] `S3Backend::check_cli()` — verify `aws` exists on PATH
+  - [x] `S3Backend::download_to_cache()` — `aws s3 cp` to temp cache dir
+  - [x] Manage temp cache directory lifecycle (`/tmp/fm-s3-cache-<pid>/`)
+  - [x] Unit tests for command construction (verify args are correct)
 
-- [ ] Task 4: Add CLI flags for S3 mode (`src/config.rs`, `src/main.rs`)
-  - [ ] Add `--aws-profile <name>` flag to clap args
-  - [ ] Detect `s3://` prefix in PATH argument
-  - [ ] Store S3 config in `AppConfig` (s3_mode: bool, aws_profile: Option<String>, s3_path: Option<S3Path>)
-  - [ ] Validate `aws` CLI at startup; exit with actionable error if missing
-  - [ ] Tests for CLI arg parsing
+- [x] Task 4: Add CLI flags for S3 mode (`src/config.rs`, `src/main.rs`)
+  - [x] Add `--aws-profile <name>` flag to clap args
+  - [x] Detect `s3://` prefix in PATH argument
+  - [x] Store S3 config in `AppConfig` (s3_mode: bool, aws_profile: Option<String>, s3_path: Option<S3Path>)
+  - [x] Validate `aws` CLI at startup; exit with actionable error if missing
+  - [x] Tests for CLI arg parsing
 
-- [ ] Task: Conductor - User Manual Verification 'S3 Backend Module' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'S3 Backend Module' (Protocol in workflow.md)
 
 ## Phase 2: S3 Tree Integration
 <!-- execution: sequential -->
