@@ -908,4 +908,65 @@ search_max_entries = 5000
         assert_eq!(merged.max_entries_per_page(), 3000); // overridden
         assert_eq!(merged.search_max_entries(), 8000); // from base
     }
+
+    #[test]
+    fn test_s3_head_lines_default() {
+        let cfg = AppConfig::default();
+        assert_eq!(cfg.s3_head_lines(), 100);
+    }
+
+    #[test]
+    fn test_s3_head_lines_from_toml() {
+        let toml = r#"
+[preview]
+s3_head_lines = 50
+"#;
+        let cfg: AppConfig = toml::from_str(toml).expect("parse");
+        assert_eq!(cfg.s3_head_lines(), 50);
+    }
+
+    #[test]
+    fn test_s3_head_lines_merge_override() {
+        let base = AppConfig {
+            preview: PreviewConfig {
+                s3_head_lines: Some(100),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let over = AppConfig {
+            preview: PreviewConfig {
+                s3_head_lines: Some(200),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let merged = base.merge(&over);
+        assert_eq!(merged.s3_head_lines(), 200);
+    }
+
+    #[test]
+    fn test_s3_head_lines_cli_override() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let cfg_path = dir.path().join("config.toml");
+        std::fs::write(
+            &cfg_path,
+            r#"
+[preview]
+s3_head_lines = 50
+"#,
+        )
+        .expect("write");
+
+        let cli_overrides = AppConfig {
+            preview: PreviewConfig {
+                s3_head_lines: Some(75),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let cfg = AppConfig::load(Some(&cfg_path), Some(&cli_overrides));
+        assert_eq!(cfg.s3_head_lines(), 75); // CLI override wins
+    }
 }
