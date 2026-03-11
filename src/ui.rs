@@ -77,9 +77,15 @@ pub fn render(app: &mut App, frame: &mut Frame) {
     // Determine border styles based on focus (using theme colors)
     let focused_border = Style::default().fg(theme.border_focused_fg);
     let unfocused_border = Style::default().fg(theme.border_fg);
+    // S3 mode: tint the tree border with S3-specific color for visual context
+    let tree_focused_border = if app.is_s3_mode() {
+        Style::default().fg(theme.s3_border_fg)
+    } else {
+        focused_border
+    };
 
     let (tree_border_style, preview_border_style, terminal_border_style) = match app.focused_panel {
-        FocusedPanel::Tree => (focused_border, unfocused_border, unfocused_border),
+        FocusedPanel::Tree => (tree_focused_border, unfocused_border, unfocused_border),
         FocusedPanel::Preview => (unfocused_border, focused_border, unfocused_border),
         FocusedPanel::Terminal => (unfocused_border, unfocused_border, focused_border),
     };

@@ -62,6 +62,11 @@ pub struct ThemeColors {
     // Scrollbar
     pub scrollbar_track_fg: Color,
     pub scrollbar_thumb_fg: Color,
+
+    // S3 mode
+    pub s3_dir_fg: Color,
+    pub s3_file_fg: Color,
+    pub s3_border_fg: Color,
 }
 
 // ── Built-in palettes ────────────────────────────────────────────────────────
@@ -117,6 +122,11 @@ pub fn dark_theme() -> ThemeColors {
         // Scrollbar
         scrollbar_track_fg: Color::Rgb(60, 60, 60), // dark gray
         scrollbar_thumb_fg: Color::Rgb(137, 180, 250), // #89b4fa (blue/accent)
+
+        // S3 mode
+        s3_dir_fg: Color::Rgb(137, 220, 235),    // #89dceb (sky)
+        s3_file_fg: Color::Rgb(250, 179, 135),   // #fab387 (peach)
+        s3_border_fg: Color::Rgb(137, 220, 235), // #89dceb (sky)
     }
 }
 
@@ -171,6 +181,11 @@ pub fn light_theme() -> ThemeColors {
         // Scrollbar
         scrollbar_track_fg: Color::Rgb(200, 200, 200), // light gray
         scrollbar_thumb_fg: Color::Rgb(30, 102, 245),  // #1e66f5 (blue/accent)
+
+        // S3 mode
+        s3_dir_fg: Color::Rgb(4, 165, 229),    // #04a5e5 (sky)
+        s3_file_fg: Color::Rgb(254, 100, 11),  // #fe640b (orange/peach)
+        s3_border_fg: Color::Rgb(4, 165, 229), // #04a5e5 (sky)
     }
 }
 
@@ -268,6 +283,15 @@ fn apply_custom_colors(theme: &mut ThemeColors, custom: &ThemeColorsConfig) {
     }
     if let Some(ref c) = custom.scrollbar_thumb_fg {
         theme.scrollbar_thumb_fg = parse_or(Some(c), theme.scrollbar_thumb_fg);
+    }
+    if let Some(ref c) = custom.s3_dir_fg {
+        theme.s3_dir_fg = parse_or(Some(c), theme.s3_dir_fg);
+    }
+    if let Some(ref c) = custom.s3_file_fg {
+        theme.s3_file_fg = parse_or(Some(c), theme.s3_file_fg);
+    }
+    if let Some(ref c) = custom.s3_border_fg {
+        theme.s3_border_fg = parse_or(Some(c), theme.s3_border_fg);
     }
 }
 
@@ -376,5 +400,47 @@ mod tests {
         assert_ne!(dark.tree_selected_bg, light.tree_selected_bg);
         assert_ne!(dark.tree_dir_fg, light.tree_dir_fg);
         assert_ne!(dark.error_fg, light.error_fg);
+    }
+
+    #[test]
+    fn test_dark_theme_s3_colors() {
+        let theme = dark_theme();
+        assert_eq!(theme.s3_dir_fg, Color::Rgb(137, 220, 235)); // #89dceb (sky)
+        assert_eq!(theme.s3_file_fg, Color::Rgb(250, 179, 135)); // #fab387 (peach)
+        assert_eq!(theme.s3_border_fg, Color::Rgb(137, 220, 235)); // #89dceb (sky)
+    }
+
+    #[test]
+    fn test_light_theme_s3_colors() {
+        let theme = light_theme();
+        assert_eq!(theme.s3_dir_fg, Color::Rgb(4, 165, 229)); // #04a5e5 (sky)
+        assert_eq!(theme.s3_file_fg, Color::Rgb(254, 100, 11)); // #fe640b (orange)
+        assert_eq!(theme.s3_border_fg, Color::Rgb(4, 165, 229)); // #04a5e5 (sky)
+    }
+
+    #[test]
+    fn test_custom_s3_color_overrides() {
+        let config = ThemeConfig {
+            scheme: Some("custom".to_string()),
+            custom: Some(ThemeColorsConfig {
+                s3_dir_fg: Some("#00ffaa".to_string()),
+                s3_file_fg: Some("#ff00bb".to_string()),
+                s3_border_fg: Some("#aabbcc".to_string()),
+                ..Default::default()
+            }),
+        };
+        let theme = resolve_theme(&config);
+        assert_eq!(theme.s3_dir_fg, Color::Rgb(0, 255, 170));
+        assert_eq!(theme.s3_file_fg, Color::Rgb(255, 0, 187));
+        assert_eq!(theme.s3_border_fg, Color::Rgb(170, 187, 204));
+    }
+
+    #[test]
+    fn test_s3_colors_differ_between_dark_and_light() {
+        let dark = dark_theme();
+        let light = light_theme();
+        assert_ne!(dark.s3_dir_fg, light.s3_dir_fg);
+        assert_ne!(dark.s3_file_fg, light.s3_file_fg);
+        assert_ne!(dark.s3_border_fg, light.s3_border_fg);
     }
 }

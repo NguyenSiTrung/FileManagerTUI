@@ -127,6 +127,9 @@ pub struct ThemeColorsConfig {
     pub dialog_border_fg: Option<String>,
     pub scrollbar_track_fg: Option<String>,
     pub scrollbar_thumb_fg: Option<String>,
+    pub s3_dir_fg: Option<String>,
+    pub s3_file_fg: Option<String>,
+    pub s3_border_fg: Option<String>,
 }
 
 /// Theme configuration section.
