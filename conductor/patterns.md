@@ -176,4 +176,11 @@ This file is the project's institutional knowledge - learnings extracted from co
 - `wrap_text()` char-boundary string wrapping for long URIs/paths in preview panels — splits at char boundaries (not word boundaries) since URIs have no natural breaks; uses `preview_area.width` for dynamic wrap width (from: S3 preview fix 9efcdb5, 2026-03-10)
 - `Y` key in `handle_preview_keys` for clipboard copy — mirrors tree-panel `y` behavior for consistent UX across panels (from: S3 preview fix 9efcdb5, 2026-03-10)
 
-Last refreshed: 2026-03-11 (S3 preview URI-wrapping and Y-key patterns added)
+- Use `std::result::Result<T, E>` explicitly when the crate has a custom `Result<T>` type alias — avoids confusing type inference errors (from: s3-head-preview_20260311, archived 2026-03-11)
+- `highlight_content_from_string()` reuses `detect_syntax_name` + `highlight_single_line` for in-memory content — same pipeline as file-based highlighting (from: s3-head-preview_20260311, archived 2026-03-11)
+- Shell pipe via `sh -c 'aws s3 cp ... - | head -n N'` is cleanest way to stream first N lines without downloading full file (from: s3-head-preview_20260311, archived 2026-03-11)
+- Binary detection for in-memory content needs `content.as_bytes()[..check_len].contains(&0)` — same pattern as file-based binary check (from: s3-head-preview_20260311, archived 2026-03-11)
+- S3 head state (active/loading/content/uri) lives on App struct alongside s3_backend/s3_config — reset on file navigation change in update_preview() (from: s3-head-preview_20260311, archived 2026-03-11)
+- Config test pattern: default → TOML parse → merge → CLI load with explicit path (from: s3-head-preview_20260311, archived 2026-03-11)
+
+Last refreshed: 2026-03-11 (S3 head preview patterns elevated)

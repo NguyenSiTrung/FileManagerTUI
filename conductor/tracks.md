@@ -68,5 +68,4 @@
 
 ---
 
-## [x] Track: S3 Head Preview — Stream first N lines of S3 files in preview panel
-*Link: [./conductor/tracks/s3-head-preview_20260311/](./conductor/tracks/s3-head-preview_20260311/)*
+<!-- Archived: s3-head-preview_20260311 (2026-03-11) → conductor/archive/ -->
