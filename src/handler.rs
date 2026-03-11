@@ -2012,6 +2012,11 @@ fn apply_settings_live(app: &mut App) {
                     app.config.preview.line_wrap = Some(*b);
                 }
             }
+            ("preview", "s3_head_lines") => {
+                if let SettingValueKind::UInt(n) = value {
+                    app.config.preview.s3_head_lines = Some(*n as usize);
+                }
+            }
             ("preview", "syntax_theme") => {
                 if let SettingValueKind::Str(s) = value {
                     if s.trim().is_empty() {

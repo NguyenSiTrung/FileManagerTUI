@@ -9,8 +9,8 @@ use ratatui::{
 use crate::config::{
     AppConfig, DEFAULT_DEBOUNCE_MS, DEFAULT_HEAD_LINES, DEFAULT_MAX_EDITOR_BYTES,
     DEFAULT_MAX_EDITOR_LINES, DEFAULT_MAX_ENTRIES_PER_PAGE, DEFAULT_MAX_FULL_PREVIEW_BYTES,
-    DEFAULT_PREVIEW_TIMEOUT_MS, DEFAULT_SCROLL_LINES, DEFAULT_SEARCH_MAX_ENTRIES,
-    DEFAULT_SNAPSHOT_MAX_ENTRIES, DEFAULT_TAIL_LINES,
+    DEFAULT_PREVIEW_TIMEOUT_MS, DEFAULT_S3_HEAD_LINES, DEFAULT_SCROLL_LINES,
+    DEFAULT_SEARCH_MAX_ENTRIES, DEFAULT_SNAPSHOT_MAX_ENTRIES, DEFAULT_TAIL_LINES,
 };
 use crate::theme::ThemeColors;
 
@@ -252,6 +252,14 @@ impl SettingsState {
                 description: "Timeout for directory deep scans (ms)",
                 current_value: SettingValueKind::UInt(config.preview_timeout_ms()),
                 default_value: SettingValueKind::UInt(DEFAULT_PREVIEW_TIMEOUT_MS),
+                modified_value: None,
+            },
+            SettingEntry {
+                section: "preview",
+                key: "s3_head_lines",
+                description: "Lines to stream for S3 head preview",
+                current_value: SettingValueKind::UInt(config.s3_head_lines() as u64),
+                default_value: SettingValueKind::UInt(DEFAULT_S3_HEAD_LINES as u64),
                 modified_value: None,
             },
             // ── Tree ─────────────────────────────────────────────────────
