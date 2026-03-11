@@ -183,4 +183,7 @@ This file is the project's institutional knowledge - learnings extracted from co
 - S3 head state (active/loading/content/uri) lives on App struct alongside s3_backend/s3_config — reset on file navigation change in update_preview() (from: s3-head-preview_20260311, archived 2026-03-11)
 - Config test pattern: default → TOML parse → merge → CLI load with explicit path (from: s3-head-preview_20260311, archived 2026-03-11)
 
-Last refreshed: 2026-03-11 (S3 head preview patterns elevated)
+- Adding new ThemeColors fields follows a 3-file pattern: struct field in theme.rs → defaults in dark_theme()/light_theme() → Option<String> in config.rs ThemeColorsConfig → apply_custom_colors() entry in theme.rs (from: s3-tree-colors_20260311, 2026-03-11)
+- Border style override per-mode: compute a mode-specific focused style variable and substitute it in the border tuple destructuring in ui.rs — pattern for any mode-contextual border tinting (from: s3-tree-colors_20260311, 2026-03-11)
+
+Last refreshed: 2026-03-11 (S3 tree colors patterns elevated)
