@@ -67,7 +67,7 @@
   - Test with/without profile
   - Test binary content detection
 
-- [ ] Task 2: Integration test for config + CLI override
+- [x] Task 2: Integration test for config + CLI override
   - Test `s3_head_lines` from config file
   - Test `--s3-head-lines` CLI flag overrides config
 
