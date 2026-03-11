@@ -212,6 +212,56 @@ pub fn load_highlighted_content(
     (result_lines, total)
 }
 
+/// Syntax-highlight a string of content, using the given filename for language detection.
+///
+/// Returns (highlighted lines, total line count). Used for S3 head preview
+/// where content is already in memory (not on disk).
+pub fn highlight_content_from_string(
+    content: &str,
+    filename: &str,
+    ss: &SyntaxSet,
+    theme: &Theme,
+    colors: &ThemeColors,
+) -> (Vec<Line<'static>>, usize) {
+    let path = std::path::Path::new(filename);
+    let syntax_name = detect_syntax_name(path);
+    let syntax = ss
+        .find_syntax_by_name(syntax_name)
+        .or_else(|| {
+            path.extension()
+                .and_then(|e| e.to_str())
+                .and_then(|ext| ss.find_syntax_by_extension(ext))
+        })
+        .unwrap_or_else(|| ss.find_syntax_plain_text());
+
+    let mut highlighter = syntect::easy::HighlightLines::new(syntax, theme);
+    let lines_text: Vec<&str> = content.lines().collect();
+    let total = lines_text.len().max(1);
+    let line_num_width = total.to_string().len();
+
+    let mut result_lines = Vec::with_capacity(total);
+
+    for (i, line_str) in lines_text.iter().enumerate() {
+        result_lines.push(highlight_single_line(
+            line_str,
+            i + 1,
+            line_num_width,
+            &mut highlighter,
+            ss,
+            colors,
+        ));
+    }
+
+    if result_lines.is_empty() {
+        result_lines.push(Line::from(Span::styled(
+            "(empty file)",
+            Style::default().fg(colors.dim_fg),
+        )));
+    }
+
+    (result_lines, total)
+}
+
 /// Count lines in a file using fast byte scanning (64KB chunks).
 pub fn fast_line_count(path: &Path) -> std::io::Result<usize> {
     let mut file = fs::File::open(path)?;

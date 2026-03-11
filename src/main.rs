@@ -77,6 +77,10 @@ struct Cli {
     /// AWS profile for S3 mode (used when PATH is an s3:// URI)
     #[arg(long = "aws-profile")]
     aws_profile: Option<String>,
+
+    /// Number of lines to stream for S3 head preview (default: 100)
+    #[arg(long)]
+    s3_head_lines: Option<usize>,
 }
 
 impl Cli {
@@ -105,6 +109,7 @@ impl Cli {
                 syntax_theme: None,
                 enabled: if self.no_preview { Some(false) } else { None },
                 preview_timeout_ms: None,
+                s3_head_lines: self.s3_head_lines,
             },
             tree: TreeConfig {
                 sort_by: None,
@@ -298,6 +303,9 @@ async fn main() -> error::Result<()> {
 
                 app.copy_overlay_text = Some(text);
                 app.mode = AppMode::CopyOverlay;
+            }
+            Event::S3HeadComplete { s3_uri, content } => {
+                app.handle_s3_head_complete(&s3_uri, content);
             }
             Event::S3ListingComplete { s3_uri, entries } => {
                 // Check if this is the root listing or a subdirectory

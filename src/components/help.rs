@@ -268,6 +268,10 @@ const PREVIEW_KEYS: &[KeyEntry] = &[
         key: "D",
         description: "Trigger deep scan (dirs only)",
     },
+    KeyEntry {
+        key: "H",
+        description: "S3 head preview (first N lines)",
+    },
 ];
 
 const EDITOR_KEYS: &[KeyEntry] = &[

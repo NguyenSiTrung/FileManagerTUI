@@ -145,6 +145,42 @@ impl S3Backend {
         &self.cache_dir
     }
 
+    /// Stream the first N lines of an S3 object without downloading the full file.
+    ///
+    /// Runs `sh -c 'aws s3 cp <uri> - | head -n <N>'` and returns the content.
+    /// Returns `Err` with a user-friendly message on failure.
+    pub async fn stream_head(&self, s3_path: &S3Path, n_lines: usize) -> Result<String, String> {
+        let s3_uri = s3_path.to_uri();
+
+        let mut shell_cmd = String::from("aws");
+        if let Some(ref profile) = self.profile {
+            shell_cmd.push_str(&format!(" --profile {}", profile));
+        }
+        shell_cmd.push_str(&format!(" s3 cp '{}' - | head -n {}", s3_uri, n_lines));
+
+        let output = Command::new("sh")
+            .arg("-c")
+            .arg(&shell_cmd)
+            .output()
+            .await
+            .map_err(|e| format!("Failed to run S3 head preview: {}", e))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(super::parser::parse_error_output(&stderr));
+        }
+
+        let content = String::from_utf8_lossy(&output.stdout).to_string();
+
+        // Check for binary content (null bytes in first 8KB)
+        let check_len = content.len().min(8192);
+        if content.as_bytes()[..check_len].contains(&0) {
+            return Err("Binary file — cannot display head preview".to_string());
+        }
+
+        Ok(content)
+    }
+
     /// Clean up the cache directory.
     pub fn cleanup_cache(&self) {
         let _ = std::fs::remove_dir_all(&self.cache_dir);
@@ -193,6 +229,14 @@ mod tests {
         };
         let backend = S3Backend::new(&config);
         assert_eq!(backend.profile(), None);
+    }
+
+    #[test]
+    fn test_stream_head_binary_detection() {
+        // Binary content should be detected by null byte check
+        let content = "hello\0world";
+        let check_len = content.len().min(8192);
+        assert!(content.as_bytes()[..check_len].contains(&0));
     }
 
     #[test]

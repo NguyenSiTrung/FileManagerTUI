@@ -249,6 +249,14 @@ pub struct App {
     /// Cache of downloaded S3 files: S3 URI -> local cache path.
     #[allow(dead_code)]
     pub s3_download_cache: HashMap<String, PathBuf>,
+    /// Whether S3 head preview is currently active (showing streamed content).
+    pub s3_head_active: bool,
+    /// Whether S3 head preview is currently loading.
+    pub s3_head_loading: bool,
+    /// Cached rendered lines for the current S3 head preview.
+    pub s3_head_content: Option<Vec<Line<'static>>>,
+    /// S3 URI for the current head preview (to invalidate on navigation).
+    pub s3_head_uri: Option<String>,
 }
 
 fn shell_quote_single(input: &str) -> String {
@@ -316,6 +324,10 @@ impl App {
             s3_backend: None,
             s3_config: None,
             s3_download_cache: HashMap::new(),
+            s3_head_active: false,
+            s3_head_loading: false,
+            s3_head_content: None,
+            s3_head_uri: None,
         })
     }
 
@@ -875,6 +887,132 @@ impl App {
         node.is_loading = false;
 
         self.tree_state.flatten();
+    }
+
+    /// Spawn an async S3 head preview: stream the first N lines of the selected S3 file.
+    pub fn spawn_s3_head(&mut self, event_tx: &mpsc::UnboundedSender<crate::event::Event>) {
+        let item = match self
+            .tree_state
+            .flat_items
+            .get(self.tree_state.selected_index)
+        {
+            Some(i) => i,
+            None => return,
+        };
+
+        if item.node_type != NodeType::File {
+            return;
+        }
+
+        let s3_uri = item.path.to_string_lossy().to_string();
+        let s3_path = match crate::s3::S3Path::parse(&s3_uri) {
+            Some(p) => p,
+            None => return,
+        };
+
+        let backend = match &self.s3_backend {
+            Some(b) => b.clone(),
+            None => return,
+        };
+
+        let n_lines = self.config.s3_head_lines();
+        let tx = event_tx.clone();
+        let uri_clone = s3_uri.clone();
+
+        self.s3_head_loading = true;
+        self.s3_head_uri = Some(s3_uri.clone());
+
+        // Show loading indicator
+        let filename = item.name.clone();
+        let loading_lines: Vec<Line<'static>> = vec![
+            Line::raw(format!("☁ S3 Head ({} lines) — {}", n_lines, filename)),
+            Line::raw(String::new()),
+            Line::raw("  ☁ Loading head preview...".to_string()),
+        ];
+        let total = loading_lines.len();
+        self.preview_state = PreviewState {
+            current_path: Some(item.path.clone()),
+            content_lines: loading_lines,
+            scroll_offset: 0,
+            view_mode: ViewMode::default(),
+            line_wrap: false,
+            total_lines: total,
+            is_large_file: false,
+            is_shallow_preview: false,
+            head_lines: self.config.head_lines(),
+            tail_lines: self.config.tail_lines(),
+        };
+
+        tokio::spawn(async move {
+            let result = backend.stream_head(&s3_path, n_lines).await;
+            let _ = tx.send(crate::event::Event::S3HeadComplete {
+                s3_uri: uri_clone,
+                content: result,
+            });
+        });
+    }
+
+    /// Handle completion of an S3 head preview fetch.
+    pub fn handle_s3_head_complete(
+        &mut self,
+        s3_uri: &str,
+        content: std::result::Result<String, String>,
+    ) {
+        self.s3_head_loading = false;
+
+        // Ignore stale results (user navigated to a different file)
+        if self.s3_head_uri.as_deref() != Some(s3_uri) {
+            return;
+        }
+
+        match content {
+            Ok(text) => {
+                // Extract filename from S3 URI for syntax detection
+                let filename = s3_uri.rsplit('/').next().unwrap_or("file.txt");
+
+                let n_lines = self.config.s3_head_lines();
+                let (mut highlighted, _total) = preview_content::highlight_content_from_string(
+                    &text,
+                    filename,
+                    &self.syntax_set,
+                    &self.syntax_theme,
+                    &self.theme_colors,
+                );
+
+                // Prepend header
+                let header = Line::raw(format!(
+                    "☁ S3 Head ({} lines) — {}  [H to close]",
+                    n_lines, filename
+                ));
+                highlighted.insert(0, Line::raw(String::new()));
+                highlighted.insert(0, header);
+
+                let total_with_header = highlighted.len();
+                self.s3_head_content = Some(highlighted.clone());
+                self.s3_head_active = true;
+
+                self.preview_state = PreviewState {
+                    current_path: self.preview_state.current_path.clone(),
+                    content_lines: highlighted,
+                    scroll_offset: 0,
+                    view_mode: ViewMode::default(),
+                    line_wrap: false,
+                    total_lines: total_with_header,
+                    is_large_file: false,
+                    is_shallow_preview: false,
+                    head_lines: self.config.head_lines(),
+                    tail_lines: self.config.tail_lines(),
+                };
+            }
+            Err(err) => {
+                self.s3_head_active = false;
+                self.s3_head_content = None;
+                self.set_status_message(format!("☁ S3 head preview failed: {}", err));
+                // Revert to metadata view
+                self.last_previewed_index = None;
+                self.update_preview();
+            }
+        }
     }
 
     /// Clean up S3 cache directory on exit.
@@ -1651,6 +1789,14 @@ impl App {
         // Preview content is about to be replaced; clear stale selection.
         self.preview_selection.clear();
 
+        // Reset S3 head preview state when navigating to a different file
+        if !same_path {
+            self.s3_head_active = false;
+            self.s3_head_loading = false;
+            self.s3_head_content = None;
+            self.s3_head_uri = None;
+        }
+
         // S3 mode: show S3 metadata instead of reading local filesystem
         if self.is_s3_mode() {
             let path_str = item.path.to_string_lossy().to_string();
@@ -1686,6 +1832,23 @@ impl App {
                     head_lines: self.config.head_lines(),
                     tail_lines: self.config.tail_lines(),
                 };
+            } else if self.s3_head_active {
+                // S3 head preview is active — show cached head content
+                if let Some(ref content) = self.s3_head_content {
+                    let total = content.len();
+                    self.preview_state = PreviewState {
+                        current_path: Some(item.path.clone()),
+                        content_lines: content.clone(),
+                        scroll_offset: preserved_scroll,
+                        view_mode: ViewMode::default(),
+                        line_wrap: false,
+                        total_lines: total,
+                        is_large_file: false,
+                        is_shallow_preview: false,
+                        head_lines: self.config.head_lines(),
+                        tail_lines: self.config.tail_lines(),
+                    };
+                }
             } else {
                 // File: show S3 object metadata
                 let size = if let Some(node) = crate::fs::tree::TreeState::find_node_mut_pub(
@@ -1708,7 +1871,9 @@ impl App {
                     lines.push(Line::raw(format!("    {}", wl)));
                 }
                 lines.push(Line::raw(String::new()));
-                lines.push(Line::raw("  Press Y to copy S3 URI".to_string()));
+                lines.push(Line::raw(
+                    "  Press Y to copy S3 URI | H for head preview".to_string(),
+                ));
                 let total = lines.len();
                 self.preview_state = PreviewState {
                     current_path: Some(item.path.clone()),
@@ -3115,7 +3280,11 @@ fn wrap_text(text: &str, max_width: usize) -> Vec<&str> {
             .take_while(|&i| i <= max_width)
             .last()
             .unwrap_or(max_width);
-        let split = if split == 0 { max_width.min(remaining.len()) } else { split };
+        let split = if split == 0 {
+            max_width.min(remaining.len())
+        } else {
+            split
+        };
         result.push(&remaining[..split]);
         remaining = &remaining[split..];
     }

@@ -1101,6 +1101,26 @@ fn handle_tree_keys(app: &mut App, key: KeyEvent, event_tx: &mpsc::UnboundedSend
             app.copy_path_to_system_clipboard(event_tx);
         }
 
+        // S3 head preview toggle
+        KeyCode::Char('H') => {
+            if app.is_s3_mode() {
+                if let Some(item) = app.tree_state.flat_items.get(app.tree_state.selected_index) {
+                    if item.node_type == NodeType::File {
+                        if app.s3_head_active {
+                            // Toggle back to metadata view
+                            app.s3_head_active = false;
+                            app.s3_head_content = None;
+                            app.s3_head_uri = None;
+                            app.last_previewed_index = None;
+                            app.update_preview();
+                        } else {
+                            app.spawn_s3_head(event_tx);
+                        }
+                    }
+                }
+            }
+        }
+
         // Open selected item's directory in the terminal panel
         KeyCode::Char('T') => {
             if app.is_s3_mode() {
@@ -1174,6 +1194,25 @@ fn handle_preview_keys(app: &mut App, key: KeyEvent, event_tx: &mpsc::UnboundedS
         }
         KeyCode::Char('-') => {
             app.adjust_preview_lines(-(crate::preview_content::LINE_COUNT_STEP as isize));
+        }
+
+        // S3 head preview toggle (same as tree panel H)
+        KeyCode::Char('H') => {
+            if app.is_s3_mode() {
+                if app.s3_head_active {
+                    app.s3_head_active = false;
+                    app.s3_head_content = None;
+                    app.s3_head_uri = None;
+                    app.last_previewed_index = None;
+                    app.update_preview();
+                } else if let Some(item) =
+                    app.tree_state.flat_items.get(app.tree_state.selected_index)
+                {
+                    if item.node_type == crate::fs::tree::NodeType::File {
+                        app.spawn_s3_head(event_tx);
+                    }
+                }
+            }
         }
 
         // Copy path to system clipboard (same as tree panel Y)

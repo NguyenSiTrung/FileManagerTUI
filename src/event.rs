@@ -91,6 +91,11 @@ pub enum Event {
         s3_uri: String,
         entries: Vec<crate::s3::S3Entry>,
     },
+    /// Async S3 head preview streaming completed.
+    S3HeadComplete {
+        s3_uri: String,
+        content: std::result::Result<String, String>,
+    },
     /// Filesystem watcher initialization failed.
     WatcherInitFailed(String),
 }

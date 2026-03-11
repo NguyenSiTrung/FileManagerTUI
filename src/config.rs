@@ -61,6 +61,8 @@ pub struct PreviewConfig {
     pub enabled: Option<bool>,
     /// Timeout in milliseconds for directory scans (default: 2000ms).
     pub preview_timeout_ms: Option<u64>,
+    /// Number of lines to stream for S3 head preview (default: 100).
+    pub s3_head_lines: Option<usize>,
 }
 
 /// Tree panel settings.
@@ -186,6 +188,8 @@ pub const DEFAULT_MAX_EDITOR_LINES: usize = 100_000;
 pub const DEFAULT_PREVIEW_TIMEOUT_MS: u64 = 2000;
 /// Default scroll lines per mouse wheel tick.
 pub const DEFAULT_SCROLL_LINES: u16 = 3;
+/// Default number of lines to stream for S3 head preview.
+pub const DEFAULT_S3_HEAD_LINES: usize = 100;
 
 // ── Config file locator ──────────────────────────────────────────────────────
 
@@ -296,6 +300,7 @@ impl AppConfig {
                     .preview
                     .preview_timeout_ms
                     .or(self.preview.preview_timeout_ms),
+                s3_head_lines: other.preview.s3_head_lines.or(self.preview.s3_head_lines),
             },
             tree: TreeConfig {
                 sort_by: other.tree.sort_by.clone().or(self.tree.sort_by),
@@ -414,6 +419,11 @@ impl AppConfig {
                 "base16-ocean.dark"
             }
         })
+    }
+
+    /// Number of lines for S3 head preview.
+    pub fn s3_head_lines(&self) -> usize {
+        self.preview.s3_head_lines.unwrap_or(DEFAULT_S3_HEAD_LINES)
     }
 
     /// Preview timeout in milliseconds for directory scans.
