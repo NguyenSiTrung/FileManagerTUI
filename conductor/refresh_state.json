@@ -1,8 +1,5 @@
 {
-    "last_refresh": "2026-03-11T00:00:00+07:00",
-    "changes": [
-        "product.md: S3 feature — added long-URI wrapping and Y key in preview panel",
-        "patterns.md: Added wrap_text() char-boundary wrapping pattern and Y-key preview clipboard pattern"
-    ],
-    "drift_source": "Post-S3 fixes: URI wrapping in preview (9efcdb5), Y key in preview panel (9efcdb5)"
+    "last_refresh": "2026-03-11T23:57:00+07:00",
+    "changes": [],
+    "drift_source": "No drift detected — full refresh check confirmed all docs in sync"
 }
