@@ -23,6 +23,7 @@ A fast, keyboard-driven terminal file manager built with Rust and [Ratatui](http
 - **Large file handling** — head/tail preview mode for files over configurable threshold
 - **Embedded terminal** — integrated PTY shell panel with VT100 emulation, dynamic resize, and scrollback
 - **Inline text editor** — press `e` in preview to edit files with syntax highlighting, undo/redo, find & replace, auto-indent, text selection (Shift+Arrow, Ctrl+A, mouse drag), and mouse cursor positioning
+- **AWS S3 browse mode** — read-only browsing of S3 buckets directly from the TUI using the AWS CLI; navigate prefixes, preview metadata, and copy S3 URIs to clipboard
 
 ## Installation
 
@@ -85,6 +86,11 @@ sudo cp target/release/fm /usr/local/bin/fm
 > source "$HOME/.cargo/env"
 > ```
 
+## Prerequisites
+
+- **Rust toolchain** for building from source
+- **AWS CLI** (optional) — required only for S3 browse mode. Install via [AWS CLI docs](https://docs.aws.amazon.com/cli/latest/userguide/install-cliv2.html) or `pip install awscli`
+
 ## Usage
 
 ```bash
@@ -105,6 +111,12 @@ fm --no-terminal
 
 # Light theme
 fm --theme light
+
+# Browse an S3 bucket
+fm s3://my-bucket
+
+# Browse an S3 prefix with a specific AWS profile
+fm s3://my-bucket/experiments/run-1/ --aws-profile mfa
 ```
 
 ## Keybindings
@@ -311,6 +323,38 @@ Based on the [Catppuccin Mocha](https://catppuccin.com/) color palette with deep
 
 Based on [Catppuccin Latte](https://catppuccin.com/) for well-lit environments with a clean light background.
 
+## S3 Browse Mode
+
+Browse AWS S3 buckets directly from the TUI by passing an `s3://` URI as the path argument. This mode uses the AWS CLI under the hood — no AWS SDK dependency.
+
+### How it works
+
+- **Auto-detection** — If the path starts with `s3://`, `fm` automatically enters S3 browse mode
+- **Read-only** — Write operations (create, rename, delete, paste) are disabled with a friendly message
+- **On-demand listing** — S3 prefixes are listed asynchronously as you expand directories
+- **S3-specific UX** — Cloud icons (☁), peach/amber tree colors, and an `☁ S3` status bar badge
+- **Copy S3 URIs** — Press `y` to copy the full `s3://` URI of the selected item to clipboard
+- **AWS profile support** — Use `--aws-profile <name>` for MFA or role-based authentication
+- **Session-scoped cache** — Downloaded previews are cached under `/tmp/fm-s3-cache-<pid>/` and cleaned up on exit
+
+### Requirements
+
+- AWS CLI (`aws`) must be installed and on `$PATH`
+- Valid AWS credentials (via `aws configure`, environment variables, or IAM role)
+
+### Examples
+
+```bash
+# Browse a bucket root
+fm s3://my-bucket
+
+# Browse a specific prefix
+fm s3://my-bucket/experiments/run-1/
+
+# Use a named profile
+fm s3://ml-data-bucket --aws-profile mfa
+```
+
 ## Architecture
 
 ```
@@ -341,6 +385,11 @@ src/
 │   ├── operations.rs  # File CRUD operations
 │   ├── clipboard.rs   # Copy/cut/paste state
 │   └── watcher.rs     # Filesystem watcher with debounce
+├── s3/
+│   ├── mod.rs         # Module exports
+│   ├── backend.rs     # Async S3 backend (shells out to `aws` CLI)
+│   ├── parser.rs      # Parser for `aws s3 ls` output
+│   └── types.rs       # S3Path, S3Entry, S3Config types
 └── terminal/
     ├── mod.rs         # Module exports, PtyProcess struct
     ├── pty.rs         # PTY creation and async I/O
