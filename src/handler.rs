@@ -1176,6 +1176,11 @@ fn handle_preview_keys(app: &mut App, key: KeyEvent, event_tx: &mpsc::UnboundedS
             app.adjust_preview_lines(-(crate::preview_content::LINE_COUNT_STEP as isize));
         }
 
+        // Copy path to system clipboard (same as tree panel Y)
+        KeyCode::Char('Y') => {
+            app.copy_path_to_system_clipboard(event_tx);
+        }
+
         _ => {}
     }
 }

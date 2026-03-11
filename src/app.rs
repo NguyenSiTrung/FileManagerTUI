@@ -1657,21 +1657,30 @@ impl App {
             let name = &item.name;
             let node_type = item.node_type.clone();
 
+            // Use preview panel width (minus borders) to wrap long URIs.
+            // Falls back to 80 on the very first frame before layout runs.
+            let wrap_width = self.preview_area.width.saturating_sub(2).max(20) as usize;
+
             if node_type == NodeType::Directory {
-                let info = format!(
-                    "☁  S3 Prefix\n\n  {}  {}\n\n  Press Enter to expand",
-                    "📁", path_str,
-                );
+                let mut lines: Vec<Line> = Vec::new();
+                lines.push(Line::raw("☁  S3 Prefix".to_string()));
+                lines.push(Line::raw(String::new()));
+                lines.push(Line::raw(format!("  📁  {}", name)));
+                lines.push(Line::raw(String::new()));
+                lines.push(Line::raw("  Path:".to_string()));
+                for wl in wrap_text(&path_str, wrap_width.saturating_sub(4)) {
+                    lines.push(Line::raw(format!("    {}", wl)));
+                }
+                lines.push(Line::raw(String::new()));
+                lines.push(Line::raw("  Press Enter to expand".to_string()));
+                let total = lines.len();
                 self.preview_state = PreviewState {
                     current_path: Some(item.path.clone()),
-                    content_lines: info
-                        .lines()
-                        .map(|l| ratatui::text::Line::raw(l.to_string()))
-                        .collect(),
+                    content_lines: lines,
                     scroll_offset: preserved_scroll,
                     view_mode: ViewMode::default(),
                     line_wrap: false,
-                    total_lines: 5,
+                    total_lines: total,
                     is_large_file: false,
                     is_shallow_preview: false,
                     head_lines: self.config.head_lines(),
@@ -1688,20 +1697,26 @@ impl App {
                     0
                 };
                 let size_str = format_size_bytes(size);
-                let info = format!(
-                    "☁  S3 Object\n\n  {}  {}\n\n  Size: {}\n  URI:  {}\n\n  Press Y to copy S3 URI",
-                    "📄", name, size_str, path_str,
-                );
+                let mut lines: Vec<Line> = Vec::new();
+                lines.push(Line::raw("☁  S3 Object".to_string()));
+                lines.push(Line::raw(String::new()));
+                lines.push(Line::raw(format!("  📄  {}", name)));
+                lines.push(Line::raw(String::new()));
+                lines.push(Line::raw(format!("  Size: {}", size_str)));
+                lines.push(Line::raw("  URI:".to_string()));
+                for wl in wrap_text(&path_str, wrap_width.saturating_sub(4)) {
+                    lines.push(Line::raw(format!("    {}", wl)));
+                }
+                lines.push(Line::raw(String::new()));
+                lines.push(Line::raw("  Press Y to copy S3 URI".to_string()));
+                let total = lines.len();
                 self.preview_state = PreviewState {
                     current_path: Some(item.path.clone()),
-                    content_lines: info
-                        .lines()
-                        .map(|l| ratatui::text::Line::raw(l.to_string()))
-                        .collect(),
+                    content_lines: lines,
                     scroll_offset: preserved_scroll,
                     view_mode: ViewMode::default(),
                     line_wrap: false,
-                    total_lines: 8,
+                    total_lines: total,
                     is_large_file: false,
                     is_shallow_preview: false,
                     head_lines: self.config.head_lines(),
@@ -3081,6 +3096,36 @@ fn slice_line_by_cols(line: &str, start_col: usize, end_col_exclusive: usize) ->
         .skip(start_col)
         .take(end_col_exclusive.saturating_sub(start_col))
         .collect()
+}
+
+/// Wrap a long string into chunks of at most `max_width` characters.
+/// Splits at character boundaries (not word boundaries) since URIs/paths
+/// don't have natural word breaks.
+fn wrap_text(text: &str, max_width: usize) -> Vec<&str> {
+    if max_width == 0 {
+        return vec![text];
+    }
+    let mut result = Vec::new();
+    let mut remaining = text;
+    while remaining.len() > max_width {
+        // Find the largest char-boundary split at or before max_width
+        let split = remaining
+            .char_indices()
+            .map(|(i, _)| i)
+            .take_while(|&i| i <= max_width)
+            .last()
+            .unwrap_or(max_width);
+        let split = if split == 0 { max_width.min(remaining.len()) } else { split };
+        result.push(&remaining[..split]);
+        remaining = &remaining[split..];
+    }
+    if !remaining.is_empty() {
+        result.push(remaining);
+    }
+    if result.is_empty() {
+        result.push(text);
+    }
+    result
 }
 
 /// Format a byte size into a human-readable string.
