@@ -69,3 +69,8 @@
 ---
 
 <!-- Archived: s3-head-preview_20260311 (2026-03-11) → conductor/archive/ -->
+
+---
+
+## [ ] Track: S3 Tree Color Improvement
+*Link: [./conductor/tracks/s3-tree-colors_20260311/](./conductor/tracks/s3-tree-colors_20260311/)*
