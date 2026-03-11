@@ -173,4 +173,7 @@ This file is the project's institutional knowledge - learnings extracted from co
 - S3 paths stored as `PathBuf` (`PathBuf::from(s3_uri)`) for compatibility with existing tree code that expects `PathBuf` throughout (from: s3-browse_20260310, archived 2026-03-10)
 - `S3ListingComplete` event for both initial and subdirectory listings; routing in main.rs checks `is_root` flag to dispatch correctly (from: s3-browse_20260310, archived 2026-03-10)
 
-Last refreshed: 2026-03-10 (S3 browse patterns elevated from s3-browse_20260310)
+- `wrap_text()` char-boundary string wrapping for long URIs/paths in preview panels — splits at char boundaries (not word boundaries) since URIs have no natural breaks; uses `preview_area.width` for dynamic wrap width (from: S3 preview fix 9efcdb5, 2026-03-10)
+- `Y` key in `handle_preview_keys` for clipboard copy — mirrors tree-panel `y` behavior for consistent UX across panels (from: S3 preview fix 9efcdb5, 2026-03-10)
+
+Last refreshed: 2026-03-11 (S3 preview URI-wrapping and Y-key patterns added)

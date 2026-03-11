@@ -1,11 +1,8 @@
 {
-    "last_refresh": "2026-03-10T20:17:03+07:00",
+    "last_refresh": "2026-03-11T00:00:00+07:00",
     "changes": [
-        "tech-stack.md: Added s3/ module (mod, types, parser, backend) to Architecture → Module structure",
-        "product.md: Added Feature #15 — S3 Browse Mode (read-only S3 browsing, --aws-profile, metadata preview, URI copy)",
-        "tracks/s3-browse_20260310: Removed duplicate track dir (already in archive/)",
-        "patterns.md: Already up-to-date — S3 patterns elevated in prior session",
-        "tracks.md: Clean — no active tracks, 23 archived tracks total"
+        "product.md: S3 feature — added long-URI wrapping and Y key in preview panel",
+        "patterns.md: Added wrap_text() char-boundary wrapping pattern and Y-key preview clipboard pattern"
     ],
-    "drift_source": "s3-browse_20260310 archived, new s3/ module added to codebase"
+    "drift_source": "Post-S3 fixes: URI wrapping in preview (9efcdb5), Y key in preview panel (9efcdb5)"
 }

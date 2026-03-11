@@ -39,7 +39,7 @@ A single static binary that provides a VS Code-like file explorer experience in 
 12. **Install Script** — One-command setup (`scripts/install.sh`) — installs Rust if missing, builds, and installs the `fm` binary
 13. **Clipboard** — OSC 52 clipboard fallback for headless/remote/web terminal environments; in-TUI copy overlay with disabled mouse capture for browser-native text selection; async clipboard operations to prevent UI freeze; graceful degradation when system clipboard unavailable
 14. **Status Bar** — Context-aware key hints per focus panel, copy path to system clipboard (`y`), mouse text selection copy in preview view mode
-15. **S3 Browse Mode** — Read-only AWS S3 bucket browsing via `fm s3://bucket/prefix/` with `--aws-profile` support; cloud tree icons (`☁`/`📦`), metadata preview (size, date, URI), on-demand file download to temp cache, S3 URI clipboard copy (`y`), disabled write operations with user-friendly messages, status bar badge (`☁ S3 | s3://bucket`), async directory expansion, and graceful AWS CLI error handling (ExpiredToken, AccessDenied, NoSuchBucket)
+15. **S3 Browse Mode** — Read-only AWS S3 bucket browsing via `fm s3://bucket/prefix/` with `--aws-profile` support; cloud tree icons (`☁`/`📦`), metadata preview (size, date, URI) with long-URI wrapping, on-demand file download to temp cache, S3 URI clipboard copy (`y` / `Y` in preview panel), disabled write operations with user-friendly messages, status bar badge (`☁ S3 | s3://bucket`), async directory expansion, and graceful AWS CLI error handling (ExpiredToken, AccessDenied, NoSuchBucket)
 
 ## Non-Functional Requirements
 - Binary size target: < 10MB (static musl build)
