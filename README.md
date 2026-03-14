@@ -40,14 +40,23 @@ Download the latest binary for your platform from the [Releases](https://github.
 | Platform | Binary |
 |----------|--------|
 | Linux (x86_64, static) | `fm-x86_64-unknown-linux-musl` |
+| Linux (.deb package) | `fm-tui_<version>_amd64.deb` |
+| Linux (AppImage) | `fm-tui-x86_64.AppImage` |
 | macOS (Intel) | `fm-x86_64-apple-darwin` |
 | macOS (Apple Silicon) | `fm-aarch64-apple-darwin` |
 | Windows | `fm-x86_64-pc-windows-msvc.exe` |
 
 ```bash
-# Linux / macOS
+# Linux / macOS — raw binary
 chmod +x fm-*
 sudo mv fm-* /usr/local/bin/fm
+
+# Linux — Debian/Ubuntu .deb package
+sudo dpkg -i fm-tui_*_amd64.deb
+
+# Linux — AppImage (portable, no install needed)
+chmod +x fm-tui-x86_64.AppImage
+./fm-tui-x86_64.AppImage
 ```
 
 ### Build from Source

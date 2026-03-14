@@ -29,6 +29,18 @@ base64 = "0.22"
 [dev-dependencies]
 tempfile = "3"
 
+[package.metadata.deb]
+maintainer = "NguyenSiTrung"
+copyright = "MIT"
+extended-description = "A fast, keyboard-driven terminal file manager built with Rust and Ratatui. Features dual-pane layout, Vim-style navigation, fuzzy finder, syntax highlighting preview, embedded terminal, inline editor, and S3 browse mode."
+section = "utils"
+priority = "optional"
+assets = [
+    ["target/release/fm", "usr/bin/", "755"],
+    ["README.md", "usr/share/doc/fm-tui/README.md", "644"],
+    ["LICENSE", "usr/share/doc/fm-tui/LICENSE", "644"],
+]
+
 [profile.release]
 opt-level = "z"
 lto = true

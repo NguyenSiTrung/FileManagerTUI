@@ -71,9 +71,145 @@ jobs:
           name: ${{ matrix.binary }}
           path: ${{ matrix.binary }}
 
+  # Build .deb package for Debian/Ubuntu
+  build-deb:
+    name: Build .deb package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry & build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-deb-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-deb-cargo-
+
+      - name: Install cargo-deb
+        run: cargo install cargo-deb
+
+      - name: Build .deb package
+        run: cargo deb
+
+      - name: Upload .deb artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: fm-deb
+          path: target/debian/*.deb
+
+  # Build AppImage for portable Linux
+  build-appimage:
+    name: Build AppImage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Cache cargo registry & build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-appimage-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-appimage-cargo-
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfuse2
+
+      - name: Build release binary
+        run: cargo build --release --target x86_64-unknown-linux-gnu
+
+      - name: Create AppDir structure
+        run: |
+          mkdir -p AppDir/usr/bin
+          mkdir -p AppDir/usr/share/applications
+          mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
+
+          # Copy binary
+          cp target/x86_64-unknown-linux-gnu/release/fm AppDir/usr/bin/fm
+          chmod +x AppDir/usr/bin/fm
+
+          # Create desktop entry
+          cat > AppDir/usr/share/applications/fm-tui.desktop << 'DESKTOP'
+          [Desktop Entry]
+          Name=fm-tui
+          Comment=A fast, keyboard-driven terminal file manager
+          Exec=fm
+          Icon=fm-tui
+          Type=Application
+          Terminal=true
+          Categories=System;FileManager;ConsoleOnly;
+          DESKTOP
+
+          # Symlink desktop file to AppDir root (required by AppImage)
+          cp AppDir/usr/share/applications/fm-tui.desktop AppDir/fm-tui.desktop
+
+          # Create a simple SVG icon
+          cat > AppDir/usr/share/icons/hicolor/256x256/apps/fm-tui.svg << 'SVG'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+            <rect width="256" height="256" rx="32" fill="#1e1e2e"/>
+            <rect x="24" y="48" width="208" height="168" rx="12" fill="#313244" stroke="#89b4fa" stroke-width="3"/>
+            <line x1="128" y1="48" x2="128" y2="216" stroke="#585b70" stroke-width="2"/>
+            <rect x="24" y="48" width="208" height="28" rx="12" fill="#45475a"/>
+            <circle cx="48" cy="62" r="6" fill="#f38ba8"/>
+            <circle cx="68" cy="62" r="6" fill="#a6e3a1"/>
+            <circle cx="88" cy="62" r="6" fill="#f9e2af"/>
+            <text x="44" y="104" font-family="monospace" font-size="14" fill="#89b4fa">📁 src/</text>
+            <text x="44" y="124" font-family="monospace" font-size="14" fill="#cdd6f4">  main.rs</text>
+            <text x="44" y="144" font-family="monospace" font-size="14" fill="#cdd6f4">  app.rs</text>
+            <text x="44" y="164" font-family="monospace" font-size="14" fill="#89b4fa">📁 tests/</text>
+            <text x="148" y="104" font-family="monospace" font-size="12" fill="#a6e3a1">fn main()</text>
+            <text x="148" y="124" font-family="monospace" font-size="12" fill="#cdd6f4">  let app</text>
+            <text x="148" y="144" font-family="monospace" font-size="12" fill="#cdd6f4">  app.run</text>
+          </svg>
+          SVG
+
+          # Symlink icon to AppDir root
+          cp AppDir/usr/share/icons/hicolor/256x256/apps/fm-tui.svg AppDir/fm-tui.svg
+
+          # Create AppRun script
+          cat > AppDir/AppRun << 'APPRUN'
+          #!/bin/bash
+          SELF=$(readlink -f "$0")
+          HERE=${SELF%/*}
+          export PATH="${HERE}/usr/bin:${PATH}"
+          exec "${HERE}/usr/bin/fm" "$@"
+          APPRUN
+          chmod +x AppDir/AppRun
+
+      - name: Download appimagetool
+        run: |
+          wget -q https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage -O appimagetool
+          chmod +x appimagetool
+
+      - name: Build AppImage
+        run: |
+          ARCH=x86_64 ./appimagetool --appimage-extract-and-run AppDir fm-tui-x86_64.AppImage
+
+      - name: Upload AppImage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: fm-appimage
+          path: fm-tui-x86_64.AppImage
+
   release:
     name: Create Release
-    needs: build
+    needs: [build, build-deb, build-appimage]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -86,7 +222,12 @@ jobs:
       - name: Collect binaries
         run: |
           mkdir -p release
+          # Copy platform binaries
           find artifacts -type f -name 'fm-*' -exec cp {} release/ \;
+          # Copy .deb package
+          find artifacts -type f -name '*.deb' -exec cp {} release/ \;
+          # Copy AppImage
+          find artifacts -type f -name '*.AppImage' -exec cp {} release/ \;
           ls -la release/
 
       - name: Create GitHub Release
