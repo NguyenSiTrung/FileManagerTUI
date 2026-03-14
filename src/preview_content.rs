@@ -1,5 +1,6 @@
 use std::fs;
 use std::io::{BufRead, BufReader, Read};
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
@@ -756,7 +757,14 @@ pub fn load_binary_metadata(path: &Path, colors: &ThemeColors) -> (Vec<Line<'sta
         })
         .unwrap_or_else(|| "Unknown".to_string());
 
+    #[cfg(unix)]
     let perms_str = format_permissions(meta.permissions().mode());
+    #[cfg(not(unix))]
+    let perms_str = if meta.permissions().readonly() {
+        "Read-only".to_string()
+    } else {
+        "Read/Write".to_string()
+    };
 
     let lines = vec![
         // Blank line
