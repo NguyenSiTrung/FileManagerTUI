@@ -186,4 +186,43 @@ This file is the project's institutional knowledge - learnings extracted from co
 - Adding new ThemeColors fields follows a 3-file pattern: struct field in theme.rs → defaults in dark_theme()/light_theme() → Option<String> in config.rs ThemeColorsConfig → apply_custom_colors() entry in theme.rs (from: s3-tree-colors_20260311, 2026-03-11)
 - Border style override per-mode: compute a mode-specific focused style variable and substitute it in the border tuple destructuring in ui.rs — pattern for any mode-contextual border tinting (from: s3-tree-colors_20260311, 2026-03-11)
 
-Last refreshed: 2026-03-11 (S3 tree colors patterns elevated)
+---
+
+## Consolidated Patterns (refresh 2026-09-30)
+
+Merged from 25 archived tracks' learnings. Most repeated lines across per-track learnings are inherited copies of this file — entries below capture the genuinely recurring discoveries and material that previously survived only as second-hand quotes.
+
+### Architecture & State
+- Clone-before-borrow umbrella rule: clone state before matching or mutating to dodge borrow conflicts — `DialogKind` before match, `SearchActionState` before match, `ThemeColors` at render start, sort fields (`sort_by`, `dirs_first`) before `find_node_mut`, one-shot click state via `.take()` (from: file-ops-dialogs_20260227, config-polish_20260228, search-action_20260228, sort-order-fix_20260228, preview-dblclick_20260304, s3-tree-colors_20260311, 2026-09-30)
+- Canonical async-operation pipeline: `tokio::spawn` → `Event` variants (Progress, OperationComplete, …) over `mpsc::unbounded_channel` → main-loop dispatch; `event_tx: Option<UnboundedSender<Event>>` stored on App so non-handler contexts can launch async work; keep a sync fallback when `event_tx` is None (tests) (from: clipboard-multiselect_20260227, large-file-scalability_20260302, terminal-panel_20260228, shallow-dir-preview_20260302, s3-browse_20260310, s3-head-preview_20260311, 2026-09-30)
+- `spawn_blocking` bridges blocking I/O (PTY reader, directory summaries) to async via mpsc channel; clone styling state (`ThemeColors`) into the closure (from: terminal-panel_20260228, light-preview-contrast_20260302, 2026-09-30)
+- TreeState private methods are exposed via `_pub` wrappers for callers outside the module (`find_node_mut_pub`, `sort_children_of_pub`) — follow this convention instead of making fields public (from: sort-order-fix_20260228, s3-browse_20260310, 2026-09-30)
+- Adding a config field has mandatory touch points: config struct field + `#[serde(default)]` + merge arm in `AppConfig::merge`, `main.rs::as_config_overrides()` explicit construction, settings-panel registration (`SettingValueKind` + `(section, key)` apply arm), and live-apply side effects; ThemeColors fields additionally need theme.rs struct → dark/light defaults → `ThemeColorsConfig` → `apply_custom_colors()` (from: large-file-scalability_20260302, light-preview-contrast_20260302, s3-tree-colors_20260311, s3-head-preview_20260311, 2026-09-30)
+- Config live-apply must handle side effects explicitly: re-sort + re-flatten (sort/hidden changes), re-resolve theme + `last_previewed_index = None` (theme/syntax changes), invalidate search cache (from: help-settings_20260302, light-preview-contrast_20260302, tree-scroll_20260303, 2026-09-30)
+- Adding a global keybinding requires an explicit conflict audit against all panel-specific bindings — Ctrl+T was reassigned from preview view-mode cycling to terminal toggle; Tab must be forwarded to the PTY when the terminal is focused (from: preview-panel_20260227, terminal-panel_20260228, focus-nav-remap_20260228, 2026-09-30)
+- Search path index is built lazily on first Ctrl+P and cached; it covers the loaded tree plus a capped walk of unloaded dirs (`search_max_entries` cap + 500 ms deadline, `build_path_index()` on the main thread); invalidate on every mutation via `invalidate_search_cache()` (from: fuzzy-search_20260228, large-dir-perf_20260228, 2026-09-30)
+- Snapshot-based pagination: `DirSnapshot::collect()` does one `read_dir()` pass, `snapshot.page(offset, count)` gives O(1) index access for `load_next_page()`; dirs at or below `page_size` bypass snapshots via `load_children_all()`; stale snapshots re-collect via `load_children_paged_with_sort()` — this is the canonical fix for O(n²) paged loads (from: large-dir-perf_20260228, large-dir-robust_20260301, 2026-09-30)
+- Terminal panel surface: `[terminal]` TOML section (`enabled`, `default_shell`, `scrollback_lines`), `--no-terminal` CLI flag, shell resolution `$SHELL` else `/bin/sh`; the shell process persists while the panel is hidden — never restart it on re-show (from: terminal-panel_20260228, 2026-09-30)
+- S3 visual semantics: ☁ + sky/cyan for S3 directories, 📦 + peach/orange for S3 files; colors configurable via `s3_dir_fg` / `s3_file_fg` / `s3_border_fg`; border tinted per-mode when the tree is focused in S3 mode (from: s3-tree-colors_20260311, 2026-09-30)
+
+### Gotchas
+- Text-input cursor is a BYTE offset — use `char.len_utf8()` for movement and edits, never char counts (from: file-ops-dialogs_20260227, 2026-09-30)
+- Rust match-guard gotcha: a guard on an OR pattern applies to the ENTIRE pattern — plain `j` then falls through to the `Char(c)` arm (from: fuzzy-search_20260228, 2026-09-30)
+- `File::create` overwrites existing files (idempotent) while `create_dir` fails on duplicates; in tests `File::create` yields 0-byte files — use `fs::write` when content matters (from: file-ops-dialogs_20260227, fuzzy-search_20260228, 2026-09-30)
+- `.clamp(min, max)` is clippy-enforced over `.max(min).min(max)` (from: fuzzy-search_20260228, 2026-09-30)
+- Color config semantics: overrides are `Option<String>` hex resolved at startup; invalid hex silently falls back to the palette; semantic colors (error/warning/success/info/accent/dim) are not user-configurable; `Color::Reset` lets the terminal-native background show through (from: config-polish_20260228, 2026-09-30)
+- Config discovery order: env var → CWD `.fm-tui.toml` → `dirs::config_dir()/fm-tui/config.toml` (from: config-polish_20260228, 2026-09-30)
+- `current_dir()` semantics for file creation: parent directory for files, the path itself for directories (from: file-ops-dialogs_20260227, 2026-09-30)
+- VTE params arrive as nested slices (`vte::Params`) — flatten via `params.iter().flat_map(|s| s.iter().copied())` when extending CSI handling (from: terminal-panel_20260228, 2026-09-30)
+- Historical bottleneck inventory from large-dir-perf_20260228 (previously only quoted inside large-dir-robust_20260301): double `read_dir()`, O(n²) `load_next_page()`, `get_child_count()` blocking on `read_dir().count()`, full paged reload on fs events. Most were resolved by snapshot-based pagination; `load_directory_summary()` sync deep scan remains (now test-only). Keep for regression awareness (2026-09-30)
+
+### Testing
+- Tests must manually seed render-derived state — `tree_visible_height` (scroll math), `preview_area` Rect + synthetic `content_lines` (mouse mapping) — because these are normally set during render; otherwise scroll/mouse math is exercised against zeros (from: tree-scroll_20260303, preview-dblclick_20260304, 2026-09-30)
+- When a key/UI behavior changes, existing tests asserting the old behavior must be updated deliberately, not just supplemented (e.g. `search_confirm` moved to the two-step overlay; mouse-scroll test switched from `selected_index` to `scroll_offset`) (from: search-action_20260228, tree-scroll_20260303, 2026-09-30)
+- Reusable test helpers beyond `setup_app()`: `test_theme()` for widget tests; `setup_app_with_preview()` with fake Rect + synthetic content for preview/mouse tests; simulate scrolling with `MouseEvent { kind: MouseEventKind::ScrollDown, .. }` through `handle_mouse_event` rather than calling scroll functions directly (from: preview-dblclick_20260304, tree-scroll_20260303, 2026-09-30)
+
+### Provenance Notes
+- Some entries above are credited to sources with no archived track directory (`editor-selection`, `editor-mouse`, `clipboard-ux standalone commits`, bare commit hashes `80243ef`, `c3f0924`, `9efcdb5`, `f9658df`) — the corresponding learnings were never appended to their archived learnings.md files.
+- Entries credited to `shallow-dir-preview_20260302` and `terminal-mouse-copy_20260302` cannot be re-derived from those archive learnings.md files (inherited block only); verify against plan.md/spec.md if needed.
+
+Last refreshed: 2026-09-30 (learnings consolidation across 25 archived tracks)

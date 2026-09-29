@@ -1,5 +1,10 @@
 {
-    "last_refresh": "2026-03-11T23:57:00+07:00",
-    "changes": [],
-    "drift_source": "No drift detected — full refresh check confirmed all docs in sync"
+    "last_refresh": "2026-09-30T01:58:08+07:00",
+    "changes": [
+        "tech-stack.md: release automation now documents .deb (cargo-deb) + AppImage + GitHub Release aggregation; Windows x86_64-pc-windows-msvc target and cfg(unix) guards; tempfile dev-dependency; [[bin]] fm; corrected CI/CD description (ci.yml runs test/clippy/fmt only — no musl build)",
+        "product.md: S3 streaming head preview (s3_head_lines, --s3-head-lines) and theme-aware S3 colors (s3_dir_fg/s3_file_fg/s3_border_fg) from tracks s3-head-preview_20260311 + s3-tree-colors_20260311; single-level undo (Ctrl+Z); Nerd Font icons/--no-icons; Windows environment with POSIX-shell caveat; prebuilt distribution artifacts (.deb/AppImage/musl)",
+        "patterns.md: consolidated learnings from 25 archived tracks — new/merged entries for clone-before-borrow umbrella, canonical async pipeline, spawn_blocking bridging, _pub wrapper convention, config/theme field touch points, live-apply side effects, keybinding conflict audit, snapshot-based pagination, terminal config surface, S3 visual semantics, byte-offset cursor, match-guard OR gotcha, render-state test seeding, test helpers, plus provenance notes",
+        "beads: drift check skipped — bd CLI blocked by legacy Dolt workspace (bd 0.56.1) migration requirement"
+    ],
+    "drift_source": "3 commits since last refresh (453ad6b Windows cfg guards, 10b116e .deb/AppImage packaging, bdfa206 .agents tooling); 2 tracks completed after the last product.md edit (s3-head-preview_20260311, s3-tree-colors_20260311); learnings consolidation across 25 archived tracks"
 }
