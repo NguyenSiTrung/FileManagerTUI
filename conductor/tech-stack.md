@@ -33,7 +33,7 @@
 - **Release profile**: `opt-level = "z"`, LTO, single codegen unit, stripped
 - **Static binary**: `x86_64-unknown-linux-musl` target for container deployment
 - **Binary size target**: < 10MB
-- **CI/CD**: GitHub Actions `ci.yml` on push/PR to `master`/`main` — `cargo test`, `cargo clippy -- -D warnings`, `cargo fmt --check`
+- **CI/CD**: GitHub Actions `ci.yml` — runs on release tags (`v*`) and manual dispatch only (no per-commit runs): `cargo test`, `cargo clippy -- -D warnings`, `cargo fmt --check`
 - **Release automation**: GitHub Actions `release.yml` on `v*` tags — 4-target cross-compile (`x86_64-unknown-linux-musl`, `x86_64-apple-darwin`, `aarch64-apple-darwin`, `x86_64-pc-windows-msvc`), plus `.deb` package (cargo-deb via `[package.metadata.deb]`) and AppImage (appimagetool), aggregated into a GitHub Release with generated notes
 - **Windows support**: `#[cfg(unix)]` / `#[cfg(not(unix))]` guards where platform-specific (permission formatting); S3 browse mode shells out to `which` + `sh -c` and therefore requires a POSIX shell with the AWS CLI
 
