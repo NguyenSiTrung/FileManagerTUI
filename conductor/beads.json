@@ -1,6 +1,6 @@
 {
   "enabled": true,
-  "mode": "stealth",
+  "mode": "normal",
   "sync": "bidirectional",
   "epicPrefix": "conductor",
   "autoCreateTasks": true,
