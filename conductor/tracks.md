@@ -73,3 +73,13 @@
 ---
 
 <!-- Archived: s3-tree-colors_20260311 (2026-03-11) → conductor/archive/ -->
+
+---
+
+## [ ] Track: Terminal Workspace for Headless and Web Terminals
+
+*Link: [./conductor/tracks/terminal-workspace_20261001/](./conductor/tracks/terminal-workspace_20261001/)*
+
+Priority: high. Includes safe editing, multiple documents, adaptive panes,
+browser-terminal profiles, search/recovery, read-only Git, LSP, and diagnostics.
+Verification is automated only; parallel execution requires disjoint ownership.
