@@ -469,6 +469,17 @@ mod tests {
             .iter()
             .any(|(_, id)| *id == CommandId::RecoveryDisable));
         assert!(screen.contains("not implemented"));
+        // Select the disabled entry explicitly — the last row changes as
+        // commands are added, but only a gated entry keeps the menu open.
+        let disabled = app
+            .command_menu
+            .as_ref()
+            .unwrap()
+            .filtered()
+            .iter()
+            .position(|meta| meta.id == CommandId::RecoveryDisable)
+            .unwrap();
+        app.command_menu.as_mut().unwrap().selected = disabled;
         key(&mut app, KeyCode::Enter); // disabled: keeps the menu
         assert_eq!(app.workspace.focus.overlay, AppMode::CommandMenu);
         key(&mut app, KeyCode::Home);

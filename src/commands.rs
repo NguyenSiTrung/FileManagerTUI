@@ -68,6 +68,9 @@ commands! {
     LspDefinition => ("lsp.definition", "Go to definition", "Jump to the symbol's definition"),
     LspReferences => ("lsp.references", "Find references", "List references to the symbol at the cursor"),
     LspSymbols => ("lsp.symbols", "Document symbols", "List this document's symbols"),
+    LspDiagnostics => ("lsp.diagnostics", "Diagnostics panel", "List all published diagnostics and jump to one"),
+    DiagnosticsNext => ("diagnostics.next", "Next diagnostic", "Jump to the next diagnostic in the active document"),
+    DiagnosticsPrev => ("diagnostics.previous", "Previous diagnostic", "Jump to the previous diagnostic in the active document"),
 
 }
 
@@ -254,7 +257,7 @@ pub fn unavailable_reason(
         }
         ToggleTerminal if app.event_tx.is_none() => Some("Terminal event routing is unavailable"),
         LspStatus | LspRestart | LspCompletion | LspHover | LspDefinition | LspReferences
-        | LspSymbols
+        | LspSymbols | LspDiagnostics | DiagnosticsNext | DiagnosticsPrev
             if !app.config.lsp.enabled() =>
         {
             Some("LSP disabled by configuration")
@@ -263,6 +266,9 @@ pub fn unavailable_reason(
             if app.current_lsp_language().is_none() =>
         {
             Some("No LSP language for the current document")
+        }
+        DiagnosticsNext | DiagnosticsPrev if context.document.is_none() => {
+            Some("No active document")
         }
         LspRestart
             if app
@@ -417,6 +423,9 @@ pub fn dispatch_command(app: &mut App, id: CommandId) -> Result<(), String> {
         LspDefinition => app.lsp_definition()?,
         LspReferences => app.lsp_references()?,
         LspSymbols => app.lsp_document_symbols()?,
+        LspDiagnostics => app.toggle_diagnostics_panel()?,
+        DiagnosticsNext => app.diagnostics_next()?,
+        DiagnosticsPrev => app.diagnostics_prev()?,
         Wrap => {
             if let Some(document) = context.text_view_document(app) {
                 app.workspace
@@ -498,7 +507,7 @@ mod tests {
 
     #[test]
     fn commands_metadata_is_complete_and_unique() {
-        assert_eq!(REGISTRY.len(), 45);
+        assert_eq!(REGISTRY.len(), 48);
         let ids: std::collections::HashSet<_> = REGISTRY.iter().map(|m| m.id.as_str()).collect();
         assert_eq!(ids.len(), REGISTRY.len());
         for m in REGISTRY {
@@ -910,6 +919,55 @@ mod tests {
         app.config.lsp.enabled = Some(false);
         let context = CommandContext::capture(&app);
         for id in [CommandId::LspStatus, CommandId::LspRestart] {
+            assert_eq!(
+                unavailable_reason(&app, &context, id),
+                Some("LSP disabled by configuration")
+            );
+        }
+    }
+
+    #[test]
+    fn diagnostics_commands_dispatch_and_gate_on_state() {
+        let (_root, mut app, _doc) = fixture();
+
+        // Panel opens through the registry; dispatch refuses to run a
+        // second command while the overlay is up (Esc/outside-click closes).
+        dispatch_command(&mut app, CommandId::LspDiagnostics).unwrap();
+        assert_eq!(
+            app.workspace.focus.overlay,
+            crate::app::AppMode::Diagnostics
+        );
+        assert!(dispatch_command(&mut app, CommandId::LspDiagnostics).is_err());
+        app.dismiss_diagnostics();
+
+        // No published diagnostics → next/prev surface the app's refusal.
+        assert!(dispatch_command(&mut app, CommandId::DiagnosticsNext).is_err());
+        assert!(dispatch_command(&mut app, CommandId::DiagnosticsPrev).is_err());
+
+        // Without any document the navigation commands are gated in the
+        // menu itself.
+        while app.workspace.documents.active_id().is_some() {
+            let id = app.workspace.documents.active_id().unwrap();
+            let _ = app.workspace.documents.close(id);
+        }
+        let context = CommandContext::capture(&app);
+        assert_eq!(
+            unavailable_reason(&app, &context, CommandId::DiagnosticsNext),
+            Some("No active document")
+        );
+        assert_eq!(
+            unavailable_reason(&app, &context, CommandId::DiagnosticsPrev),
+            Some("No active document")
+        );
+
+        // LSP disabled by configuration gates all three.
+        app.config.lsp.enabled = Some(false);
+        let context = CommandContext::capture(&app);
+        for id in [
+            CommandId::LspDiagnostics,
+            CommandId::DiagnosticsNext,
+            CommandId::DiagnosticsPrev,
+        ] {
             assert_eq!(
                 unavailable_reason(&app, &context, id),
                 Some("LSP disabled by configuration")

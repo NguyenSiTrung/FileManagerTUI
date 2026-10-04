@@ -291,8 +291,8 @@ impl SyncedDocuments {
         self.docs.contains_key(uri)
     }
 
-    /// Version last sent for `uri` — test/support surface.
-    #[allow(dead_code)] // Asserted by the transcript tests; UI reads status.
+    /// Version last sent for `uri` — the staleness baseline for versioned
+    /// publishDiagnostics (see `crate::diagnostics`).
     pub fn version(&self, uri: &str) -> Option<i64> {
         self.docs.get(uri).map(|d| d.version)
     }

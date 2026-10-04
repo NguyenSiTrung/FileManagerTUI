@@ -1074,7 +1074,7 @@ exist. Add a module's declarations in the task that introduces it. Avoid broad
     `#[rustfmt::skip]` or restructured to `while`-condition loops so
     `cargo fmt --check` and coverage both stay green.)
 
-- [ ] Task 3: Add versioned diagnostics state and navigable panel
+- [x] Task 3: Add versioned diagnostics state and navigable panel
 
   **Files:** create `src/diagnostics.rs`, `src/components/diagnostics.rs`;
   modify `src/main.rs`, `src/components/mod.rs`, `src/app.rs`, `src/event.rs`,
@@ -1082,16 +1082,59 @@ exist. Add a module's declarations in the task that introduces it. Avoid broad
   **Requirements:** FR-10, AC-5, AC-8.
   **Produces:** per-document/server diagnostic generations, severity summaries,
   bounded rows/gutter markers, next/previous/navigate commands.
-  - [ ] Test error/warning/info/hint, empty replacement, unsupported/stale
+  - [x] Test error/warning/info/hint, empty replacement, unsupported/stale
     versions, close/restart, Unicode ranges, multi-file results, and tiny panels:
     ```rust
     assert_eq!(diagnostics.for_document(id).len(), 1);
     diagnostics.apply(stale_publish);
     assert_eq!(diagnostics.for_document(id).len(), 1);
     ```
-  - [ ] Treat versionless publishes according to a documented generation policy;
+    (`src/diagnostics.rs` 18 tests + app/handler/commands/ui integration tests:
+    every severity maps and renders; empty `diagnostics: []` replaces a stored
+    entry; stale explicit versions are ignored — the pinned assert pair is
+    implemented verbatim in `versioned_stale_publish_never_overwrites`;
+    `Ready`/`ServerDied` clear a whole server, close removes the document's
+    URI from every server (clean-close, discard, stale-decision and
+    quit-cancel paths all covered); UTF-16 positions land via
+    `goto_lsp_position`; multi-file rows order `file:` before `untitled:`;
+    `render_bounds_rows_and_survives_tiny_frames` renders down to a 1x1
+    surface.)
+  - [x] Treat versionless publishes according to a documented generation policy;
     do not attribute another server's results to the current document version.
-  - [ ] Run `cargo test diagnostics` and panel/navigation snapshots.
+    (`Diagnostics::apply` documents the policy in the module docs: an explicit
+    version must equal the document's synced version for that server
+    (`LspManager::synced_version`), a `null` version always applies, and an
+    unsynced document is baseline-less so the publish's own version is stored
+    as its baseline — entries are keyed per `(language, uri)` so one server's
+    results can never overwrite another's. `Ready`/`ServerDied` queue a
+    `DiagnosticEvent::Clear` scoped to that language only.)
+  - [x] Run `cargo test diagnostics` and panel/navigation snapshots.
+    (27 diagnostics-filtered tests green; full suite 1522 green; both clippy
+    gates, release build, fmt clean. Panel renders via
+    `DiagnosticsPanel::render` on a clamped centered surface; navigation
+    through `DiagnosticsNext`/`DiagnosticsPrev` wraps and reports
+    `Diagnostic i/n (marker)`; `LspDiagnostics` toggles the overlay and
+    `dispatch_command`'s non-Normal-overlay gate is asserted. Diff coverage
+    776/777 = 99.9% — sole residual `main.rs:1530`
+    (`app.drain_lsp_diagnostics()` inside the systematically-uncovered
+    `run()` loop, same accepted class as Task 2's 1529). `src/event.rs`
+    listed in Files needed no change — `DiagnosticEvent` lives in
+    `src/diagnostics.rs` and drains through `take_diagnostics()` polled
+    beside `take_results()`. Quit-cancel losing diagnostics was a real bug
+    found and fixed: `remove_document` now sits inside the `!quitting`
+    arm of `advance_document_lifecycle`.)
+  - [x] Implementation: `src/diagnostics.rs` (`Severity`, `Publish`,
+    `DiagnosticEvent`, `Diagnostics` store over
+    `BTreeMap<(language, uri), Entry>` with `revision`; bounded
+    MAX_ITEMS_PER_DOCUMENT=256, MAX_DOCUMENTS_PER_SERVER=64,
+    MAX_PANEL_ROWS=512, MAX_MESSAGE_CHARS=160), `src/components/diagnostics.rs`
+    (`DiagnosticsPanel`: rebuild/move_selection/hit/title/render),
+    `AppMode::Diagnostics` overlay (Esc/Enter/j/k/PageUp/Down/Home/End +
+    mouse click/drag-to-scroll/dismiss-outside), status-bar severity
+    segment, editor-gutter severity styling, `LspDiagnostics`/
+    `DiagnosticsNext`/`DiagnosticsPrev` commands gated on `lsp.enabled()`,
+    `drain_lsp_diagnostics` in the run loop, and URI removal hooks on
+    close/discard/rename/save-as/undo-rename paths.
 
 - [ ] Task 4: Automated checkpoint for language features
 

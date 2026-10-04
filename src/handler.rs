@@ -236,6 +236,39 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent, event_tx: &crate::ev
         }
         return;
     }
+    if app.workspace.focus.overlay == AppMode::Diagnostics {
+        match mouse.kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                let hit = app
+                    .diagnostics_panel
+                    .as_ref()
+                    .and_then(|panel| panel.hit(mouse.column, mouse.row));
+                if hit.is_some() {
+                    if let (Some(panel), Some(index)) = (app.diagnostics_panel.as_mut(), hit) {
+                        panel.selected = index;
+                    }
+                    app.apply_diagnostic_selection();
+                } else if app
+                    .diagnostics_panel
+                    .as_ref()
+                    .is_some_and(|panel| !panel.area.contains((mouse.column, mouse.row).into()))
+                {
+                    app.dismiss_diagnostics();
+                }
+            }
+            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
+                if let Some(panel) = app.diagnostics_panel.as_mut() {
+                    panel.move_selection(if mouse.kind == MouseEventKind::ScrollUp {
+                        -1
+                    } else {
+                        1
+                    });
+                }
+            }
+            _ => {}
+        }
+        return;
+    }
     if app.workspace.focus.overlay == AppMode::Normal
         && app
             .command_entry_area
@@ -840,6 +873,7 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent, event_tx: &crate::event::E
     match &app.workspace.focus.overlay {
         AppMode::CommandMenu => handle_command_menu(app, key),
         AppMode::LanguageFeatures => handle_language_features(app, key),
+        AppMode::Diagnostics => handle_diagnostics(app, key),
         AppMode::Normal => handle_normal_mode(app, key, event_tx),
         AppMode::Dialog(_) => handle_dialog_mode(app, key),
         AppMode::Search => handle_search_mode(app, key),
@@ -917,6 +951,29 @@ fn handle_language_features(app: &mut App, key: KeyEvent) {
                 KeyCode::PageDown => features.move_selection(8),
                 KeyCode::Home => features.move_selection(isize::MIN),
                 KeyCode::End => features.move_selection(isize::MAX),
+                _ => {}
+            }
+        }
+    }
+}
+
+/// Keys while the diagnostics panel is up: navigation only — the list is
+/// read-only. Enter jumps to the selected diagnostic's position.
+fn handle_diagnostics(app: &mut App, key: KeyEvent) {
+    match key.code {
+        KeyCode::Esc => app.dismiss_diagnostics(),
+        KeyCode::Enter => app.apply_diagnostic_selection(),
+        _ => {
+            let Some(panel) = app.diagnostics_panel.as_mut() else {
+                return;
+            };
+            match key.code {
+                KeyCode::Up => panel.move_selection(-1),
+                KeyCode::Down => panel.move_selection(1),
+                KeyCode::PageUp => panel.move_selection(-8),
+                KeyCode::PageDown => panel.move_selection(8),
+                KeyCode::Home => panel.move_selection(isize::MIN),
+                KeyCode::End => panel.move_selection(isize::MAX),
                 _ => {}
             }
         }
@@ -2278,7 +2335,17 @@ fn execute_input_operation(app: &mut App, kind: &DialogKind, input: &str) {
                 };
                 match operations::rename(original, &new_path) {
                     Ok(()) => {
+                        // Old keys die: a republish under the new URI must
+                        // not merge into entries for a moved-away path.
+                        let old_uris: Vec<String> = changes
+                            .iter()
+                            .filter_map(|(id, _)| app.workspace.documents.get(*id))
+                            .map(|d| crate::lsp::features::uri_for_path(d.path()))
+                            .collect();
                         app.workspace.documents.commit_rename(changes);
+                        for uri in old_uris {
+                            app.diagnostics.remove_document(&uri);
+                        }
                         app.last_undo = Some(crate::app::UndoAction::Rename {
                             from: original.clone(),
                             to: new_path,
@@ -8245,6 +8312,166 @@ keys = ["F9"]
             &tx,
         );
         app.dismiss_language_features();
+    }
+
+    #[test]
+    fn diagnostics_overlay_keys_mouse_and_dismiss() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("f.rs");
+        std::fs::write(&path, "let x = 1\nlet y = 2\n").unwrap();
+        let mut app = App::new(dir.path(), crate::config::AppConfig::default()).unwrap();
+        let tx = make_event_tx();
+        app.open_document_path(&path, true);
+        let uri = crate::lsp::features::uri_for_path(&path);
+        app.diagnostics.apply(
+            crate::diagnostics::Publish {
+                language: "rust".into(),
+                generation: 0,
+                uri: uri.clone(),
+                version: None,
+                diagnostics: vec![
+                    crate::diagnostics::Diagnostic {
+                        start_line: 0,
+                        start_character: 0,
+                        end_line: 0,
+                        end_character: 1,
+                        severity: crate::diagnostics::Severity::Error,
+                        code: None,
+                        source: None,
+                        message: "boom".into(),
+                    },
+                    crate::diagnostics::Diagnostic {
+                        start_line: 1,
+                        start_character: 0,
+                        end_line: 1,
+                        end_character: 1,
+                        severity: crate::diagnostics::Severity::Warning,
+                        code: None,
+                        source: None,
+                        message: "careful".into(),
+                    },
+                ],
+            },
+            None,
+        );
+        app.toggle_diagnostics_panel().unwrap();
+        assert_eq!(
+            app.workspace.focus.overlay,
+            crate::app::AppMode::Diagnostics
+        );
+
+        // Every movement key routes through the panel; a non-movement key
+        // is swallowed by the read-only list.
+        for code in [
+            KeyCode::Down,
+            KeyCode::Up,
+            KeyCode::PageUp,
+            KeyCode::PageDown,
+            KeyCode::Home,
+            KeyCode::End,
+            KeyCode::Char('j'),
+        ] {
+            handle_key_event(&mut app, make_key(code), &tx);
+        }
+        assert_eq!(
+            app.workspace.focus.overlay,
+            crate::app::AppMode::Diagnostics
+        );
+        // Overlay open but the surface was dropped → keys no-op.
+        app.diagnostics_panel = None;
+        handle_key_event(&mut app, make_key(KeyCode::Down), &tx);
+        assert_eq!(
+            app.workspace.focus.overlay,
+            crate::app::AppMode::Diagnostics
+        );
+
+        // Rebuild the surface; Enter applies the selected row's position.
+        let mut panel = crate::components::diagnostics::DiagnosticsPanel::default();
+        panel.rebuild(&app.diagnostics);
+        app.diagnostics_panel = Some(panel);
+        handle_key_event(&mut app, make_key(KeyCode::Enter), &tx);
+        assert_eq!(app.workspace.focus.overlay, crate::app::AppMode::Normal);
+        assert_eq!(
+            app.workspace
+                .documents
+                .active()
+                .unwrap()
+                .editor
+                .cursor_position()
+                .line,
+            0
+        );
+
+        // Esc dismisses the open panel.
+        app.toggle_diagnostics_panel().unwrap();
+        handle_key_event(&mut app, make_key(KeyCode::Esc), &tx);
+        assert_eq!(app.workspace.focus.overlay, crate::app::AppMode::Normal);
+
+        // Mouse: geometry drives hit-testing without a live renderer.
+        app.toggle_diagnostics_panel().unwrap();
+        let panel = app.diagnostics_panel.as_mut().unwrap();
+        panel.area = ratatui::layout::Rect::new(10, 4, 40, 6);
+        panel.row_rects = vec![
+            ratatui::layout::Rect::new(10, 5, 40, 1),
+            ratatui::layout::Rect::new(10, 6, 40, 1),
+        ];
+        // Click row 2 → selection moves and applies (line 1 → cursor).
+        handle_mouse_event(&mut app, make_mouse_down_left(15, 6), &tx);
+        assert_eq!(app.workspace.focus.overlay, crate::app::AppMode::Normal);
+        assert_eq!(
+            app.workspace
+                .documents
+                .active()
+                .unwrap()
+                .editor
+                .cursor_position()
+                .line,
+            1
+        );
+
+        // Reopen: scroll events step the selection; inside-but-not-on-a-row
+        // stays open; other mouse kinds are ignored.
+        app.toggle_diagnostics_panel().unwrap();
+        let panel = app.diagnostics_panel.as_mut().unwrap();
+        panel.area = ratatui::layout::Rect::new(10, 4, 40, 6);
+        panel.row_rects = vec![
+            ratatui::layout::Rect::new(10, 5, 40, 1),
+            ratatui::layout::Rect::new(10, 6, 40, 1),
+        ];
+        handle_mouse_event(&mut app, make_mouse_scroll_down(15, 5), &tx);
+        handle_mouse_event(&mut app, make_mouse_scroll_up(15, 5), &tx);
+        assert_eq!(app.diagnostics_panel.as_ref().unwrap().selected, 0);
+        handle_mouse_event(&mut app, make_mouse_down_left(15, 4), &tx); // title row
+        assert_eq!(
+            app.workspace.focus.overlay,
+            crate::app::AppMode::Diagnostics
+        );
+        handle_mouse_event(
+            &mut app,
+            MouseEvent {
+                kind: MouseEventKind::Moved,
+                column: 15,
+                row: 5,
+                modifiers: KeyModifiers::NONE,
+            },
+            &tx,
+        );
+        assert_eq!(
+            app.workspace.focus.overlay,
+            crate::app::AppMode::Diagnostics
+        );
+        // Click outside the surface dismisses.
+        handle_mouse_event(&mut app, make_mouse_down_left(60, 40), &tx);
+        assert_eq!(app.workspace.focus.overlay, crate::app::AppMode::Normal);
+
+        // Overlay open but the surface was dropped → scroll no-ops.
+        app.toggle_diagnostics_panel().unwrap();
+        app.diagnostics_panel = None;
+        handle_mouse_event(&mut app, make_mouse_scroll_down(15, 5), &tx);
+        assert_eq!(
+            app.workspace.focus.overlay,
+            crate::app::AppMode::Diagnostics
+        );
     }
 
     #[test]

@@ -153,6 +153,9 @@ pub struct LspManager {
     next_request_id: u64,
     /// Resolved requests awaiting app consumption.
     feature_results: VecDeque<FeatureResult>,
+    /// Queued publishDiagnostics / per-server clear events for the app's
+    /// diagnostics store — generation already validated at handle_event.
+    diagnostic_events: VecDeque<crate::diagnostics::DiagnosticEvent>,
 }
 
 impl LspManager {
@@ -432,6 +435,20 @@ impl LspManager {
         self.feature_results.drain(..).collect()
     }
 
+    /// Drain queued diagnostic events; the app applies them to its store.
+    pub fn take_diagnostics(&mut self) -> Vec<crate::diagnostics::DiagnosticEvent> {
+        self.diagnostic_events.drain(..).collect()
+    }
+
+    /// The version this session last synchronized for `uri` — the only
+    /// baseline a versioned publish may claim (see diagnostics policy).
+    /// `None` means the document is not synced (or the session is dead),
+    /// in which case the publish's own version establishes the baseline.
+    pub fn synced_version(&self, language: &str, uri: &str) -> Option<i64> {
+        let session = self.sessions.get(language)?;
+        session.docs.version(uri)
+    }
+
     /// Test-only: inject a Ready session with a live command channel so
     /// app-level tests can drive the request/response path.
     #[cfg(test)]
@@ -666,6 +683,12 @@ impl LspManager {
                 session.sync = sync;
                 session.features = features;
                 session.status = SessionStatus::Ready { encoding };
+                // A (re)started generation owns an empty diagnostic table —
+                // anything the previous generation published is invalid.
+                self.diagnostic_events
+                    .push_back(crate::diagnostics::DiagnosticEvent::Clear {
+                        language: language.to_string(),
+                    });
                 // A restart's new generation owns an empty document table —
                 // re-open every doc the mirror still holds (same versions).
                 for params in session.docs.reopen_params(language) {
@@ -687,6 +710,11 @@ impl LspManager {
                 // In-flight requests die with the session — their ids will
                 // never resolve; the status note carries the failure.
                 self.pending_features.retain(|_, r| r.language != language);
+                // The dead server's diagnostics die with it.
+                self.diagnostic_events
+                    .push_back(crate::diagnostics::DiagnosticEvent::Clear {
+                        language: language.to_string(),
+                    });
                 Some(format!("LSP {language}: stopped ({reason})"))
             }
             ClientEvent::Expired { id, method, .. } => {
@@ -724,9 +752,20 @@ impl LspManager {
                 }
                 None
             }
-            ClientEvent::Notification { .. } => {
-                // Diagnostics land in Phase 11 Task 3; other notifications
-                // need no session-table transition.
+            ClientEvent::Notification {
+                generation,
+                method,
+                params,
+            } => {
+                if method == "textDocument/publishDiagnostics" {
+                    if let Some(publish) =
+                        crate::diagnostics::parse_publish(language, generation, &params)
+                    {
+                        self.diagnostic_events
+                            .push_back(crate::diagnostics::DiagnosticEvent::Publish(publish));
+                    }
+                }
+                // Other notifications need no session-table transition.
                 None
             }
         }

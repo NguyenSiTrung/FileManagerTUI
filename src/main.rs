@@ -7,6 +7,7 @@ mod background;
 mod commands;
 mod components;
 mod config;
+mod diagnostics;
 mod editor;
 mod error;
 mod event;
@@ -1526,6 +1527,7 @@ async fn main() -> error::Result<()> {
             // events flipping a session to Ready).
             app.sync_lsp_documents();
             app.drain_lsp_results();
+            app.drain_lsp_diagnostics();
 
             // Throttled, bounded snapshot pass for dirty documents. Runs
             // outside render and outside the input handlers; the throttle keeps

@@ -146,6 +146,16 @@ pub fn render_in_area(app: &mut App, frame: &mut Frame, area: ratatui::layout::R
                     editor_widget = editor_widget.prepared(cache);
                 }
             }
+            let diagnostic_lines = app
+                .workspace
+                .documents
+                .active()
+                .map(|document| crate::lsp::features::uri_for_path(document.path()))
+                .filter(|uri| app.diagnostics.contains(uri))
+                .map(|uri| app.diagnostics.lines_for(&uri));
+            if let Some(lines) = diagnostic_lines.as_ref().filter(|lines| !lines.is_empty()) {
+                editor_widget = editor_widget.diagnostic_lines(lines);
+            }
             frame.render_widget(editor_widget.block(editor_block), preview_area);
         }
     } else if !app.config.preview_enabled() {
@@ -407,6 +417,26 @@ pub fn render_in_area(app: &mut App, frame: &mut Frame, area: ratatui::layout::R
         status_widget = status_widget.git_branch(branch);
     }
 
+    // Severity summary for the active document's published diagnostics;
+    // worst severity picks the color. Absent when clean.
+    let diagnostics_summary = presented_document
+        .map(|document| crate::lsp::features::uri_for_path(document.path()))
+        .map(|uri| app.diagnostics.summary(&uri))
+        .filter(|summary| summary.total() > 0);
+    let diagnostics_label = diagnostics_summary.as_ref().map(|summary| summary.label());
+    if let (Some(summary), Some(label)) = (diagnostics_summary, diagnostics_label.as_deref()) {
+        let color = if summary.errors > 0 {
+            theme.error_fg
+        } else if summary.warnings > 0 {
+            theme.warning_fg
+        } else if summary.informations > 0 {
+            theme.editor_line_nr_current
+        } else {
+            theme.editor_line_nr
+        };
+        status_widget = status_widget.diagnostics(label, color);
+    }
+
     // Show filter query in status bar when filtering
     let filter_display;
     if app.workspace.focus.overlay == AppMode::Filter || app.tree_state.is_filtering {
@@ -457,6 +487,13 @@ pub fn render_in_area(app: &mut App, frame: &mut Frame, area: ratatui::layout::R
         if let Some(mut features) = app.language_features.take() {
             features.render(app, frame);
             app.language_features = Some(features);
+        }
+    }
+
+    if app.workspace.focus.overlay == AppMode::Diagnostics {
+        if let Some(mut panel) = app.diagnostics_panel.take() {
+            panel.render(&app.diagnostics, &theme, frame);
+            app.diagnostics_panel = Some(panel);
         }
     }
 
@@ -716,6 +753,89 @@ mod tests {
         assert!(text.contains("complete_me"), "{text}");
         // The take/restore arm leaves the overlay owned by the app.
         assert!(app.language_features.is_some());
+    }
+
+    #[test]
+    fn diagnostics_overlay_status_segment_and_gutter_render() {
+        use super::{render, App};
+        use ratatui::{backend::TestBackend, Terminal};
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("f.rs");
+        std::fs::write(&path, "let x = 1\nlet y = 2\n").unwrap();
+        let mut app = App::new(dir.path(), crate::config::AppConfig::default()).unwrap();
+        app.open_document_path(&path, true);
+        let uri = crate::lsp::features::uri_for_path(&path);
+        let theme = crate::theme::dark_theme();
+        let publish = |severity, message: &str| crate::diagnostics::Publish {
+            language: "rust".into(),
+            generation: 0,
+            uri: uri.clone(),
+            version: None,
+            diagnostics: vec![crate::diagnostics::Diagnostic {
+                start_line: 1,
+                start_character: 0,
+                end_line: 1,
+                end_character: 1,
+                severity,
+                code: None,
+                source: Some("t".into()),
+                message: message.into(),
+            }],
+        };
+
+        // Every severity paints the status segment and the gutter number in
+        // its own color (worst wins: the entries replace per publish).
+        use crate::diagnostics::Severity;
+        use ratatui::style::Modifier;
+        for (severity, label, color, modifier) in [
+            (Severity::Error, "E:1", theme.error_fg, Modifier::BOLD),
+            (Severity::Warning, "W:1", theme.warning_fg, Modifier::BOLD),
+            (
+                Severity::Information,
+                "I:1",
+                theme.editor_line_nr_current,
+                Modifier::empty(),
+            ),
+            (
+                Severity::Hint,
+                "H:1",
+                theme.editor_line_nr,
+                Modifier::UNDERLINED,
+            ),
+        ] {
+            app.diagnostics.apply(publish(severity, "boom"), None);
+            let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+            terminal.draw(|frame| render(&mut app, frame)).unwrap();
+            let text: String = terminal
+                .backend()
+                .buffer()
+                .content
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect();
+            assert!(text.contains(label), "{label} in {text}");
+            let painted = terminal.backend().buffer().content.iter().any(|cell| {
+                cell.fg == color && cell.symbol() == "2" && cell.modifier.contains(modifier)
+            });
+            assert!(painted, "{label} gutter painted in its severity style");
+        }
+
+        // Panel overlay renders its severity title and rows.
+        app.diagnostics
+            .apply(publish(Severity::Error, "boom"), None);
+        app.toggle_diagnostics_panel().unwrap();
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let text: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(text.contains("Diagnostics · E:1"), "{text}");
+        assert!(text.contains("boom"), "{text}");
+        assert!(app.diagnostics_panel.is_some());
     }
 
     #[test]

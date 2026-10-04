@@ -1278,3 +1278,15 @@ verification evidence, and reusable patterns.
 - **Overlay height must clamp both ends**: `(LIST_HEIGHT+4).min(area.height)
   .max(3).min(area.height)` — `.max(N)` alone panics on frames smaller
   than N (found by the tiny-4×4 render test, a real bug).
+
+## Phase 11 Task 3 — Versioned diagnostics + navigable panel (2026-10-04)
+
+- **`publishDiagnostics` lands on its own event domain**: `DiagnosticEvent::{Publish, Clear}` lives in `src/diagnostics.rs` (not `src/event.rs`); `LspManager` queues it like results and the run loop calls `app.drain_lsp_diagnostics()` beside `drain_lsp_results`. `Ready`/`ServerDied` both queue `Clear{language}` so a restart never leaks the old server's rows.
+- **Version policy (documented on `Diagnostics::apply`)**: explicit version must equal `LspManager::synced_version(language, uri)`; `null` version always applies; unsynced document ⇒ the publish's own version becomes the baseline. Entries key on `(language, uri)` — one server can never overwrite another's rows.
+- **`}`-line coverage idiom confirmed**: a `}` closing `if result.is_ok()` counts the false arm — the arm's execution count is 0 only because discard/close paths never fail in tests. Cover by manufacturing the Err arm: stale lifecycle decision (`discard_and_close` on a vanished doc → `Unknown(id)` Err → `if let Err` status arm) rather than folding.
+- **Quit-cancel must keep diagnostics**: `remove_document` inside `if !quitting` only — a cancelled quit leaves the document open and its diagnostics must survive (real bug caught by close-path test).
+- **`insert_ready_session` does NOT enable open/close sync** (`sync.open_close:false`): `try_open` refuses, `synced_version` stays None. Tests that need `version(uri)==Some(1)` must send a `ClientEvent::Ready` with `TextSync{open_close:true,..}` through `handle_event` then call `app.sync_lsp_documents()`.
+- **Second `LspDiagnostics` dispatch Errs by design**: `dispatch_command` refuses non-Normal overlays before the toggle fn runs; the dismiss arm is only reachable via direct `toggle_diagnostics_panel()`/key handler. Commands test asserts `.is_err()` on re-dispatch; handler test covers dismiss via Esc.
+- **`CommandMenu.selected` indexes `filtered()`, not `rows`**: `rows` is only the rendered hit-target subset. Regression fix: after `key(End)`, position `RecoveryDisable` via `filtered().iter().position(...)` — new diagnostics commands appended to REGISTRY shifted the last row.
+- **Per-severity render coverage**: one `apply` REPLACES a `(language,uri)` entry — republish single-item publishes (Error→Warning→Information→Hint) and assert gutter `fg`+`modifier` per severity; Hint must assert `Modifier::UNDERLINED` since its fg equals plain gutter color.
+- **Gates**: 27 `cargo test diagnostics` green; suite 1522 green; both clippy gates, release build, fmt clean. Diff coverage 776/777 = 99.9% — sole residual `main.rs:1530` (`drain_lsp_diagnostics` inside systematically-uncovered `run()`; same accepted class as Tasks 1–2).

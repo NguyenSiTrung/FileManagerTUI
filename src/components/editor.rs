@@ -24,6 +24,8 @@ pub struct EditorWidget<'a> {
     /// When true (production `App::prepared_pipeline`), the render-path
     /// highlighter fallback is unreachable even if no cache was attached.
     prepared_only: bool,
+    /// Worst diagnostic severity per line — colors the gutter number.
+    diagnostic_lines: Option<&'a std::collections::BTreeMap<u32, crate::diagnostics::Severity>>,
     block: Option<Block<'a>>,
 }
 
@@ -41,8 +43,18 @@ impl<'a> EditorWidget<'a> {
             syntax_theme,
             prepared: None,
             prepared_only: false,
+            diagnostic_lines: None,
             block: None,
         }
+    }
+
+    /// Diagnostic gutter markers for this document (worst severity wins).
+    pub fn diagnostic_lines(
+        mut self,
+        lines: &'a std::collections::BTreeMap<u32, crate::diagnostics::Severity>,
+    ) -> Self {
+        self.diagnostic_lines = Some(lines);
+        self
     }
 
     /// Render from prepared runs only (no render-path highlighting).
@@ -172,6 +184,26 @@ impl<'a> Widget for EditorWidget<'a> {
                         .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(self.theme.editor_line_nr)
+                };
+                // A diagnostic on this line paints the gutter number in
+                // the worst severity's color (number stays readable).
+                let style = match self
+                    .diagnostic_lines
+                    .and_then(|lines| lines.get(&(line_idx as u32)))
+                {
+                    Some(crate::diagnostics::Severity::Error) => {
+                        style.fg(self.theme.error_fg).add_modifier(Modifier::BOLD)
+                    }
+                    Some(crate::diagnostics::Severity::Warning) => {
+                        style.fg(self.theme.warning_fg).add_modifier(Modifier::BOLD)
+                    }
+                    Some(crate::diagnostics::Severity::Information) => {
+                        style.fg(self.theme.editor_line_nr_current)
+                    }
+                    Some(crate::diagnostics::Severity::Hint) => style
+                        .fg(self.theme.editor_line_nr)
+                        .add_modifier(Modifier::UNDERLINED),
+                    None => style,
                 };
                 buf.set_span(inner.x, y, &Span::styled(num, style), gutter_w);
             }

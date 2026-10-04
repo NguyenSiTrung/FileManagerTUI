@@ -450,6 +450,11 @@ pub struct App {
     pub command_menu: Option<crate::components::command_menu::CommandMenu>,
     /// Language-feature overlay state (completion/hover/locations/symbols).
     pub language_features: Option<crate::components::language_features::LanguageFeatures>,
+    /// Versioned diagnostics store — every live server's publish lands in
+    /// its own (language, uri) slot (see crate::diagnostics policy).
+    pub diagnostics: crate::diagnostics::Diagnostics,
+    /// Navigable diagnostics panel; a snapshot view over `diagnostics`.
+    pub diagnostics_panel: Option<crate::components::diagnostics::DiagnosticsPanel>,
     pub command_entry_area: Rect,
     /// Direct secondary actions return to their workspace, not a stale search.
     pub command_selection_actions: bool,
@@ -839,6 +844,8 @@ impl App {
             keymap_target: None,
             command_menu: None,
             language_features: None,
+            diagnostics: crate::diagnostics::Diagnostics::new(),
+            diagnostics_panel: None,
             command_entry_area: Rect::default(),
             config,
             theme_colors,
@@ -2361,6 +2368,151 @@ impl App {
         doc.editor.set_cursor_position(line, byte);
     }
 
+    // ── Diagnostics (publishDiagnostics) ─────────────────────────────────
+
+    /// Apply queued diagnostic events: a publish lands in its own
+    /// (language, uri) slot after the synced-version staleness check; a
+    /// `Clear` wipes a dead or restarted server's whole table. An open
+    /// panel refreshes only when the store revision moved.
+    pub fn drain_lsp_diagnostics(&mut self) {
+        for event in self.lsp.take_diagnostics() {
+            match event {
+                crate::diagnostics::DiagnosticEvent::Clear { language } => {
+                    self.diagnostics.clear_language(&language);
+                }
+                crate::diagnostics::DiagnosticEvent::Publish(publish) => {
+                    let tracked = self.lsp.synced_version(&publish.language, &publish.uri);
+                    self.diagnostics.apply(publish, tracked);
+                }
+            }
+        }
+        if let Some(panel) = self.diagnostics_panel.as_mut() {
+            if panel.built_revision != self.diagnostics.revision() {
+                panel.rebuild(&self.diagnostics);
+            }
+        }
+    }
+
+    /// Toggle the navigable diagnostics panel (all servers, all files).
+    pub fn toggle_diagnostics_panel(&mut self) -> std::result::Result<(), String> {
+        if self.workspace.focus.overlay == AppMode::Diagnostics {
+            self.dismiss_diagnostics();
+            return Ok(());
+        }
+        if self.workspace.focus.overlay != AppMode::Normal {
+            return Err("Finish the current overlay before opening diagnostics".into());
+        }
+        self.workspace
+            .focus
+            .open_overlay(AppMode::Diagnostics, self.workspace.documents.active_id())
+            .map_err(|e| e.to_string())?;
+        let mut panel = crate::components::diagnostics::DiagnosticsPanel::default();
+        panel.rebuild(&self.diagnostics);
+        self.diagnostics_panel = Some(panel);
+        Ok(())
+    }
+
+    /// Esc / outside-click: close the panel and return to its origin.
+    pub fn dismiss_diagnostics(&mut self) {
+        if self.workspace.focus.overlay != AppMode::Diagnostics {
+            return;
+        }
+        self.diagnostics_panel = None;
+        self.workspace.focus.dismiss_overlay();
+    }
+
+    /// Enter on a panel row: open the file and jump to the position.
+    /// `file:` URIs only — every other scheme fails visibly.
+    pub fn apply_diagnostic_selection(&mut self) {
+        if self.diagnostics.is_empty() {
+            return;
+        }
+        let Some(row) = self
+            .diagnostics_panel
+            .as_ref()
+            .and_then(|panel| panel.selected().cloned())
+        else {
+            return;
+        };
+        self.dismiss_diagnostics();
+        let Some(path) = crate::lsp::features::path_for_uri(&row.uri) else {
+            self.set_status_message(format!(
+                "LSP: unsupported URI scheme — {}",
+                crate::lsp::features::sanitize_server_text(&row.uri, 120)
+            ));
+            return;
+        };
+        if self.open_document_path(&path, false) {
+            if let Some(id) = self.workspace.documents.active_id() {
+                self.goto_lsp_position(id, row.line as u64, row.character as u64);
+            }
+        }
+    }
+
+    /// Jump the cursor to the next diagnostic in the ACTIVE document,
+    /// wrapping at the end. Diagnostics are position-sorted per document.
+    pub fn diagnostics_next(&mut self) -> std::result::Result<(), String> {
+        self.step_diagnostic(1)
+    }
+
+    /// Jump the cursor to the previous diagnostic, wrapping at the start.
+    pub fn diagnostics_prev(&mut self) -> std::result::Result<(), String> {
+        self.step_diagnostic(-1)
+    }
+
+    fn step_diagnostic(&mut self, direction: isize) -> std::result::Result<(), String> {
+        let id = self
+            .workspace
+            .documents
+            .active_id()
+            .ok_or_else(|| "No active document".to_string())?;
+        #[rustfmt::skip]
+        let Some(document) = self.workspace.documents.get(id) else { return Err("No active document".to_string()); };
+        let uri = crate::lsp::features::uri_for_path(document.path());
+        let items = self.diagnostics.for_document(&uri);
+        if items.is_empty() {
+            return Err("No diagnostics for this document".to_string());
+        }
+        // Cursor position in the server's units (the encoding the session
+        // negotiated — Utf16 until Ready says otherwise).
+        let encoding = self
+            .current_lsp_language()
+            .and_then(|l| self.lsp.ready_encoding(&l))
+            .unwrap_or_default();
+        let cursor_char = document
+            .editor
+            .buffer
+            .get(document.editor.cursor_line)
+            .and_then(|text| {
+                crate::lsp::positions::byte_to_lsp(text, document.editor.cursor_col, encoding)
+            })
+            .unwrap_or(0) as u32;
+        let cursor = (document.editor.cursor_line as u32, cursor_char);
+        let index = if direction >= 0 {
+            items
+                .iter()
+                .position(|d| (d.start_line, d.start_character) > cursor)
+                .unwrap_or(0)
+        } else {
+            items
+                .iter()
+                .rposition(|d| (d.start_line, d.start_character) < cursor)
+                .unwrap_or_else(|| items.len() - 1)
+        };
+        let total = items.len();
+        let target = items[index];
+        let (line, character, severity) =
+            (target.start_line, target.start_character, target.severity);
+        self.goto_lsp_position(id, line as u64, character as u64);
+        self.set_status_message(format!(
+            "Diagnostic {}/{} ({})",
+            index + 1,
+            total,
+            severity.marker()
+        ));
+        Ok(())
+    }
+
     /// Bounded teardown of every server session; after the event loop, with
     /// terminal shutdown.
     pub fn shutdown_lsp(&mut self) {
@@ -3665,7 +3817,17 @@ impl App {
                 // Rename back: from is original, to is what it was renamed to
                 match operations::rename(&to, &from) {
                     Ok(()) => {
+                        // Old keys die: a republish under the new URI must
+                        // not merge into entries for a moved-away path.
+                        let old_uris: Vec<String> = changes
+                            .iter()
+                            .filter_map(|(id, _)| self.workspace.documents.get(*id))
+                            .map(|d| crate::lsp::features::uri_for_path(d.path()))
+                            .collect();
                         self.workspace.documents.commit_rename(changes);
+                        for uri in old_uris {
+                            self.diagnostics.remove_document(&uri);
+                        }
                         if let Some(parent) = from.parent() {
                             self.tree_state.reload_dir(parent);
                         }
@@ -4029,6 +4191,11 @@ impl App {
                 self.set_status_message(message.clone());
                 message
             })?;
+        let old_uri = self
+            .workspace
+            .documents
+            .get(id)
+            .map(|d| crate::lsp::features::uri_for_path(d.path()));
         let editor = self
             .workspace
             .documents
@@ -4040,6 +4207,9 @@ impl App {
         }
         let result = editor.save_as(&path);
         if result.is_ok() {
+            if let Some(uri) = old_uri {
+                self.diagnostics.remove_document(&uri);
+            }
             self.workspace.documents.commit_save_as(id, path.clone());
             if let Some(parent) = path.parent() {
                 self.tree_state.reload_dir(parent);
@@ -4979,9 +5149,11 @@ impl App {
                 self.set_status_message("Document no longer owned; operation cancelled".into());
                 return;
             };
+            let closed_uri = crate::lsp::features::uri_for_path(d.path());
             if !d.editor.modified {
                 if !quitting {
                     let _ = self.workspace.documents.close(id);
+                    self.diagnostics.remove_document(&closed_uri);
                 }
                 self.document_lifecycle
                     .as_mut()
@@ -5035,6 +5207,11 @@ impl App {
         if flow.pending.front().copied() != Some(id) {
             return;
         }
+        let closed_uri = self
+            .workspace
+            .documents
+            .get(id)
+            .map(|d| crate::lsp::features::uri_for_path(d.path()));
         let result = if discard {
             self.workspace.documents.discard_and_close(id)
         } else if !flow.quitting {
@@ -5042,6 +5219,11 @@ impl App {
         } else {
             Ok(())
         };
+        if result.is_ok() {
+            if let Some(uri) = closed_uri {
+                self.diagnostics.remove_document(&uri);
+            }
+        }
         if let Err(error) = result {
             self.document_lifecycle = None;
             self.set_status_message(error.to_string());
@@ -16149,6 +16331,392 @@ mod tests {
                 .byte,
             3
         );
+    }
+
+    // ── Phase 11 Task 3 — versioned diagnostics wiring ──
+
+    /// Queue a `textDocument/publishDiagnostics` notification through the
+    /// manager — the same entry point the client thread uses.
+    fn publish_diagnostics(app: &mut App, generation: u64, params: serde_json::Value) {
+        app.lsp.handle_event(
+            "rust",
+            generation,
+            crate::lsp::client::ClientEvent::Notification {
+                generation,
+                method: "textDocument/publishDiagnostics".into(),
+                params: params.to_string(),
+            },
+        );
+    }
+
+    fn diag_item(line: u64, character: u64, severity: u64, message: &str) -> serde_json::Value {
+        serde_json::json!({
+            "range": {
+                "start": {"line": line, "character": character},
+                "end": {"line": line, "character": character + 1},
+            },
+            "severity": severity,
+            "message": message,
+        })
+    }
+
+    #[test]
+    fn diagnostics_publish_flows_to_store_panel_and_navigation() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("a.rs");
+        std::fs::write(&file, "let x = 1\nlet y = 2\n").unwrap();
+        let mut app = App::new(dir.path(), AppConfig::default()).unwrap();
+        let (_rx, _doc) = lsp_fixture(&mut app, &file, Default::default());
+        // Ready advertises open/close sync → didOpen makes version 1 the
+        // staleness baseline (the fixture's session starts sync-disabled).
+        app.lsp.handle_event(
+            "rust",
+            0,
+            crate::lsp::client::ClientEvent::Ready {
+                generation: 0,
+                encoding: crate::lsp::positions::PositionEncoding::Utf16,
+                sync: crate::lsp::features::TextSync {
+                    open_close: true,
+                    ..Default::default()
+                },
+                features: Default::default(),
+            },
+        );
+        app.sync_lsp_documents();
+        let uri = crate::lsp::features::uri_for_path(&file);
+        assert_eq!(app.lsp.synced_version("rust", &uri), Some(1));
+
+        // A publish for a different document version is ignored entirely.
+        publish_diagnostics(
+            &mut app,
+            0,
+            serde_json::json!({
+                "uri": uri, "version": 9,
+                "diagnostics": [diag_item(0, 0, 1, "stale")],
+            }),
+        );
+        app.drain_lsp_diagnostics();
+        assert_eq!(app.diagnostics.for_document(&uri).len(), 0);
+
+        // The matching publish lands — error and warning, position-sorted.
+        publish_diagnostics(
+            &mut app,
+            0,
+            serde_json::json!({
+                "uri": uri, "version": 1,
+                "diagnostics": [
+                    diag_item(1, 4, 1, "boom"),
+                    diag_item(0, 0, 2, "careful"),
+                ],
+            }),
+        );
+        app.drain_lsp_diagnostics();
+        assert_eq!(app.diagnostics.for_document(&uri).len(), 2);
+        assert_eq!(app.diagnostics.summary(&uri).errors, 1);
+        assert_eq!(app.diagnostics.summary(&uri).warnings, 1);
+
+        // Panel opens over Normal, snapshot already current.
+        app.toggle_diagnostics_panel().unwrap();
+        assert_eq!(app.workspace.focus.overlay, AppMode::Diagnostics);
+        assert_eq!(app.diagnostics_panel.as_ref().unwrap().len(), 2);
+
+        // A republish while open rebuilds the snapshot (revision moved).
+        publish_diagnostics(
+            &mut app,
+            0,
+            serde_json::json!({
+                "uri": uri, "version": 1,
+                "diagnostics": [
+                    diag_item(1, 4, 1, "boom"),
+                    diag_item(0, 7, 4, "hint"),
+                    diag_item(0, 0, 2, "careful"),
+                ],
+            }),
+        );
+        app.drain_lsp_diagnostics();
+        assert_eq!(app.diagnostics_panel.as_ref().unwrap().len(), 3);
+
+        // Toggle again dismisses back to the captured context.
+        app.toggle_diagnostics_panel().unwrap();
+        assert_eq!(app.workspace.focus.overlay, AppMode::Normal);
+        app.dismiss_diagnostics(); // no-op outside the overlay
+
+        // next: (0,0) → (0,7) → (1,4) → wraps to (0,0).
+        app.diagnostics_next().unwrap();
+        assert_eq!(
+            app.workspace
+                .documents
+                .active()
+                .unwrap()
+                .editor
+                .cursor_position()
+                .line,
+            0
+        );
+        app.diagnostics_next().unwrap();
+        assert_eq!(
+            app.workspace
+                .documents
+                .active()
+                .unwrap()
+                .editor
+                .cursor_position()
+                .line,
+            1
+        );
+        app.diagnostics_next().unwrap();
+        assert_eq!(
+            app.workspace
+                .documents
+                .active()
+                .unwrap()
+                .editor
+                .cursor_position()
+                .line,
+            0
+        );
+        // prev: (0,0) wraps to (1,4), then back to (0,0).
+        app.diagnostics_prev().unwrap();
+        assert_eq!(
+            app.workspace
+                .documents
+                .active()
+                .unwrap()
+                .editor
+                .cursor_position()
+                .line,
+            1
+        );
+        app.diagnostics_prev().unwrap();
+        assert_eq!(
+            app.workspace
+                .documents
+                .active()
+                .unwrap()
+                .editor
+                .cursor_position()
+                .line,
+            0
+        );
+
+        // Enter on a panel row opens the file at the diagnostic position.
+        app.toggle_diagnostics_panel().unwrap();
+        let rows_len = app.diagnostics_panel.as_ref().unwrap().len();
+        app.diagnostics_panel.as_mut().unwrap().selected = rows_len - 1;
+        app.apply_diagnostic_selection();
+        assert_eq!(app.workspace.focus.overlay, AppMode::Normal);
+        assert_eq!(
+            app.workspace
+                .documents
+                .active()
+                .unwrap()
+                .editor
+                .cursor_position()
+                .line,
+            1
+        );
+
+        // ServerDied clears that server's whole diagnostic table.
+        app.lsp.handle_event(
+            "rust",
+            0,
+            crate::lsp::client::ClientEvent::ServerDied {
+                generation: 1,
+                reason: "gone".into(),
+            },
+        );
+        app.drain_lsp_diagnostics();
+        assert_eq!(app.diagnostics.for_document(&uri).len(), 0);
+    }
+
+    #[test]
+    fn diagnostics_close_nonfile_versionless_and_error_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("a.rs");
+        let other = dir.path().join("b.rs");
+        std::fs::write(&file, "let x = 1\n").unwrap();
+        std::fs::write(&other, "let z = 3\n").unwrap();
+        let mut app = App::new(dir.path(), AppConfig::default()).unwrap();
+        let (_rx, doc) = lsp_fixture(&mut app, &file, Default::default());
+        app.lsp.handle_event(
+            "rust",
+            0,
+            crate::lsp::client::ClientEvent::Ready {
+                generation: 0,
+                encoding: crate::lsp::positions::PositionEncoding::Utf16,
+                sync: crate::lsp::features::TextSync {
+                    open_close: true,
+                    ..Default::default()
+                },
+                features: Default::default(),
+            },
+        );
+        app.sync_lsp_documents();
+        let uri = crate::lsp::features::uri_for_path(&file);
+        let other_uri = crate::lsp::features::uri_for_path(&other);
+
+        // Versionless publish applies unconditionally; project diagnostics
+        // for unopened files land too.
+        publish_diagnostics(
+            &mut app,
+            0,
+            serde_json::json!({
+                "uri": uri,
+                "diagnostics": [diag_item(0, 0, 1, "boom")],
+            }),
+        );
+        publish_diagnostics(
+            &mut app,
+            0,
+            serde_json::json!({
+                "uri": other_uri,
+                "diagnostics": [diag_item(0, 0, 1, "far")],
+            }),
+        );
+        // A non-file URI is listed but cannot be navigated into.
+        publish_diagnostics(
+            &mut app,
+            0,
+            serde_json::json!({
+                "uri": "untitled:x",
+                "diagnostics": [diag_item(0, 0, 3, "scheme")],
+            }),
+        );
+        app.drain_lsp_diagnostics();
+        assert_eq!(app.diagnostics.for_document(&other_uri).len(), 1);
+
+        // An empty replacement clears the document's list.
+        publish_diagnostics(
+            &mut app,
+            0,
+            serde_json::json!({"uri": other_uri, "diagnostics": []}),
+        );
+        app.drain_lsp_diagnostics();
+        assert_eq!(app.diagnostics.for_document(&other_uri).len(), 0);
+
+        // Selecting the non-file row fails visibly, keeping the document.
+        app.toggle_diagnostics_panel().unwrap();
+        let rows = app.diagnostics_panel.as_ref().unwrap().len();
+        assert_eq!(rows, 2);
+        app.diagnostics_panel.as_mut().unwrap().selected = rows - 1;
+        assert_eq!(
+            app.diagnostics_panel
+                .as_ref()
+                .unwrap()
+                .selected()
+                .unwrap()
+                .uri,
+            "untitled:x"
+        );
+        app.apply_diagnostic_selection();
+        let note = app
+            .status_message
+            .as_ref()
+            .map(|(m, _)| m.clone())
+            .unwrap_or_default();
+        assert!(note.contains("unsupported URI scheme"), "{note}");
+
+        // A row whose file can no longer be opened drops the navigation.
+        let gone_uri = crate::lsp::features::uri_for_path(&dir.path().join("gone.rs"));
+        app.diagnostics.apply(
+            crate::diagnostics::Publish {
+                language: "rust".into(),
+                generation: 0,
+                uri: gone_uri.clone(),
+                version: None,
+                diagnostics: vec![crate::diagnostics::Diagnostic {
+                    start_line: 0,
+                    start_character: 0,
+                    end_line: 0,
+                    end_character: 1,
+                    severity: crate::diagnostics::Severity::Error,
+                    code: None,
+                    source: None,
+                    message: "ghost".into(),
+                }],
+            },
+            None,
+        );
+        let mut panel = crate::components::diagnostics::DiagnosticsPanel::default();
+        panel.rebuild(&app.diagnostics);
+        panel.selected = panel
+            .rows
+            .iter()
+            .position(|row| row.uri == gone_uri)
+            .unwrap();
+        app.diagnostics_panel = Some(panel);
+        app.workspace
+            .focus
+            .open_overlay(crate::app::AppMode::Diagnostics, Some(doc))
+            .unwrap();
+        app.apply_diagnostic_selection();
+        assert_eq!(app.workspace.focus.overlay, crate::app::AppMode::Normal);
+
+        // Panel gone → Enter is a silent no-op.
+        app.diagnostics_panel = None;
+        app.apply_diagnostic_selection();
+
+        // Navigation needs a document; a synced doc needs diagnostics.
+        assert!(app.diagnostics_next().is_ok());
+        let mut clean = App::new(dir.path(), AppConfig::default()).unwrap();
+        assert!(clean.diagnostics_next().is_err());
+        assert!(clean.diagnostics_prev().is_err());
+        assert!(clean.toggle_diagnostics_panel().is_ok());
+        clean.apply_diagnostic_selection(); // empty store → no-op
+
+        // The overlay gate refuses stacking.
+        let mut busy = App::new(dir.path(), AppConfig::default()).unwrap();
+        busy.open_dialog(crate::app::DialogKind::CreateFile);
+        assert!(busy.toggle_diagnostics_panel().is_err());
+
+        // Closing the document removes its URI entries from every server —
+        // via the clean-close path and, for a dirty document, the discard path.
+        assert!(app.diagnostics.contains(&uri));
+        assert_eq!(app.workspace.documents.active_id(), Some(doc));
+        app.close_active_document();
+        assert!(!app.diagnostics.contains(&uri));
+
+        // Reopen, dirty it, republish, then close → dialog → discard.
+        assert!(app.open_document_path(&file, true));
+        let doc = app.workspace.documents.active_id().unwrap();
+        app.workspace
+            .documents
+            .get_mut(doc)
+            .unwrap()
+            .editor
+            .insert_text("x")
+            .unwrap();
+        publish_diagnostics(
+            &mut app,
+            0,
+            serde_json::json!({"uri": uri, "diagnostics": [diag_item(0, 0, 1, "boom")]}),
+        );
+        app.drain_lsp_diagnostics();
+        assert!(app.diagnostics.contains(&uri));
+        app.close_active_document();
+        assert!(matches!(
+            app.workspace.focus.overlay,
+            crate::app::AppMode::Dialog(crate::app::DialogKind::DocumentDecision { .. })
+        ));
+        app.discard_lifecycle_document(doc);
+        assert!(!app.diagnostics.contains(&uri));
+
+        // A decision arriving for a document that vanished mid-dialog
+        // surfaces the stale id instead of touching the store.
+        assert!(app.open_document_path(&file, true));
+        let doc = app.workspace.documents.active_id().unwrap();
+        app.workspace
+            .documents
+            .get_mut(doc)
+            .unwrap()
+            .editor
+            .insert_text("x")
+            .unwrap();
+        app.close_active_document();
+        let _ = app.workspace.documents.discard_and_close(doc);
+        app.discard_lifecycle_document(doc);
+        assert!(app.document_lifecycle.is_none());
+        assert!(app.status_message.is_some());
     }
 }
 

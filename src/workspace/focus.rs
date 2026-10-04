@@ -27,6 +27,8 @@ pub enum InputOverlay {
     CommandMenu,
     /// Language-feature results (completion/hover/locations/symbols).
     LanguageFeatures,
+    /// Navigable diagnostics panel (published diagnostics across servers).
+    Diagnostics,
 }
 
 /// Explicit input destination. A focused empty editor must not dispatch tree keys.

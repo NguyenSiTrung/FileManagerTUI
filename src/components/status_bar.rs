@@ -1,7 +1,7 @@
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
-    style::{Modifier, Style},
+    style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::Widget,
 };
@@ -19,6 +19,7 @@ pub struct StatusBarWidget<'a> {
     is_error: bool,
     clipboard_info: Option<&'a str>,
     watcher_status: Option<&'a str>,
+    diagnostics: Option<(&'a str, Color)>,
     key_hints: Option<&'a str>,
     git_branch: Option<&'a str>,
     document: Option<DocumentStatus<'a>>,
@@ -35,6 +36,7 @@ impl<'a> StatusBarWidget<'a> {
             is_error: false,
             clipboard_info: None,
             watcher_status: None,
+            diagnostics: None,
             key_hints: None,
             git_branch: None,
             document: None,
@@ -55,6 +57,13 @@ impl<'a> StatusBarWidget<'a> {
 
     pub fn watcher_status(mut self, status: &'a str) -> Self {
         self.watcher_status = Some(status);
+        self
+    }
+
+    /// Severity summary ("E:2 W:1") in the worst severity's color — the
+    /// caller picks; absent entirely when the workspace is clean.
+    pub fn diagnostics(mut self, label: &'a str, color: Color) -> Self {
+        self.diagnostics = Some((label, color));
         self
     }
 
@@ -183,6 +192,13 @@ impl Widget for StatusBarWidget<'_> {
             (
                 self.watcher_status,
                 base.fg(self.theme.warning_fg).add_modifier(Modifier::BOLD),
+            ),
+            (
+                self.diagnostics.map(|(label, _)| label),
+                base.fg(self
+                    .diagnostics
+                    .map_or(self.theme.error_fg, |(_, color)| color))
+                    .add_modifier(Modifier::BOLD),
             ),
             (
                 Some(self.key_hints.unwrap_or(if self.document.is_some() {

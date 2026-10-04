@@ -1,5 +1,6 @@
 pub mod command_menu;
 pub mod content_search;
+pub mod diagnostics;
 pub mod dialog;
 pub mod document_tabs;
 pub mod editor;
