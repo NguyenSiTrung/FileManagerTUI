@@ -1146,6 +1146,9 @@ impl Cli {
             git: crate::config::GitConfig {
                 enabled: if self.no_git { Some(false) } else { None },
             },
+            lsp: crate::lsp::config::LspConfig::default(),
+            lsp_global: crate::lsp::config::LspConfig::default(),
+            lsp_local: crate::lsp::config::LspConfig::default(),
             theme: crate::config::ThemeConfig {
                 scheme: self.theme.clone(),
                 custom: None,
@@ -1387,6 +1390,12 @@ async fn main() -> error::Result<()> {
     // outside render through the backend's bounded background transport.
     app.request_git_refresh();
 
+    // LSP: seed global-config trust, then start (or gate) servers for any
+    // restored documents. All spawning is async on per-session pump threads;
+    // project argv needing trust only queues a dialog — startup never blocks.
+    app.init_lsp_trust();
+    app.start_lsp_for_open_documents();
+
     let epoch = std::time::Instant::now();
     let mut policy = LoopPolicy::new(Duration::ZERO, background::RedrawLimits::default(), 65536);
     let loop_result: error::Result<()> = async {
@@ -1498,8 +1507,17 @@ async fn main() -> error::Result<()> {
                     // Generation-tagged: stale results are refused in the state.
                     let _ = app.accept_git_refresh(refresh);
                 }
-                // Staged: consumed once Task 4 wires server startup into App.
-                Event::Lsp(_) => {}
+                Event::Lsp {
+                    language,
+                    generation,
+                    event,
+                } => {
+                    if let Some(note) = app.lsp.handle_event(&language, generation, event) {
+                        app.set_status_message(note);
+                    }
+                    // A queued project-server request opens the trust dialog.
+                    app.maybe_prompt_lsp_trust();
+                }
             }
 
             // Throttled, bounded snapshot pass for dirty documents. Runs
@@ -1546,6 +1564,9 @@ async fn main() -> error::Result<()> {
     events.rx.close();
     app.cancel_token.store(true, Ordering::SeqCst);
     app.shutdown_terminal();
+    // Bounded teardown of every LSP session (shutdown→exit→kill inside each
+    // client's own deadline — a hung server cannot stall quit).
+    app.shutdown_lsp();
     app.shutdown_background().await;
     events.shutdown().await;
     if let Some(watcher) = watcher_thread {

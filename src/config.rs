@@ -299,6 +299,18 @@ pub struct AppConfig {
     pub session: SessionConfig,
     pub recovery: RecoveryConfig,
     pub git: GitConfig,
+    /// Installed-server LSP configuration (FR-10). Optional by design.
+    pub lsp: crate::lsp::config::LspConfig,
+    /// The `[lsp]` section as loaded from trusted layers only (global file,
+    /// `$FM_TUI_CONFIG`, `--config`, CLI overrides) — the source of durable
+    /// `[[lsp.trust]]` grants. Never deserialized; populated by
+    /// `load_checked`.
+    #[serde(skip)]
+    pub lsp_global: crate::lsp::config::LspConfig,
+    /// The `[lsp]` section from the project-local `.fm-tui.toml` alone —
+    /// configuration, but untrusted for execution until approved.
+    #[serde(skip)]
+    pub lsp_local: crate::lsp::config::LspConfig,
     pub theme: ThemeConfig,
     pub keymap: crate::keymap::KeymapConfig,
 }
@@ -369,6 +381,20 @@ pub const MAX_RECOVERY_MAX_AGE_SECS: u64 = 100 * 365 * 24 * 60 * 60;
 /// Default minimum interval between throttled snapshot writes.
 pub const DEFAULT_RECOVERY_MIN_INTERVAL_MS: u64 = 2_000;
 
+/// A project-local config file may carry `[[lsp.trust]]` entries, but
+/// honoring them would let a checked-out repository grant its own argv
+/// execution. Strip them (with a notice) — grants belong to trusted layers.
+fn strip_untrusted_trust(parsed: &mut AppConfig, path: &Path, is_project_layer: bool) {
+    if is_project_layer && !parsed.lsp.trust.is_empty() {
+        eprintln!(
+            "fm: ignoring [[lsp.trust]] in project-local config {} — \
+             execution grants belong in the global config",
+            path.display()
+        );
+        parsed.lsp.trust.clear();
+    }
+}
+
 // ── Config file locator ──────────────────────────────────────────────────────
 
 /// Return the list of candidate config file paths in priority order.
@@ -436,6 +462,12 @@ impl AppConfig {
         if let Some(path) = cli_config_path {
             paths.push((path.to_owned(), true));
         }
+        // The one untrusted layer: the auto-discovered `.fm-tui.toml` in the
+        // current directory. Everything else (global, env, --config, CLI
+        // overrides) is the user's own trusted configuration.
+        let project_local = std::env::current_dir()
+            .ok()
+            .map(|cwd| cwd.join(".fm-tui.toml"));
         for (path, explicit) in paths {
             let file = match std::fs::File::open(&path) {
                 Ok(file) => file,
@@ -451,11 +483,21 @@ impl AppConfig {
             if content.len() > 1024 * 1024 {
                 return Err(format!("Config {} exceeds 1 MiB", path.display()));
             }
-            let parsed: Self = toml::from_str(&content)
+            let mut parsed: Self = toml::from_str(&content)
                 .map_err(|error| format!("Invalid config {}: {error}", path.display()))?;
+            let is_project_layer = project_local.as_deref() == Some(path.as_path());
+            strip_untrusted_trust(&mut parsed, &path, is_project_layer);
+            // Provenance must survive the merge for the trust gate: keep the
+            // per-layer lsp sections alongside the merged view.
+            if is_project_layer {
+                config.lsp_local = config.lsp_local.merge(&parsed.lsp);
+            } else {
+                config.lsp_global = config.lsp_global.merge(&parsed.lsp);
+            }
             config = config.merge(&parsed);
         }
         if let Some(overrides) = cli_overrides {
+            config.lsp_global = config.lsp_global.merge(&overrides.lsp);
             config = config.merge(overrides);
         }
         crate::keymap::Keymap::compile(&config.keymap)
@@ -624,6 +666,11 @@ impl AppConfig {
             git: GitConfig {
                 enabled: other.git.enabled.or(self.git.enabled),
             },
+            lsp: self.lsp.merge(&other.lsp),
+            // Per-layer lsp provenance merges through its own channels in
+            // `load_checked`; other layers arrive empty and change nothing.
+            lsp_global: self.lsp_global.merge(&other.lsp_global),
+            lsp_local: self.lsp_local.merge(&other.lsp_local),
             theme: ThemeConfig {
                 scheme: other.theme.scheme.clone().or(self.theme.scheme),
                 custom: match (&self.theme.custom, &other.theme.custom) {
@@ -1764,5 +1811,83 @@ search_max_excerpt_bytes = 40
         let absent: AppConfig = toml::from_str("[git]\n").unwrap();
         assert!(!absent.clone().merge(&file).git_enabled());
         assert!(absent.merge(&AppConfig::default()).git_enabled());
+    }
+
+    #[test]
+    fn lsp_toml_parses_servers_languages_and_trust() {
+        let config: AppConfig = toml::from_str(
+            r#"
+[lsp]
+enabled = false
+
+[lsp.servers.rust]
+argv = ["rust-analyzer", "--stdio"]
+root_markers = ["Cargo.toml"]
+
+[lsp.servers.python]
+argv = ["pylsp"]
+
+[[lsp.trust]]
+root = "~/work"
+argv = ["./vendor/ra", "--project"]
+
+[lsp.languages]
+templ = "html"
+"#,
+        )
+        .unwrap();
+        assert_eq!(config.lsp.enabled, Some(false));
+        assert!(!config.lsp.enabled());
+        let rust = &config.lsp.servers["rust"];
+        assert_eq!(rust.argv, vec!["rust-analyzer", "--stdio"]);
+        assert_eq!(rust.root_markers, vec!["Cargo.toml"]);
+        assert_eq!(config.lsp.servers["python"].argv, vec!["pylsp"]);
+        assert_eq!(config.lsp.trust.len(), 1);
+        assert_eq!(config.lsp.trust[0].argv, vec!["./vendor/ra", "--project"]);
+        assert_eq!(config.lsp.languages["templ"], "html");
+        // Bare TOML parse never populates provenance — `load_checked` does.
+        assert!(config.lsp_global.servers.is_empty());
+        assert!(config.lsp_local.servers.is_empty());
+    }
+
+    #[test]
+    fn project_layer_trust_entries_are_stripped_but_global_keeps_grants() {
+        // `load_checked` marks exactly `cwd/.fm-tui.toml` as the project
+        // layer; the strip helper is the testable unit.
+        let mut project: AppConfig =
+            toml::from_str("[[lsp.trust]]\nroot = \"/tmp\"\nargv = [\"ra\"]\n").unwrap();
+        assert_eq!(project.lsp.trust.len(), 1);
+        strip_untrusted_trust(&mut project, Path::new("/p/.fm-tui.toml"), true);
+        assert!(project.lsp.trust.is_empty());
+
+        // Any other layer keeps its explicit grants.
+        let mut global: AppConfig =
+            toml::from_str("[[lsp.trust]]\nroot = \"/tmp\"\nargv = [\"ra\"]\n").unwrap();
+        strip_untrusted_trust(
+            &mut global,
+            Path::new("/home/u/.config/fm-tui/config.toml"),
+            false,
+        );
+        assert_eq!(global.lsp.trust.len(), 1);
+    }
+
+    #[test]
+    fn load_checked_populates_lsp_provenance_and_keeps_trusted_grants() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "[lsp.servers.rust]\nargv = [\"rust-analyzer\"]\n\
+             [[lsp.trust]]\nroot = \"/tmp\"\nargv = [\"ra\"]\n",
+        )
+        .unwrap();
+        let config = AppConfig::load_checked(Some(&path), None).unwrap();
+        // A --config file is a trusted layer: servers land in lsp_global,
+        // nothing lands in lsp_local, and its grants survive.
+        assert!(config.lsp_global.servers.contains_key("rust"));
+        assert!(config.lsp_local.servers.is_empty());
+        assert_eq!(config.lsp.trust.len(), 1);
+        // The merged view sees the same server (provenance + merged both set).
+        assert_eq!(config.lsp.servers["rust"].argv, vec!["rust-analyzer"]);
     }
 }

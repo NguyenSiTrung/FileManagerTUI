@@ -929,7 +929,7 @@ exist. Add a module's declarations in the task that introduces it. Avoid broad
   - [x] Run `cargo test lsp::client` against fake peers, not installed real servers.
     (19 tests: 10 scripted-peer unit tests + 9 real-child fake-server tests.)
 
-- [ ] Task 4: Add installed-server configuration and project execution trust
+- [x] Task 4: Add installed-server configuration and project execution trust
 
   **Files:** create `src/lsp/config.rs`; modify `src/lsp/mod.rs`, `src/config.rs`,
   `src/main.rs`, `src/app.rs`, `src/commands.rs`, `src/components/dialog.rs`,
@@ -937,16 +937,30 @@ exist. Add a module's declarations in the task that introduces it. Avoid broad
   **Requirements:** FR-10, AC-8, AC-11.
   **Produces:** language mappings, argv validation, workspace-root matching,
   capability/status display, explicit project-command trust.
-  - [ ] Test global/local precedence, missing executable, refused trust,
+  - [x] Test global/local precedence, missing executable, refused trust,
     noninteractive startup, modified project argv, and session restore:
     ```rust
     assert!(!project_server.allowed_without_explicit_trust());
     assert!(!restored_session_grants_execution);
     ```
-  - [ ] Keep startup asynchronous and basic editing available; require no
+    (Both pinned assertions implemented verbatim in `lsp::config` tests —
+    `project_server_never_executes_without_explicit_trust`,
+    `session_restore_never_grants_execution`. Provenance flows via
+    `lsp_global`/`lsp_local` on `AppConfig`; project `[[lsp.trust]]` is
+    stripped at load with a warning; trust keys bind canonicalized
+    (root, argv); headless = `event_tx.is_none()` → `Denied("headless start")`;
+    a modified project argv re-gates — stale session is shut down boundedly
+    first.)
+  - [x] Keep startup asynchronous and basic editing available; require no
     automatic server installation. Bind trust to the actual workspace/command,
     not just a language name.
-  - [ ] Run `cargo test lsp::config` and TOML/trust dialog tests.
+    (All spawning happens on per-session pump threads; `maybe_start_*` only
+    resolves + gates + queues the dialog. Nothing is ever downloaded.)
+  - [x] Run `cargo test lsp::config` and TOML/trust dialog tests.
+    (11 new config tests + 6 manager tests + TOML/strip/provenance tests +
+    `LspTrust`/`LspStatus` dialog render & key tests + command dispatch
+    tests. Full suite 1438 green; diff coverage 98.9% — residuals are
+    defensive catch-alls, test internals, and `main()` wiring.)
 
 - [ ] Task 5: Automated checkpoint for LSP foundation
 

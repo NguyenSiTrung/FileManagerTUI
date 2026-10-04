@@ -2129,6 +2129,19 @@ fn handle_dialog_mode(app: &mut App, key: KeyEvent) {
             KeyCode::Esc | KeyCode::Char('n' | 'N' | 'c' | 'C') => app.close_dialog(),
             _ => {}
         },
+        DialogKind::LspTrust { .. } => match key.code {
+            // Approval binds this session to the exact (root, argv) shown —
+            // anything else the project config might add stays untrusted.
+            KeyCode::Char('y' | 'Y') | KeyCode::Enter => app.approve_lsp_trust(),
+            KeyCode::Esc | KeyCode::Char('n' | 'N' | 'c' | 'C') => app.deny_lsp_trust(),
+            _ => {}
+        },
+        DialogKind::LspStatus { .. } => match key.code {
+            KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q' | 'Q' | 'c' | 'C') => {
+                app.close_dialog()
+            }
+            _ => {}
+        },
         _ => {
             handle_input_dialog(app, key, kind);
         }
@@ -8959,5 +8972,124 @@ keys = ["F9"]
         assert!(!app.preview_selection.is_active());
         // But last_preview_click should NOT be set (click was on tree)
         assert!(app.last_preview_click.is_none());
+    }
+
+    #[test]
+    fn lsp_trust_dialog_keys_approve_and_refuse() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("main.rs");
+        std::fs::write(&file, "fn main() {}\n").unwrap();
+        std::fs::write(dir.path().join("Cargo.toml"), "[package]\nname = \"x\"\n").unwrap();
+        let mut config = crate::config::AppConfig::default();
+        config.lsp_local.servers.insert(
+            "rust".to_string(),
+            crate::lsp::config::ServerEntry {
+                argv: vec!["/bin/true".to_string()],
+                root_markers: vec!["Cargo.toml".to_string()],
+            },
+        );
+        let mut app = App::new(dir.path(), config).unwrap();
+        let (tx, _rx) = crate::event::event_channel(Default::default());
+        app.event_tx = Some(tx.clone());
+
+        // Opening a Rust file queues the trust prompt for the project argv.
+        app.open_document_path(&file, true);
+        assert!(app.lsp.next_pending_trust().is_some());
+        assert!(matches!(
+            app.workspace.focus.overlay,
+            AppMode::Dialog(DialogKind::LspTrust { .. })
+        ));
+
+        // An unrelated key is a no-op; the prompt re-ask is gated on a
+        // Normal overlay (calling it now is an early return).
+        app.maybe_prompt_lsp_trust();
+        handle_key_event(&mut app, make_key(KeyCode::Char('x')), &tx);
+        assert!(matches!(
+            app.workspace.focus.overlay,
+            AppMode::Dialog(DialogKind::LspTrust { .. })
+        ));
+
+        // 'n' refuses: queue drains, overlay closes, argv A stays denied.
+        handle_key_event(&mut app, make_key(KeyCode::Char('n')), &tx);
+        assert!(matches!(app.workspace.focus.overlay, AppMode::Normal));
+        assert!(app.lsp.next_pending_trust().is_none());
+        app.maybe_start_lsp_for_path(&file);
+        assert_eq!(
+            app.lsp.session_status("rust"),
+            Some(&crate::lsp::SessionStatus::Denied("refused"))
+        );
+        // A status-only session has no channel → restart reports the Err arm.
+        assert!(app.restart_lsp_current().is_err());
+
+        // The project command changed → fresh prompt; 'y' approves and the
+        // session spawns (/bin/sh exits fast; Starting/Dead both fine).
+        app.config.lsp_local.servers.get_mut("rust").unwrap().argv = vec![
+            "/bin/sh".to_string(),
+            "-c".to_string(),
+            "exit 0".to_string(),
+        ];
+        app.maybe_start_lsp_for_path(&file);
+        assert!(matches!(
+            app.workspace.focus.overlay,
+            AppMode::Dialog(DialogKind::LspTrust { .. })
+        ));
+        handle_key_event(&mut app, make_key(KeyCode::Char('y')), &tx);
+        assert!(matches!(app.workspace.focus.overlay, AppMode::Normal));
+        assert!(app.lsp.next_pending_trust().is_none());
+        assert!(app.lsp.session_status("rust").is_some());
+    }
+
+    #[test]
+    fn lsp_app_surfaces_status_restart_dismiss_and_shutdown() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("main.rs");
+        std::fs::write(&file, "fn main() {}\n").unwrap();
+        let mut config = crate::config::AppConfig::default();
+        config.lsp_global.servers.insert(
+            "rust".to_string(),
+            crate::lsp::config::ServerEntry {
+                // /bin/cat stays alive — the session channel stays open so
+                // the restart path is exercised, not just the error arm.
+                argv: vec!["/bin/cat".to_string()],
+                root_markers: vec!["Cargo.toml".to_string()],
+            },
+        );
+        config
+            .lsp_global
+            .trust
+            .push(crate::lsp::config::TrustGrantEntry {
+                root: dir.path().to_string_lossy().into_owned(),
+                argv: vec!["/bin/cat".to_string()],
+            });
+        let mut app = App::new(dir.path(), config).unwrap();
+        let (tx, _rx) = crate::event::event_channel(Default::default());
+        app.event_tx = Some(tx.clone());
+
+        // Error arm first: no active document → no language → Err.
+        assert!(app.restart_lsp_current().is_err());
+
+        // Global grant + trusted argv → the document's server spawns.
+        app.init_lsp_trust();
+        app.open_document_path(&file, true);
+        app.start_lsp_for_open_documents();
+        assert!(app.lsp.has_session("rust"));
+        assert!(app.restart_lsp_current().is_ok());
+
+        // Status dialog opens, ignores unrelated keys, dismisses on Esc.
+        app.show_lsp_status();
+        assert!(matches!(
+            app.workspace.focus.overlay,
+            AppMode::Dialog(DialogKind::LspStatus { .. })
+        ));
+        handle_key_event(&mut app, make_key(KeyCode::Char('x')), &tx);
+        assert!(matches!(
+            app.workspace.focus.overlay,
+            AppMode::Dialog(DialogKind::LspStatus { .. })
+        ));
+        handle_key_event(&mut app, make_key(KeyCode::Esc), &tx);
+        assert!(matches!(app.workspace.focus.overlay, AppMode::Normal));
+
+        app.shutdown_lsp();
+        assert!(!app.lsp.has_session("rust"));
     }
 }

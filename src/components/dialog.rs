@@ -139,6 +139,16 @@ impl<'a> Widget for DialogWidget<'a> {
                 };
                 render_input_dialog(title, self.dialog_state, self.theme, area, buf);
             }
+            DialogKind::LspTrust {
+                language,
+                argv,
+                root,
+            } => {
+                render_lsp_trust_dialog(language, argv, root, self.theme, area, buf);
+            }
+            DialogKind::LspStatus { lines } => {
+                render_lsp_status_dialog(lines, self.theme, area, buf);
+            }
             DialogKind::SaveOverwrite { normalize, .. } => {
                 render_save_choices(
                     "Replace the disk version with this buffer?",
@@ -428,6 +438,128 @@ fn render_confirm_dialog(
         .add_modifier(Modifier::DIM);
     let hint_line = Line::from(Span::styled(hint, hint_style));
     buf.set_line(inner.x, inner.y + inner.height - 1, &hint_line, inner.width);
+}
+
+/// Interactive trust for a project-local LSP argv. The approved identity is
+/// the (workspace root, argv) pair — the dialog shows both verbatim.
+fn render_lsp_trust_dialog(
+    language: &str,
+    argv: &[String],
+    root: &std::path::Path,
+    theme: &ThemeColors,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    let argv_text = argv.join(" ");
+    let longest = argv_text.len().max(root.display().to_string().len()) as u16;
+    let dialog_width = (longest + 8).max(46).min(area.width.saturating_sub(4));
+    let dialog_height = 11u16.min(area.height.saturating_sub(2));
+    let rect = DialogWidget::centered_rect(dialog_width, dialog_height, area);
+
+    Clear.render(rect, buf);
+
+    let block = Block::default()
+        .title(format!(" LSP trust: {language} "))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(theme.warning_fg))
+        .padding(Padding::horizontal(1));
+
+    let inner = block.inner(rect);
+    block.render(rect, buf);
+
+    if inner.height == 0 || inner.width == 0 {
+        return;
+    }
+
+    let body = vec![
+        Line::from(Span::styled(
+            "This project config wants to run a language server:",
+            Style::default().fg(theme.status_fg),
+        )),
+        Line::from(String::new()),
+        Line::from(Span::styled(
+            format!("  command: {argv_text}"),
+            Style::default()
+                .fg(theme.warning_fg)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(
+            format!("  in root: {}", root.display()),
+            Style::default().fg(theme.status_fg),
+        )),
+        Line::from(String::new()),
+        Line::from(Span::styled(
+            "Trust applies to this exact argv + root,",
+            Style::default().fg(theme.dim_fg),
+        )),
+        Line::from(Span::styled(
+            "for this session only.",
+            Style::default().fg(theme.dim_fg),
+        )),
+    ];
+    Paragraph::new(body)
+        .wrap(Wrap { trim: false })
+        .render(inner, buf);
+
+    if inner.height >= 2 {
+        let hint = "[y/Enter] Trust and start  [n/Esc] Refuse";
+        let hint_line = Line::from(Span::styled(
+            hint,
+            Style::default()
+                .fg(theme.dim_fg)
+                .add_modifier(Modifier::DIM),
+        ));
+        buf.set_line(inner.x, inner.y + inner.height - 1, &hint_line, inner.width);
+    }
+}
+
+/// Read-only LSP capability/session status list.
+fn render_lsp_status_dialog(lines: &[String], theme: &ThemeColors, area: Rect, buf: &mut Buffer) {
+    let longest = lines.iter().map(|l| l.len()).max().unwrap_or(20) as u16;
+    let dialog_width = (longest + 6).max(36).min(area.width.saturating_sub(4));
+    let dialog_height = ((lines.len() as u16) + 4)
+        .max(6)
+        .min(area.height.saturating_sub(2));
+    let rect = DialogWidget::centered_rect(dialog_width, dialog_height, area);
+
+    Clear.render(rect, buf);
+
+    let block = Block::default()
+        .title(" LSP status ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(theme.info_fg))
+        .padding(Padding::horizontal(1));
+
+    let inner = block.inner(rect);
+    block.render(rect, buf);
+
+    if inner.height == 0 || inner.width == 0 {
+        return;
+    }
+
+    let body_height = inner.height.saturating_sub(1) as usize;
+    let body: Vec<Line> = lines
+        .iter()
+        .take(body_height)
+        .map(|l| {
+            Line::from(Span::styled(
+                l.clone(),
+                Style::default().fg(theme.status_fg),
+            ))
+        })
+        .collect();
+    Paragraph::new(body).render(inner, buf);
+
+    let hint = "[Enter/Esc] Dismiss";
+    let hint_line = Line::from(Span::styled(
+        hint,
+        Style::default()
+            .fg(theme.dim_fg)
+            .add_modifier(Modifier::DIM),
+    ));
+    if inner.height > 1 {
+        buf.set_line(inner.x, inner.y + inner.height - 1, &hint_line, inner.width);
+    }
 }
 
 fn render_error_dialog(message: &str, theme: &ThemeColors, area: Rect, buf: &mut Buffer) {
@@ -924,6 +1056,60 @@ mod tests {
                 DialogWidget::new(&AppMode::Dialog(kind.clone()), &state, &tc)
                     .render(area, &mut buf);
             }
+        }
+    }
+
+    #[test]
+    fn lsp_trust_dialog_shows_verbatim_command_and_session_scope() {
+        let mode = AppMode::Dialog(DialogKind::LspTrust {
+            language: "rust".to_string(),
+            argv: vec!["./vendor/ra".to_string(), "--project-mode".to_string()],
+            root: PathBuf::from("/work/proj"),
+        });
+        let state = DialogState::default();
+        let tc = test_theme();
+        let area = Rect::new(0, 0, 100, 30);
+        let mut buf = Buffer::empty(area);
+        DialogWidget::new(&mode, &state, &tc).render(area, &mut buf);
+        let content = buffer_to_string(&buf, area);
+        assert!(content.contains("LSP trust: rust"), "{content}");
+        assert!(content.contains("./vendor/ra"), "{content}");
+        assert!(content.contains("--project-mode"), "{content}");
+        assert!(content.contains("/work/proj"), "{content}");
+        // The boundary is stated: exact argv + root, session only.
+        assert!(content.contains("this exact argv + root"), "{content}");
+        assert!(content.contains("session only"), "{content}");
+        assert!(content.contains("Trust and start"), "{content}");
+        assert!(content.contains("Refuse"), "{content}");
+        for (width, height) in [(0, 0), (1, 1), (3, 2), (20, 4)] {
+            let area = Rect::new(2, 3, width, height);
+            let mut buf = Buffer::empty(area);
+            DialogWidget::new(&mode, &state, &tc).render(area, &mut buf);
+        }
+    }
+
+    #[test]
+    fn lsp_status_dialog_lists_session_lines() {
+        let mode = AppMode::Dialog(DialogKind::LspStatus {
+            lines: vec![
+                "rust  /usr/bin/rust-analyzer  ready (utf-16)".to_string(),
+                "python  pylsp  missing".to_string(),
+            ],
+        });
+        let state = DialogState::default();
+        let tc = test_theme();
+        let area = Rect::new(0, 0, 100, 30);
+        let mut buf = Buffer::empty(area);
+        DialogWidget::new(&mode, &state, &tc).render(area, &mut buf);
+        let content = buffer_to_string(&buf, area);
+        assert!(content.contains("LSP status"), "{content}");
+        assert!(content.contains("rust-analyzer"), "{content}");
+        assert!(content.contains("pylsp"), "{content}");
+        assert!(content.contains("Dismiss"), "{content}");
+        for (width, height) in [(0, 0), (1, 1), (3, 2), (20, 4)] {
+            let area = Rect::new(2, 3, width, height);
+            let mut buf = Buffer::empty(area);
+            DialogWidget::new(&mode, &state, &tc).render(area, &mut buf);
         }
     }
 

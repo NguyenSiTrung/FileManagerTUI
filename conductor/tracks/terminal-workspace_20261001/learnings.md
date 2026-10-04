@@ -1157,3 +1157,36 @@ verification evidence, and reusable patterns.
 - **`shutdown()` must tolerate a server that ignores `exit`.** Wait for the
   shutdown reply inside `shutdown_timeout`, send `exit` regardless, then
   let the transport kill+wait — bounded even for the `noexit` fake.
+
+## Phase 10, Task 4 — Installed-server config and project trust
+
+- **Provenance must survive the merge for the trust gate.** `config.lsp` alone
+  can't tell which layer an argv came from, so `AppConfig` keeps
+  `#[serde(skip)] lsp_global`/`lsp_local` populated per layer in
+  `load_checked` (the project layer = exactly `cwd/.fm-tui.toml`; everything
+  else — global, env, `--config`, CLI overrides — is trusted). Project
+  `[[lsp.trust]]` is stripped at load with a warning so a malicious project
+  file can't self-grant execution.
+- **Trust keys are (canonicalized root, exact argv), never a language name.**
+  `allow`/`deny` both key on the pair; a modified project argv misses the
+  stored key and re-gates. Manager dedup must compare argv — a same-language
+  session/prompt for a stale argv is shut down (bounded `LspCommand::Shutdown`
+  on the pump thread) before the new one is gated, or the change never
+  re-prompts.
+- **Headless = "no event_tx", not a config flag.** `interactive` is derived
+  from `app.event_tx.is_some()`; with no UI to answer, project argv records
+  `Denied("headless start")` and moves on — editing stays usable. Startup
+  never blocks: `maybe_start_*` only resolves + gates; spawn + handshake run
+  on per-session pump threads.
+- **Session restore carries no execution trust by construction.**
+  `TrustStore::restored_from_session` returns `Self::default()` — the pinned
+  `assert!(!restored_session_grants_execution)` is a compile-time-shaped
+  contract, not runtime behavior that could regress.
+- **Two-level generation guard.** `Client` bumps its generation on restart;
+  `LspManager.handle_event` additionally drops events tagged below the
+  session's highest seen generation — protects status transitions even if a
+  consumer forgets `accepts()`.
+- **Paragraph::wrap collides with hand-rendered hint rows.** A dim scope
+  line wrapped onto the same inner row the `[y/Enter]`/`[n/Esc]` hint is
+  painted on — split long dialog lines explicitly and budget the box height
+  instead of relying on wrap.

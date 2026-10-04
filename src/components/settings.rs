@@ -465,6 +465,15 @@ impl SettingsState {
                 default_value: SettingValueKind::Bool(true),
                 modified_value: None,
             },
+            // ── LSP ──────────────────────────────────────────────────────
+            SettingEntry {
+                section: "lsp",
+                key: "enabled",
+                description: "Start configured language servers for open documents",
+                current_value: SettingValueKind::Bool(config.lsp.enabled()),
+                default_value: SettingValueKind::Bool(true),
+                modified_value: None,
+            },
             SettingEntry {
                 section: "layout",
                 key: "explorer_width",

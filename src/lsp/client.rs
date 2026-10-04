@@ -80,7 +80,11 @@ pub enum ClientState {
 #[derive(Debug)]
 pub enum ClientEvent {
     /// Handshake completed for `generation`.
-    Ready { generation: u64 },
+    Ready {
+        generation: u64,
+        /// The negotiated position encoding (UTF-16 when undeclared).
+        encoding: PositionEncoding,
+    },
     /// A response resolved a pending request. `result`/`error` are the raw
     /// JSON bodies from the server.
     Response {
@@ -506,6 +510,7 @@ impl Client {
                     self.finish_initialize(&message);
                     return Some(ClientEvent::Ready {
                         generation: self.generation,
+                        encoding: self.encoding,
                     });
                 }
                 let outcome = match (message.get("result"), message.get("error")) {
@@ -1034,7 +1039,7 @@ mod tests {
         let events = client.initialize_blocking(Duration::from_secs(5));
         assert!(events.iter().any(|e| matches!(
             e,
-            ClientEvent::Ready { generation } if *generation == second
+            ClientEvent::Ready { generation, .. } if *generation == second
         )));
         // Results stamped with the old generation stay rejected.
         assert!(!client.accepts(first, 0));

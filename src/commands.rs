@@ -61,6 +61,8 @@ commands! {
     RecoveryClear => ("recovery.clear", "Clear all recovery snapshots", "Clear every owned recovery record (Phase 7)"),
     RecoveryDisable => ("recovery.disable", "Disable recovery", "Disable private snapshots (Phase 7)"),
     RecoveryEnable => ("recovery.enable", "Enable recovery", "Enable private recovery snapshots (Phase 7)"),
+    LspStatus => ("lsp.status", "LSP status", "Show language-server capability/session status"),
+    LspRestart => ("lsp.restart", "Restart LSP server", "Restart the current document's language server"),
 
 }
 
@@ -246,6 +248,17 @@ pub fn unavailable_reason(
             Some("Explorer has no resizable split")
         }
         ToggleTerminal if app.event_tx.is_none() => Some("Terminal event routing is unavailable"),
+        LspStatus | LspRestart if !app.config.lsp.enabled() => {
+            Some("LSP disabled by configuration")
+        }
+        LspRestart
+            if app
+                .current_lsp_language()
+                .and_then(|l| app.lsp.session_status(&l))
+                .is_none() =>
+        {
+            Some("No LSP session for the current document")
+        }
         Wrap if context.text_view_document(app).is_none() && !app.config.preview_enabled() => {
             Some("Preview disabled by configuration")
         }
@@ -384,6 +397,8 @@ pub fn dispatch_command(app: &mut App, id: CommandId) -> Result<(), String> {
             app.toggle_terminal(&tx);
         }
         CyclePreview => app.cycle_view_mode(),
+        LspStatus => app.show_lsp_status(),
+        LspRestart => app.restart_lsp_current()?,
         Wrap => {
             if let Some(document) = context.text_view_document(app) {
                 app.workspace
@@ -465,7 +480,7 @@ mod tests {
 
     #[test]
     fn commands_metadata_is_complete_and_unique() {
-        assert_eq!(REGISTRY.len(), 38);
+        assert_eq!(REGISTRY.len(), 40);
         let ids: std::collections::HashSet<_> = REGISTRY.iter().map(|m| m.id.as_str()).collect();
         assert_eq!(ids.len(), REGISTRY.len());
         for m in REGISTRY {
@@ -848,5 +863,77 @@ mod tests {
         ] {
             assert!(dispatch_command(&mut app, id).is_err());
         }
+    }
+
+    #[test]
+    fn lsp_commands_dispatch_and_gate_on_configuration() {
+        let (_root, mut app, _doc) = fixture();
+        let context = CommandContext::capture(&app);
+
+        // No configured server for the active document → restart is gated.
+        assert_eq!(
+            unavailable_reason(&app, &context, CommandId::LspRestart),
+            Some("No LSP session for the current document")
+        );
+        // Status is always available while LSP is enabled (it reports the
+        // empty state), and dispatch opens the status dialog.
+        assert_eq!(
+            unavailable_reason(&app, &context, CommandId::LspStatus),
+            None
+        );
+        dispatch_command(&mut app, CommandId::LspStatus).unwrap();
+        assert!(matches!(
+            app.workspace.focus.overlay,
+            crate::app::AppMode::Dialog(crate::app::DialogKind::LspStatus { .. })
+        ));
+        app.close_dialog();
+
+        // LSP disabled by configuration gates both commands.
+        app.config.lsp.enabled = Some(false);
+        let context = CommandContext::capture(&app);
+        for id in [CommandId::LspStatus, CommandId::LspRestart] {
+            assert_eq!(
+                unavailable_reason(&app, &context, id),
+                Some("LSP disabled by configuration")
+            );
+        }
+    }
+
+    #[test]
+    fn lsp_restart_dispatches_to_a_live_session() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("main.rs");
+        std::fs::write(&file, "fn main() {}\n").unwrap();
+        std::fs::write(dir.path().join("Cargo.toml"), "[package]\nname = \"x\"\n").unwrap();
+        let mut config = crate::config::AppConfig::default();
+        config.lsp_global.servers.insert(
+            "rust".to_string(),
+            crate::lsp::config::ServerEntry {
+                argv: vec!["/bin/cat".to_string()],
+                root_markers: vec!["Cargo.toml".to_string()],
+            },
+        );
+        config
+            .lsp_global
+            .trust
+            .push(crate::lsp::config::TrustGrantEntry {
+                root: dir.path().to_string_lossy().into_owned(),
+                argv: vec!["/bin/cat".to_string()],
+            });
+        let mut app = App::new(dir.path(), config).unwrap();
+        app.init_lsp_trust();
+        app.open_document_path(&file, true);
+        assert_eq!(
+            app.lsp.session_status("rust"),
+            Some(&crate::lsp::SessionStatus::Starting)
+        );
+
+        let context = CommandContext::capture(&app);
+        assert_eq!(
+            unavailable_reason(&app, &context, CommandId::LspRestart),
+            None
+        );
+        dispatch_command(&mut app, CommandId::LspRestart).unwrap();
+        app.shutdown_lsp();
     }
 }

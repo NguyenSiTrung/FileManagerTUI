@@ -83,6 +83,18 @@ pub enum DialogKind {
         /// Records still retained, this offer included.
         remaining: usize,
     },
+    /// Interactive approval of a project-local LSP argv before execution.
+    /// The approved identity is the (workspace root, argv) pair — never the
+    /// language name alone. Session-scoped: nothing is persisted.
+    LspTrust {
+        language: String,
+        argv: Vec<String>,
+        root: PathBuf,
+    },
+    /// Read-only LSP capability/session status display.
+    LspStatus {
+        lines: Vec<String>,
+    },
 }
 
 pub use crate::workspace::focus::{InputOverlay as AppMode, PanelFocus as FocusedPanel};
@@ -523,6 +535,9 @@ pub struct App {
     pub search_action_state: Option<SearchActionState>,
     /// Event sender for spawning async operations from non-handler contexts.
     pub event_tx: Option<crate::event::EventSender>,
+    /// Language-server sessions and execution trust (FR-10). Sessions own
+    /// pump threads; events arrive generation-tagged via `Event::Lsp`.
+    pub lsp: crate::lsp::LspManager,
     /// Native scan scheduler is lazily created inside a running Tokio context.
     jobs: Option<crate::app_jobs::AppJobs>,
     /// Bounded previous tree root, so profile replacement cannot revive A/B/A.
@@ -871,6 +886,7 @@ impl App {
             search_action_state: None,
             command_selection_actions: false,
             event_tx: None,
+            lsp: crate::lsp::LspManager::new(),
             jobs: None,
             jobs_root: (path.as_os_str().len() <= 4096).then(|| path.to_path_buf()),
             active_dir_scan: None,
@@ -1861,6 +1877,132 @@ impl App {
             pty.shutdown();
         }
         self.terminal_state.pty = None;
+    }
+
+    // ── LSP sessions and execution trust (FR-10) ────────────────────────────
+
+    /// Seed the manager's durable grants from the trusted config layer.
+    /// Called once at startup before any document opens.
+    pub fn init_lsp_trust(&mut self) {
+        self.lsp.apply_config_trust(&self.config.lsp_global);
+    }
+
+    /// Start (or gate) the language server matching `path`'s language, if a
+    /// server is configured. Spawning happens on the session's pump thread;
+    /// this returns immediately with at most a status note + a queued trust
+    /// dialog.
+    pub fn maybe_start_lsp_for_path(&mut self, path: &Path) {
+        let interactive = self.event_tx.is_some();
+        let tx = self.event_tx.clone().unwrap_or_else(|| {
+            // No event loop (headless/tests): the sender exists only to let
+            // the gate record its decision; nothing ever spawns.
+            let (tx, _rx) = crate::event::event_channel(crate::event::TransportLimits::default());
+            tx
+        });
+        if let Some(note) = self.lsp.maybe_start_for_path(
+            path,
+            &self.config.lsp_global,
+            &self.config.lsp_local,
+            interactive,
+            &tx,
+        ) {
+            self.set_status_message(note);
+        }
+        self.maybe_prompt_lsp_trust();
+    }
+
+    /// Start servers for every document already open (session restore).
+    pub fn start_lsp_for_open_documents(&mut self) {
+        let paths: Vec<PathBuf> = self
+            .workspace
+            .documents
+            .iter()
+            .map(|d| d.path().to_path_buf())
+            .collect();
+        for path in paths {
+            self.maybe_start_lsp_for_path(&path);
+        }
+    }
+
+    /// Open the trust dialog for the next pending project argv — only when
+    /// no other overlay owns the input.
+    pub fn maybe_prompt_lsp_trust(&mut self) {
+        if self.workspace.focus.overlay != AppMode::Normal {
+            return;
+        }
+        let Some(pending) = self.lsp.next_pending_trust() else {
+            return;
+        };
+        self.open_dialog(DialogKind::LspTrust {
+            language: pending.resolved.spec.language.clone(),
+            argv: pending.resolved.spec.argv.clone(),
+            root: pending.resolved.root.clone(),
+        });
+    }
+
+    /// Interactive approval: bind (root, argv) for this session and spawn.
+    pub fn approve_lsp_trust(&mut self) {
+        let note = self
+            .event_tx
+            .clone()
+            .and_then(|tx| self.lsp.approve_next_trust(&tx))
+            .or_else(|| {
+                // No event loop → nothing can spawn; treat as refused.
+                self.lsp.deny_next_trust()
+            });
+        if let Some(note) = note {
+            self.set_status_message(note);
+        }
+        self.close_dialog();
+        self.maybe_prompt_lsp_trust();
+    }
+
+    /// Interactive refusal: denied for the rest of the session.
+    pub fn deny_lsp_trust(&mut self) {
+        if let Some(note) = self.lsp.deny_next_trust() {
+            self.set_status_message(note);
+        }
+        self.close_dialog();
+        self.maybe_prompt_lsp_trust();
+    }
+
+    /// Open the capability/status dialog for all live/attempted sessions.
+    pub fn show_lsp_status(&mut self) {
+        let mut lines = self.lsp.status_summary();
+        if lines.is_empty() {
+            lines.push("No LSP servers configured or started.".to_string());
+            lines.push(
+                "Configure [lsp.servers.<language>] argv in global or project config.".to_string(),
+            );
+        }
+        self.open_dialog(DialogKind::LspStatus { lines });
+    }
+
+    /// Restart the server for the active document's language.
+    pub fn restart_lsp_current(&mut self) -> std::result::Result<(), String> {
+        let language = self
+            .current_lsp_language()
+            .ok_or_else(|| "No LSP language for the current document".to_string())?;
+        match self.lsp.restart(&language) {
+            Some(note) => {
+                self.set_status_message(note);
+                Ok(())
+            }
+            None => Err(format!("No running LSP session for {language}")),
+        }
+    }
+
+    /// Language mapped to the currently focused text document.
+    pub fn current_lsp_language(&self) -> Option<String> {
+        let id = self.workspace.documents.active_id()?;
+        let document = self.workspace.documents.get(id)?;
+        crate::lsp::config::language_for_path(document.path(), &self.config.lsp.languages)
+    }
+
+    /// Bounded teardown of every server session; after the event loop, with
+    /// terminal shutdown.
+    pub fn shutdown_lsp(&mut self) {
+        self.lsp.shutdown_all();
     }
 
     // ── S3 Mode ─────────────────────────────────────────────────────────────
@@ -5234,6 +5376,9 @@ impl App {
         };
         match self.admit_document(path, intent) {
             Ok(_) => {
+                // Start (or gate) the file's language server, if configured.
+                // Returns immediately — the pump thread does the handshake.
+                self.maybe_start_lsp_for_path(path);
                 self.right_panel_presentation = if pinned {
                     RightPanelPresentation::RetainedDocument
                 } else {
