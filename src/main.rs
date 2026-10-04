@@ -15,6 +15,7 @@ mod git;
 mod handler;
 mod highlighting;
 mod keymap;
+mod lsp;
 mod preview_content;
 // Bounded private recovery snapshots: the record shape, atomic store,
 // retention, and restore/clear/disable surface. The startup discovery, the

@@ -852,21 +852,29 @@ exist. Add a module's declarations in the task that introduces it. Avoid broad
 
 ## Phase 10: LSP Positions, Transport, Client, and Trust
 
-- [ ] Task 1: Define LSP position-encoding adapters
+- [x] Task 1: Define LSP position-encoding adapters
 
   **Files:** create `src/lsp/mod.rs`, `src/lsp/positions.rs`; modify `src/main.rs`.
   **Requirements:** FR-10, AC-8.
   **Consumes:** text byte/display conversions; **produces:** `PositionEncoding`,
   `byte_to_lsp(text, byte, encoding)` and `lsp_to_byte(text, character, encoding)`.
-  - [ ] Add UTF-8/16/32 round trips, non-BMP text, invalid ranges, CRLF lines,
+  - [x] Add UTF-8/16/32 round trips, non-BMP text, invalid ranges, CRLF lines,
     tabs, and combining-character tests:
     ```rust
     assert_eq!(byte_to_lsp("a😀b", 5, PositionEncoding::Utf16).unwrap(), 3);
     assert_eq!(lsp_to_byte("a😀b", 3, PositionEncoding::Utf16).unwrap(), 5);
     ```
-  - [ ] Negotiate encoding; use UTF-16 only as the protocol fallback. Reject
+    (every char boundary round-trips in all three encodings across
+    ASCII/CJK/non-BMP/combining/tab/CR text.)
+  - [x] Negotiate encoding; use UTF-16 only as the protocol fallback. Reject
     out-of-range/surrogate-interior edits without corrupting UTF-8.
-  - [ ] Run `cargo test lsp::positions`.
+    (`PositionEncoding::from_capability` maps "utf-8"/"utf-16"/"utf-32" and
+    falls back to Utf16 for absent/unrecognized values; `lsp_to_byte` returns
+    None on surrogate-interior and overshoot offsets, `byte_to_lsp` returns
+    None on non-boundary bytes — no clamping, no mid-scalar slicing.)
+  - [x] Run `cargo test lsp::positions`.
+    (8 tests green; staged-surface `#[allow(dead_code)]` documented until
+    Task 2 transport consumes it.)
 
 - [ ] Task 2: Implement bounded stdio JSON-RPC framing
 
