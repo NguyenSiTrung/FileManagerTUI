@@ -1924,6 +1924,29 @@ impl App {
         }
     }
 
+    /// Poll-based document sync: reconcile the open document set against
+    /// the LSP manager's tracked table. One call per event covers every
+    /// mutation source uniformly (typing, paste, undo, external reload,
+    /// rename, close) — content changes are detected via `content_revision`
+    /// so no editor path needs its own hook. Text is fetched lazily and
+    /// only for documents that actually owe a send.
+    pub fn sync_lsp_documents(&mut self) {
+        if !self.config.lsp_global.enabled() {
+            return;
+        }
+        let docs: Vec<_> = self
+            .workspace
+            .documents
+            .iter()
+            .map(|d| (d.id(), d.path().to_path_buf(), d.editor.content_revision()))
+            .collect();
+        self.lsp.sync_documents(
+            &self.config.lsp_global,
+            docs.iter().map(|(id, p, r)| (*id, p.as_path(), *r)),
+            |id| self.workspace.documents.get(id).map(|d| d.text()),
+        );
+    }
+
     /// Open the trust dialog for the next pending project argv — only when
     /// no other overlay owns the input.
     pub fn maybe_prompt_lsp_trust(&mut self) {
@@ -3746,6 +3769,7 @@ impl App {
                     }) {
                         self.note_self_write(&path, &written);
                     }
+                    self.lsp.document_saved(id);
                     self.complete_lifecycle_document(id, false);
                 }
                 Ok(())
@@ -14902,6 +14926,26 @@ mod tests {
         assert_eq!(app.git.issued(), 0);
         assert!(app.git_snapshot().is_none());
         assert!(app.git_render().is_none());
+    }
+
+    #[test]
+    fn sync_lsp_documents_tracks_open_docs_and_skips_when_disabled() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("a.rs");
+        std::fs::write(&file, "fn a() {}\n").unwrap();
+        let mut app = App::new(dir.path(), AppConfig::default()).unwrap();
+
+        // Disabled: the poll is a no-op — nothing is tracked.
+        app.config.lsp_global.enabled = Some(false);
+        assert!(app.open_document_path(&file, true));
+        app.sync_lsp_documents();
+        assert_eq!(app.lsp.tracked_len(), 0);
+
+        // Enabled: the document is tracked even before a session is Ready —
+        // its didOpen defers until the handshake completes.
+        app.config.lsp_global.enabled = None;
+        app.sync_lsp_documents();
+        assert_eq!(app.lsp.tracked_len(), 1);
     }
 }
 

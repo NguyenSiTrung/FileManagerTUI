@@ -84,6 +84,8 @@ pub enum ClientEvent {
         generation: u64,
         /// The negotiated position encoding (UTF-16 when undeclared).
         encoding: PositionEncoding,
+        /// The negotiated document-sync surface (Task 11 did*/versioning).
+        sync: crate::lsp::features::TextSync,
     },
     /// A response resolved a pending request. `result`/`error` are the raw
     /// JSON bodies from the server.
@@ -174,6 +176,8 @@ pub struct Client {
     pending: HashMap<u64, PendingRequest>,
     state: ClientState,
     encoding: PositionEncoding,
+    /// Negotiated `textDocumentSync` from the initialize result.
+    sync: crate::lsp::features::TextSync,
     /// Highest document version issued per URI — responses bearing an older
     /// version are stale (the document moved on while the request was in
     /// flight).
@@ -208,6 +212,7 @@ impl Client {
             pending: HashMap::new(),
             state: ClientState::Starting,
             encoding: PositionEncoding::default(),
+            sync: crate::lsp::features::TextSync::default(),
             doc_versions: HashMap::new(),
             latest_doc_version: 0,
             options,
@@ -511,6 +516,7 @@ impl Client {
                     return Some(ClientEvent::Ready {
                         generation: self.generation,
                         encoding: self.encoding,
+                        sync: self.sync,
                     });
                 }
                 let outcome = match (message.get("result"), message.get("error")) {
@@ -537,8 +543,11 @@ impl Client {
     }
 
     fn finish_initialize(&mut self, message: &Value) {
-        let offered = message["result"]["capabilities"]["positionEncoding"].as_str();
+        let capabilities = &message["result"]["capabilities"];
+        let offered = capabilities["positionEncoding"].as_str();
         self.encoding = PositionEncoding::from_capability(offered);
+        self.sync =
+            crate::lsp::features::TextSync::from_capability(capabilities.get("textDocumentSync"));
         // `initialized` is fire-and-forget; a broken pipe here surfaces on the
         // next poll as ServerDied.
         let _ = self.notify("initialized", json!({}));

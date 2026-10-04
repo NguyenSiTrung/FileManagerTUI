@@ -1203,3 +1203,39 @@ verification evidence, and reusable patterns.
   uncoverage lines were doc comments and test comments — LCOV doesn't
   instrument comments, so a clean checkpoint diff should show 100%
   executable coverage.
+
+## Phase 11 Task 1 — document sync (didOpen/didChange/didSave/didClose)
+
+- **Poll-based reconcile beats per-call-site hooks**: a single
+  `sync_documents` pass diffing `(DocumentId, path, content_revision)`
+  against a tracked table covers open/change/close/rename/external-reload
+  uniformly — `reload()` resets the revision to 0, which still differs and
+  fires correctly. Only didSave needs an explicit hook
+  (`finish_editor_save` → `document_saved`).
+- **The mirror is the contract**: `SyncedDocuments` keeps the exact text
+  the server holds per URI. It is simultaneously (a) the diff base for
+  `SyncKind::Incremental`, and (b) the re-open payload after a restart —
+  `reopen_params` re-sends didOpen with the SAME version, so versions never
+  duplicate and anything edited while the server was dead converges on the
+  next poll diff.
+- **Kill is not a flush**: `transport.shutdown()` does `drop(out_tx)` then
+  `child.kill()` — queued-and-in-pipe writes die with the child. Tests must
+  sync on the transcript file showing the last expected notification BEFORE
+  restarting; the fake must also write its transcript ATOMICALLY
+  (`open(tmp,"w")` + `os.replace`) or a SIGKILL mid-dump leaves a torn file
+  that reads as an empty transcript.
+- **Fake-server restart semantics**: a respawned fake must load the prior
+  transcript's `log` (continuity) but NOT its `docs` — a fresh LSP
+  generation's document table IS empty, and the client proves it re-opens.
+- **Coverage found a real bug**: `incremental_change`'s suffix back-off
+  decremented `suffix` but re-checked the pre-computed `old_end`/`new_end` —
+  entering the loop guaranteed underflow. `"xé"→"wĩ"` (shared 0xA9 tail
+  byte) exposes it. Recompute both ends inside the loop.
+- **LCOV brace artifacts**: `}` closing `if let`/`while` counts as
+  executable only via the else/exit path — restructure (map-chains instead
+  of `if let` single-arm blocks, `loop`+explicit `break` instead of
+  `while`) so every DA line is a real statement rather than chasing
+  unreachable else-arms.
+- **`text_of` laziness**: closures in tests need both branches to execute —
+  every doc in the poll set that owes a send calls `text_of`, so withhold
+  text for one id while a sibling owes a real send.

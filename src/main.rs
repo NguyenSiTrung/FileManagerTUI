@@ -1520,6 +1520,12 @@ async fn main() -> error::Result<()> {
                 }
             }
 
+            // Reconcile open documents toward their language servers — the
+            // single poll covers open/change/close/rename for every event
+            // source that just ran (typing, paste, undo, fs changes, Lsp
+            // events flipping a session to Ready).
+            app.sync_lsp_documents();
+
             // Throttled, bounded snapshot pass for dirty documents. Runs
             // outside render and outside the input handlers; the throttle keeps
             // it to at most one pass per configured interval.

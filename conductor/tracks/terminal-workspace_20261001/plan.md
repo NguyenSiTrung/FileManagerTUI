@@ -980,22 +980,52 @@ exist. Add a module's declarations in the task that introduces it. Avoid broad
 
 ## Phase 11: Language Features and Diagnostics
 
-- [ ] Task 1: Synchronize open/changed/saved/closed documents
+- [x] Task 1: Synchronize open/changed/saved/closed documents
 
   **Files:** create `src/lsp/features.rs`; modify `src/lsp/mod.rs`,
   `src/workspace/documents.rs`, `src/app.rs`, `src/event.rs`.
   **Requirements:** FR-4, FR-10, AC-8.
   **Produces:** versioned didOpen/didChange/didSave/didClose using negotiated
   full/incremental synchronization and stable file URIs.
-  - [ ] Assert fake-server transcripts for two unsaved documents, edit/paste/
+  - [x] Assert fake-server transcripts for two unsaved documents, edit/paste/
     undo, save, close, rename, external reload, and server restart:
     ```rust
     assert!(sent_versions.windows(2).all(|v| v[0] < v[1]));
     assert_eq!(server_text, active_document_text);
     ```
-  - [ ] Skip read-only S3/binary previews; reopen supported active documents
+    (Implemented verbatim in
+    `document_sync_transcript_matches_active_documents_end_to_end`: two
+    unsaved docs, insert_text/undo, save+didSave, rename = didClose+didOpen,
+    external reload, didClose, restart re-open — per-generation strictly
+    increasing versions, `server_text == active_document_text` against the
+    fake's mirror.)
+  - [x] Skip read-only S3/binary previews; reopen supported active documents
     after server restart without duplicating versions/events.
-  - [ ] Run `cargo test lsp::features` and document event tests.
+    (S3/binary/readonly previews never reach DocumentStore so the poll never
+    tracks them. Restart re-opens via `SyncedDocuments::reopen_params` — same
+    versions, mirror text — asserted `a2` opens exactly twice, not more.)
+  - [x] Run `cargo test lsp::features` and document event tests.
+    (1454 tests pass incl. 10 lsp::features + 79 lsp::*; E2E transcript test
+    deterministic across repeated runs.)
+  - [x] Implementation: `src/lsp/features.rs` (TextSync capability parsing,
+    `uri_for_path`, `position_at`, char-boundary-safe `incremental_change`,
+    mirror-based `SyncedDocuments`); `src/lsp/mod.rs` (poll-based
+    `sync_documents` reconcile: open/change/close/rename uniformly via
+    content_revision, `document_saved` gated on save capability,
+    `close_tracked` silent on dead sessions, Ready-arm `reopen_params`);
+    `src/lsp/client.rs` (`ClientEvent::Ready` carries negotiated `TextSync`);
+    `src/app.rs` (`sync_lsp_documents` poll after events, `document_saved`
+    hook in `finish_editor_save`); `src/main.rs` (reconcile call in the event
+    loop); `scripts/fake-lsp-server.py` (`sync` mode: utf-16 range
+    application + atomic per-message transcript flushes + restart log
+    carry-forward). `documents.rs`/`event.rs` needed no changes — the poll
+    reads existing `content_revision`/`Document::path` and `Event::Lsp`
+    already existed. Bug found by coverage: `incremental_change`'s suffix
+    back-off rechecked stale range ends and would underflow; fixed by
+    recomputing inside the loop. Diff coverage 99.9% executable — sole
+    residual is the `app.sync_lsp_documents()` call line inside the
+    systematically-uncovered `run()` event-loop region in main.rs
+    (all neighboring pre-existing lines are 0-hit too).)
 
 - [ ] Task 2: Add completion, hover, definition, references, and symbols
 

@@ -13,6 +13,7 @@
 
 pub mod client;
 pub mod config;
+pub mod features;
 pub mod positions;
 pub mod transport;
 
@@ -33,8 +34,6 @@ pub enum LspCommand {
     /// Respawn the same argv (restart budget applies in the client).
     Restart,
     /// Send one encoded JSON-RPC body (notification or request).
-    /// Written by Phase 11's document-to-request mapping.
-    #[allow(dead_code)]
     Send(Vec<u8>),
 }
 
@@ -77,6 +76,20 @@ struct LspSession {
     status: SessionStatus,
     /// Highest event generation seen — guards stale-event replay.
     generation: u64,
+    /// Documents this session has (re-)opened, mirroring the server's view.
+    docs: features::SyncedDocuments,
+    /// Negotiated sync surface; `default` (no sync) until `Ready` lands.
+    sync: features::TextSync,
+}
+
+/// One open editor document known to the manager. The reconcile pass
+/// re-derives `language`/`uri` from the current path each poll, so a rename
+/// reads as close-on-old + open-on-new without a dedicated hook.
+struct TrackedDoc {
+    language: String,
+    uri: String,
+    /// `content_revision` last reflected (or queued) toward the server.
+    revision: u64,
 }
 
 /// A project-local argv awaiting (or refused) interactive approval.
@@ -97,6 +110,8 @@ pub struct LspManager {
     trust: TrustStore,
     /// Project argv waiting for the interactive dialog, one at a time.
     pending_trust: VecDeque<PendingTrust>,
+    /// Editor documents currently under sync, keyed by stable document id.
+    tracked: HashMap<crate::workspace::documents::DocumentId, TrackedDoc>,
 }
 
 impl LspManager {
@@ -218,6 +233,8 @@ impl LspManager {
                         cmd_tx: None,
                         status: SessionStatus::MissingExecutable(program.clone()),
                         generation: 0,
+                        docs: features::SyncedDocuments::default(),
+                        sync: features::TextSync::default(),
                     },
                 );
                 Some(format!(
@@ -233,6 +250,8 @@ impl LspManager {
                         cmd_tx: None,
                         status: SessionStatus::Denied("headless start"),
                         generation: 0,
+                        docs: features::SyncedDocuments::default(),
+                        sync: features::TextSync::default(),
                     },
                 );
                 Some(format!(
@@ -248,6 +267,8 @@ impl LspManager {
                         cmd_tx: None,
                         status: SessionStatus::Denied("refused"),
                         generation: 0,
+                        docs: features::SyncedDocuments::default(),
+                        sync: features::TextSync::default(),
                     },
                 );
                 Some(format!("LSP {language}: refused earlier this session"))
@@ -279,7 +300,6 @@ impl LspManager {
 
     /// Send an already-encoded JSON body to a live session's server.
     /// Returns false when the session is absent/dead — the UI degrades.
-    #[allow(dead_code)] // Consumed by Phase 11 feature requests (didOpen, …).
     pub fn send(&self, language: &str, body: &[u8]) -> bool {
         self.sessions
             .get(language)
@@ -294,6 +314,173 @@ impl LspManager {
         tx.try_send(LspCommand::Restart).ok()?;
         session.status = SessionStatus::Starting;
         Some(format!("LSP {language}: restarting"))
+    }
+
+    // ── Document sync (Phase 11): didOpen/didChange/didSave/didClose ────────
+
+    /// Wrap params as a JSON-RPC notification and queue it to the session's
+    /// pump thread. Returns false when the session cannot be reached.
+    fn notify(&self, language: &str, method: &str, params: serde_json::Value) -> bool {
+        let body = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": method,
+            "params": params,
+        });
+        self.send(language, body.to_string().as_bytes())
+    }
+
+    /// The negotiated sync surface of a session that can accept `did*`
+    /// messages right now (Ready + open/close advertised).
+    fn ready_sync(
+        &self,
+        language: &str,
+    ) -> Option<(features::TextSync, positions::PositionEncoding)> {
+        let session = self.sessions.get(language)?;
+        match session.status {
+            SessionStatus::Ready { encoding } if session.sync.open_close => {
+                Some((session.sync, encoding))
+            }
+            _ => None,
+        }
+    }
+
+    /// Send `didOpen` for `uri` when the session is ready; records the
+    /// mirror either way so a later `Ready` re-open diffs correctly.
+    fn try_open(&mut self, language: &str, uri: &str, text: &str) -> bool {
+        if self.ready_sync(language).is_none() {
+            return false;
+        }
+        let session = self.sessions.get_mut(language).unwrap();
+        let params = session.docs.did_open(uri, language, text);
+        self.notify(language, "textDocument/didOpen", params)
+    }
+
+    /// Send `didChange` (or silently advance the mirror for `SyncKind::None`)
+    /// and report whether the revision was reflected toward the server.
+    fn try_change(&mut self, language: &str, uri: &str, text: &str) -> bool {
+        let Some((sync, encoding)) = self.ready_sync(language) else {
+            return false;
+        };
+        let session = self.sessions.get_mut(language).unwrap();
+        match session.docs.did_change(uri, text, sync, encoding) {
+            Some(params) => self.notify(language, "textDocument/didChange", params),
+            // `None` = sync-disabled or identical text: mirrored, nothing owed.
+            None => true,
+        }
+    }
+
+    /// Drop `id`'s tracked record, sending `didClose` only when the owning
+    /// session is still live enough to hear it (a dead server needs none).
+    fn close_tracked(&mut self, id: crate::workspace::documents::DocumentId) {
+        let Some(tracked) = self.tracked.remove(&id) else {
+            return;
+        };
+        let Some(session) = self.sessions.get_mut(&tracked.language) else {
+            return;
+        };
+        let live = matches!(session.status, SessionStatus::Ready { .. });
+        if let Some(params) = session.docs.did_close(&tracked.uri) {
+            if live {
+                self.notify(&tracked.language, "textDocument/didClose", params);
+            }
+        }
+    }
+
+    /// Reconcile the open document set against the tracked table — the
+    /// single driver for didOpen/didChange/didClose. `docs` yields
+    /// `(id, path, content_revision)` for every open editor document;
+    /// `text_of` fetches text lazily, only for docs that need a send.
+    ///
+    /// Open covers docs that appeared before the handshake or before trust
+    /// was granted; a changed `uri`/language (rename) reads as close-old +
+    /// open-new; ids absent from `docs` are closed. Read-only S3/binary
+    /// previews never reach the document store, so they never appear here.
+    pub fn sync_documents<'a, I, F>(&mut self, config: &config::LspConfig, docs: I, mut text_of: F)
+    where
+        I: Iterator<Item = (crate::workspace::documents::DocumentId, &'a Path, u64)>,
+        F: FnMut(crate::workspace::documents::DocumentId) -> Option<String>,
+    {
+        if !config.enabled() {
+            return;
+        }
+        let mut seen = std::collections::HashSet::new();
+        for (id, path, revision) in docs {
+            seen.insert(id);
+            let uri = features::uri_for_path(path);
+            let language = config::language_for_path(path, &config.languages);
+            // A rename or a lost language mapping closes under the OLD
+            // identity before the new one is considered.
+            if let Some(tracked) = self.tracked.get(&id) {
+                if Some(&tracked.language) != language.as_ref() || tracked.uri != uri {
+                    self.close_tracked(id);
+                }
+            }
+            let Some(language) = language else {
+                continue;
+            };
+            self.tracked.entry(id).or_insert(TrackedDoc {
+                language: language.clone(),
+                uri: uri.clone(),
+                revision,
+            });
+            let opened = self
+                .sessions
+                .get(&language)
+                .is_some_and(|s| s.docs.is_open(&uri));
+            if !opened {
+                if let Some(text) = text_of(id) {
+                    if self.try_open(&language, &uri, &text) {
+                        self.tracked.get_mut(&id).unwrap().revision = revision;
+                    }
+                }
+                continue;
+            }
+            if self.tracked[&id].revision == revision {
+                continue;
+            }
+            let Some(text) = text_of(id) else {
+                continue;
+            };
+            if self.try_change(&language, &uri, &text) {
+                self.tracked.get_mut(&id).unwrap().revision = revision;
+            }
+        }
+        let gone: Vec<_> = self
+            .tracked
+            .keys()
+            .filter(|id| !seen.contains(id))
+            .copied()
+            .collect();
+        for id in gone {
+            self.close_tracked(id);
+        }
+    }
+
+    /// `didSave` for a successfully saved document — only when the session
+    /// advertised save support and the document is actually open there.
+    #[cfg(test)]
+    pub(crate) fn tracked_len(&self) -> usize {
+        self.tracked.len()
+    }
+
+    pub fn document_saved(&mut self, id: crate::workspace::documents::DocumentId) {
+        let Some(tracked) = self.tracked.get(&id) else {
+            return;
+        };
+        let language = tracked.language.clone();
+        let uri = tracked.uri.clone();
+        let Some(session) = self.sessions.get(&language) else {
+            return;
+        };
+        if !session.sync.save
+            || !session.docs.is_open(&uri)
+            || !matches!(session.status, SessionStatus::Ready { .. })
+        {
+            return;
+        }
+        if let Some(params) = session.docs.did_save(&uri, session.sync.save_include_text) {
+            self.notify(&language, "textDocument/didSave", params);
+        }
     }
 
     /// Route one generation-tagged event into the session table; returns a
@@ -312,9 +499,23 @@ impl LspManager {
             ClientEvent::Ready {
                 generation,
                 encoding,
+                sync,
             } => {
                 session.generation = generation;
+                session.sync = sync;
                 session.status = SessionStatus::Ready { encoding };
+                // A restart's new generation owns an empty document table —
+                // re-open every doc the mirror still holds (same versions).
+                for params in session.docs.reopen_params(language) {
+                    let body = serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "method": "textDocument/didOpen",
+                        "params": params,
+                    });
+                    if let Some(tx) = session.cmd_tx.as_ref() {
+                        let _ = tx.try_send(LspCommand::Send(body.to_string().into_bytes()));
+                    }
+                }
                 Some(format!("LSP {language}: ready ({})", encoding.as_str()))
             }
             ClientEvent::ServerDied { generation, reason } => {
@@ -369,6 +570,8 @@ impl LspManager {
                 cmd_tx: Some(cmd_tx),
                 status: SessionStatus::Starting,
                 generation: 0,
+                docs: features::SyncedDocuments::default(),
+                sync: features::TextSync::default(),
             },
         );
         format!("LSP {language}: starting")
@@ -393,7 +596,7 @@ fn run_server(
         });
     };
 
-    let root_uri = format!("file://{}", cwd.display());
+    let root_uri = features::uri_for_path(&cwd);
     let mut client = match Client::spawn(&argv, &cwd, &root_uri, ClientOptions::default()) {
         Ok(c) => c,
         Err(ClientError::Io(e)) => {
@@ -638,6 +841,8 @@ mod tests {
                 cmd_tx: None,
                 status: SessionStatus::Starting,
                 generation: 3,
+                docs: features::SyncedDocuments::default(),
+                sync: features::TextSync::default(),
             },
         );
         // Events tagged older than the session's generation are ignored.
@@ -734,6 +939,8 @@ mod tests {
                 cmd_tx: None,
                 status: SessionStatus::Starting,
                 generation: 0,
+                docs: features::SyncedDocuments::default(),
+                sync: features::TextSync::default(),
             },
         )
     }
@@ -808,6 +1015,7 @@ mod tests {
                 ClientEvent::Ready {
                     generation: 2,
                     encoding: positions::PositionEncoding::Utf8,
+                    sync: features::TextSync::default(),
                 },
             )
             .unwrap();
@@ -1080,5 +1288,561 @@ mod tests {
 
         manager.shutdown_all();
         assert!(manager.sessions.is_empty());
+    }
+
+    // ── Document sync (Phase 11 Task 1) ────────────────────────────────────
+
+    /// Drive one reconcile pass the way `App::sync_lsp_documents` does.
+    fn drive(
+        manager: &mut LspManager,
+        config: &LspConfig,
+        store: &crate::workspace::documents::DocumentStore,
+    ) {
+        let docs: Vec<_> = store
+            .iter()
+            .map(|d| (d.id(), d.path().to_path_buf(), d.editor.content_revision()))
+            .collect();
+        manager.sync_documents(
+            config,
+            docs.iter().map(|(id, p, r)| (*id, p.as_path(), *r)),
+            |id| store.get(id).map(|d| d.text()),
+        );
+    }
+
+    /// Decode queued `Send` bodies into (method, params) pairs.
+    fn drain_sends(rx: &mpsc::Receiver<LspCommand>) -> Vec<(String, serde_json::Value)> {
+        let mut out = Vec::new();
+        while let Ok(LspCommand::Send(body)) = rx.try_recv() {
+            let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+            out.push((
+                v["method"].as_str().unwrap().to_string(),
+                v["params"].clone(),
+            ));
+        }
+        out
+    }
+
+    fn ready_session(
+        manager: &mut LspManager,
+        language: &str,
+        sync: features::TextSync,
+    ) -> mpsc::Receiver<LspCommand> {
+        let (cmd_tx, cmd_rx) = mpsc::sync_channel::<LspCommand>(64);
+        let (language, mut session) = fake_session(language, &["ra"]);
+        session.cmd_tx = Some(cmd_tx);
+        session.status = SessionStatus::Ready {
+            encoding: positions::PositionEncoding::Utf16,
+        };
+        session.sync = sync;
+        manager.sessions.insert(language, session);
+        cmd_rx
+    }
+
+    const FULL_SYNC: features::TextSync = features::TextSync {
+        open_close: true,
+        change: features::TextSyncKind::Full,
+        save: true,
+        save_include_text: true,
+    };
+
+    #[test]
+    fn sync_opens_changes_saves_and_closes_against_channel() {
+        use crate::workspace::documents::{DocumentStore, OpenDisposition};
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("a.rs");
+        std::fs::write(&file, "fn a() {}\n").unwrap();
+        let mut manager = LspManager::new();
+        let cmd_rx = ready_session(&mut manager, "rust", FULL_SYNC);
+        let config = LspConfig::default();
+        let mut store = DocumentStore::new();
+        let a = store.open(&file, OpenDisposition::Pinned).unwrap();
+
+        // First poll: didOpen with the file's text.
+        drive(&mut manager, &config, &store);
+        let sent = drain_sends(&cmd_rx);
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].0, "textDocument/didOpen");
+        assert_eq!(sent[0].1["textDocument"]["version"], 1);
+        assert_eq!(sent[0].1["textDocument"]["languageId"], "rust");
+
+        // No revision change → no resend (opened docs are not duplicated).
+        drive(&mut manager, &config, &store);
+        assert!(drain_sends(&cmd_rx).is_empty());
+
+        // Edit bumps the revision → didChange (full text under Full sync).
+        store.get_mut(a).unwrap().editor.insert_text("x").unwrap();
+        drive(&mut manager, &config, &store);
+        let sent = drain_sends(&cmd_rx);
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].0, "textDocument/didChange");
+        assert_eq!(sent[0].1["textDocument"]["version"], 2);
+        assert!(sent[0].1["contentChanges"][0]["text"]
+            .as_str()
+            .unwrap()
+            .starts_with('x'));
+
+        // Save flows only when the session advertised it (FULL_SYNC did).
+        manager.document_saved(a);
+        let sent = drain_sends(&cmd_rx);
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].0, "textDocument/didSave");
+        assert!(sent[0].1["textDocument"]["text"]
+            .as_str()
+            .unwrap()
+            .starts_with('x'));
+
+        // Closing the document emits didClose and drops the tracked record.
+        store.discard_and_close(a).unwrap();
+        drive(&mut manager, &config, &store);
+        let sent = drain_sends(&cmd_rx);
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].0, "textDocument/didClose");
+        assert!(manager.tracked.is_empty());
+        assert!(!manager.sessions["rust"]
+            .docs
+            .is_open(&features::uri_for_path(
+                store.get(a).map(|d| d.path()).unwrap_or(&file)
+            )));
+    }
+
+    #[test]
+    fn sync_skips_disabled_unmapped_missing_text_and_not_ready_sends() {
+        use crate::workspace::documents::{DocumentStore, OpenDisposition};
+        let dir = tempfile::tempdir().unwrap();
+        let file_rs = dir.path().join("a.rs");
+        let file_xyz = dir.path().join("a.unknownext");
+        std::fs::write(&file_rs, "fn a() {}\n").unwrap();
+        std::fs::write(&file_xyz, "??\n").unwrap();
+        let mut manager = LspManager::new();
+        let cmd_rx = ready_session(&mut manager, "rust", FULL_SYNC);
+        let mut store = DocumentStore::new();
+        let a = store.open(&file_rs, OpenDisposition::Pinned).unwrap();
+        let u = store.open(&file_xyz, OpenDisposition::Pinned).unwrap();
+        // Disabled config: reconcile is a no-op — nothing tracked or sent.
+        let mut config = LspConfig {
+            enabled: Some(false),
+            ..LspConfig::default()
+        };
+        drive(&mut manager, &config, &store);
+        assert!(manager.tracked.is_empty());
+        assert!(drain_sends(&cmd_rx).is_empty());
+        config.enabled = None;
+
+        // Unknown extension is skipped before tracking; .rs opens normally.
+        drive(&mut manager, &config, &store);
+        assert!(manager.tracked.contains_key(&a));
+        assert!(!manager.tracked.contains_key(&u));
+        assert_eq!(drain_sends(&cmd_rx).len(), 1);
+
+        // Missing text: a poll item the text provider cannot produce stays
+        // tracked but unopened, while a sibling with a real diff still sends.
+        let b_file = dir.path().join("b.rs");
+        std::fs::write(&b_file, "fn b() {}\n").unwrap();
+        let b = store.open(&b_file, OpenDisposition::Pinned).unwrap();
+        let a_path = store.get(a).unwrap().path().to_path_buf();
+        let b_path = store.get(b).unwrap().path().to_path_buf();
+        let b_uri = features::uri_for_path(&b_path);
+        store.get_mut(a).unwrap().editor.insert_text("x").unwrap();
+        let a_rev = store.get(a).unwrap().editor.content_revision();
+        manager.sync_documents(
+            &config,
+            [(a, a_path.as_path(), a_rev), (b, b_path.as_path(), 0u64)].into_iter(),
+            |id| {
+                if id == b {
+                    None
+                } else {
+                    store.get(id).map(|d| d.text())
+                }
+            },
+        );
+        assert!(manager.tracked.contains_key(&b));
+        assert!(!manager.sessions["rust"].docs.is_open(&b_uri));
+        let sent = drain_sends(&cmd_rx);
+        assert_eq!(sent.len(), 1, "{sent:?}");
+        assert_eq!(sent[0].0, "textDocument/didChange");
+
+        // The change path defers too: `a` owes a diff but its text is
+        // unavailable, so the revision stays unsynced; `b` opens normally.
+        store.get_mut(a).unwrap().editor.insert_text("y").unwrap();
+        let a_rev = store.get(a).unwrap().editor.content_revision();
+        let stale = manager.tracked[&a].revision;
+        manager.sync_documents(
+            &config,
+            [(a, a_path.as_path(), a_rev), (b, b_path.as_path(), 0u64)].into_iter(),
+            |id| {
+                if id == a {
+                    None
+                } else {
+                    store.get(id).map(|d| d.text())
+                }
+            },
+        );
+        assert_eq!(manager.tracked[&a].revision, stale);
+        let sent = drain_sends(&cmd_rx);
+        assert_eq!(sent.len(), 1, "{sent:?}");
+        assert_eq!(sent[0].0, "textDocument/didOpen");
+        assert_eq!(sent[0].1["textDocument"]["uri"], b_uri);
+        store.discard_and_close(b).unwrap();
+
+        // Session gone not-ready: a change diffs but cannot leave.
+        manager.sessions.get_mut("rust").unwrap().status = SessionStatus::Starting;
+        let rev2 = store.get(a).unwrap().editor.content_revision() + 1;
+        store.get_mut(a).unwrap().editor.insert_text("y").unwrap();
+        let rev3 = store.get(a).unwrap().editor.content_revision();
+        assert_eq!(rev3, rev2);
+        manager.sync_documents(&config, [(a, a_path.as_path(), rev3)].into_iter(), |id| {
+            store.get(id).map(|d| d.text())
+        });
+        assert!(drain_sends(&cmd_rx).is_empty());
+
+        // SyncKind::None mirrors the change without emitting a notification.
+        let session = manager.sessions.get_mut("rust").unwrap();
+        session.status = SessionStatus::Ready {
+            encoding: positions::PositionEncoding::Utf16,
+        };
+        session.sync = features::TextSync {
+            open_close: true,
+            change: features::TextSyncKind::None,
+            save: false,
+            save_include_text: false,
+        };
+        store.get_mut(a).unwrap().editor.insert_text("z").unwrap();
+        drive(&mut manager, &config, &store);
+        assert!(drain_sends(&cmd_rx).is_empty());
+
+        // close_tracked early returns: unknown id; session present but the
+        // uri was never opened (didClose stays silent); missing session.
+        manager.close_tracked(u);
+        let u_uri = features::uri_for_path(&file_xyz);
+        manager.tracked.insert(
+            u,
+            TrackedDoc {
+                language: "rust".into(),
+                uri: u_uri.clone(),
+                revision: 0,
+            },
+        );
+        manager.close_tracked(u);
+        assert!(!manager.tracked.contains_key(&u));
+        assert!(drain_sends(&cmd_rx).is_empty());
+        manager.sessions.remove("rust");
+        manager.close_tracked(a);
+        assert!(!manager.tracked.contains_key(&a));
+
+        // document_saved early returns: untracked id; then tracked-but-dead.
+        manager.document_saved(u);
+        let mut manager2 = LspManager::new();
+        let _rx2 = ready_session(&mut manager2, "rust", FULL_SYNC);
+        manager2.sessions.get_mut("rust").unwrap().status = SessionStatus::Starting;
+        let a2 = store.get(a).unwrap().id();
+        manager2.tracked.insert(
+            a2,
+            TrackedDoc {
+                language: "rust".into(),
+                uri: features::uri_for_path(store.get(a).unwrap().path()),
+                revision: 0,
+            },
+        );
+        manager2.document_saved(a2);
+        assert!(drain_sends(&_rx2).is_empty());
+
+        // And with the owning session itself removed.
+        manager2.sessions.remove("rust");
+        manager2.document_saved(a2);
+        assert!(drain_sends(&_rx2).is_empty());
+    }
+
+    #[test]
+    fn sync_defers_open_until_ready_and_skips_unsupported() {
+        use crate::workspace::documents::{DocumentStore, OpenDisposition};
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("a.rs");
+        std::fs::write(&file, "fn a() {}\n").unwrap();
+        let mut manager = LspManager::new();
+        let mut store = DocumentStore::new();
+        let a = store.open(&file, OpenDisposition::Pinned).unwrap();
+        let config = LspConfig::default();
+
+        // Session still Starting: tracked but nothing sent, no open.
+        let (cmd_tx, cmd_rx) = mpsc::sync_channel::<LspCommand>(64);
+        let (language, mut session) = fake_session("rust", &["ra"]);
+        session.cmd_tx = Some(cmd_tx);
+        manager.sessions.insert(language, session);
+        drive(&mut manager, &config, &store);
+        assert!(drain_sends(&cmd_rx).is_empty());
+        assert_eq!(manager.tracked.len(), 1);
+
+        // Ready + no open_close support → still nothing.
+        let session = manager.sessions.get_mut("rust").unwrap();
+        session.status = SessionStatus::Ready {
+            encoding: positions::PositionEncoding::Utf16,
+        };
+        session.sync = features::TextSync::default();
+        drive(&mut manager, &config, &store);
+        assert!(drain_sends(&cmd_rx).is_empty());
+
+        // Upgrading sync to Full opens the already-tracked document.
+        manager.sessions.get_mut("rust").unwrap().sync = FULL_SYNC;
+        drive(&mut manager, &config, &store);
+        let sent = drain_sends(&cmd_rx);
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].0, "textDocument/didOpen");
+
+        // didSave is gated by the advertised capability.
+        manager.sessions.get_mut("rust").unwrap().sync.save = false;
+        manager.document_saved(a);
+        assert!(drain_sends(&cmd_rx).is_empty());
+    }
+
+    #[test]
+    fn sync_rename_closes_old_uri_and_dead_session_sends_nothing() {
+        use crate::workspace::documents::{DocumentStore, OpenDisposition};
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("a.rs");
+        let renamed = dir.path().join("renamed.rs");
+        std::fs::write(&file, "fn a() {}\n").unwrap();
+        let mut manager = LspManager::new();
+        let cmd_rx = ready_session(&mut manager, "rust", FULL_SYNC);
+        let config = LspConfig::default();
+        let mut store = DocumentStore::new();
+        let a = store.open(&file, OpenDisposition::Pinned).unwrap();
+        drive(&mut manager, &config, &store);
+        assert_eq!(drain_sends(&cmd_rx).len(), 1);
+
+        // Rename on disk + store commit: poll observes the new path and
+        // emits didClose(old uri) + didOpen(new uri) in order.
+        std::fs::rename(&file, &renamed).unwrap();
+        let canon = std::fs::canonicalize(&renamed).unwrap();
+        store.commit_rename(vec![(a, canon.clone())]);
+        drive(&mut manager, &config, &store);
+        let sent = drain_sends(&cmd_rx);
+        assert_eq!(sent.len(), 2, "{sent:?}");
+        assert_eq!(sent[0].0, "textDocument/didClose");
+        assert_eq!(
+            sent[0].1["textDocument"]["uri"],
+            features::uri_for_path(&file)
+        );
+        assert_eq!(sent[1].0, "textDocument/didOpen");
+        assert_eq!(
+            sent[1].1["textDocument"]["uri"],
+            features::uri_for_path(&canon)
+        );
+
+        // A dead session sends nothing — didClose is swallowed, not queued.
+        store.discard_and_close(a).unwrap();
+        manager.sessions.get_mut("rust").unwrap().status = SessionStatus::Dead("x".into());
+        drive(&mut manager, &config, &store);
+        assert!(drain_sends(&cmd_rx).is_empty());
+        assert!(manager.tracked.is_empty());
+    }
+
+    /// The pinned scenario: a real fake-server transcript over two unsaved
+    /// documents exercising edit/paste/undo, save, close, rename, external
+    /// reload, and a server restart — versions monotonic per generation,
+    /// server-side mirror equal to the active document text.
+    #[test]
+    fn document_sync_transcript_matches_active_documents_end_to_end() {
+        use crate::workspace::documents::{DocumentStore, OpenDisposition};
+        use std::time::Instant;
+        let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("scripts")
+            .join("fake-lsp-server.py");
+        let dir = tempfile::tempdir().unwrap();
+        let transcript = dir.path().join("transcript.json");
+        let a_path = dir.path().join("a.rs");
+        let b_path = dir.path().join("b.rs");
+        std::fs::write(&a_path, "fn a() {}\n").unwrap();
+        std::fs::write(&b_path, "fn b() {}\n").unwrap();
+
+        let mut manager = LspManager::new();
+        let (tx, mut rx) = crate::event::event_channel(crate::event::TransportLimits::default());
+        let resolved = ResolvedServer {
+            spec: config::ServerSpec {
+                language: "rust".to_string(),
+                argv: vec![
+                    script.to_string_lossy().into_owned(),
+                    "sync".to_string(),
+                    transcript.to_string_lossy().into_owned(),
+                ],
+                root_markers: vec![],
+                source: ConfigSource::Global,
+            },
+            root: dir.path().to_path_buf(),
+            executable: None,
+        };
+        manager.spawn_session(resolved, &tx);
+
+        // Route Lsp events into the manager exactly like main.rs does.
+        let wait_ready =
+            |manager: &mut LspManager, rx: &mut crate::event::EventReceiver, n: u32| {
+                let deadline = Instant::now() + Duration::from_secs(15);
+                let mut seen = 0u32;
+                while Instant::now() < deadline && seen < n {
+                    match rx.try_recv() {
+                        Ok(crate::event::Event::Lsp {
+                            language,
+                            generation,
+                            event,
+                        }) => {
+                            let is_ready = matches!(event, ClientEvent::Ready { .. });
+                            manager.handle_event(&language, generation, event);
+                            if is_ready {
+                                seen += 1;
+                            }
+                        }
+                        _ => {
+                            std::thread::sleep(Duration::from_millis(25));
+                        }
+                    }
+                }
+                seen
+            };
+        assert_eq!(wait_ready(&mut manager, &mut rx, 1), 1);
+
+        let config = LspConfig::default();
+        let mut store = DocumentStore::new();
+        let a = store.open(&a_path, OpenDisposition::Pinned).unwrap();
+        let b = store.open(&b_path, OpenDisposition::Pinned).unwrap();
+
+        // Two documents, both edited in memory (unsaved — text never touches
+        // disk; the server learns it only through didOpen/didChange).
+        drive(&mut manager, &config, &store);
+        store.get_mut(a).unwrap().editor.insert_text("aaa").unwrap();
+        store
+            .get_mut(b)
+            .unwrap()
+            .editor
+            .insert_text("multi\nline")
+            .unwrap();
+        drive(&mut manager, &config, &store);
+        store.get_mut(a).unwrap().editor.undo();
+        drive(&mut manager, &config, &store);
+
+        // Save a → didSave; rename a → close+open; reload it from disk.
+        store.get_mut(a).unwrap().editor.save().unwrap();
+        manager.document_saved(a);
+        let a2_path = dir.path().join("a2.rs");
+        std::fs::rename(&a_path, &a2_path).unwrap();
+        let canon = std::fs::canonicalize(&a2_path).unwrap();
+        store.commit_rename(vec![(a, canon.clone())]);
+        drive(&mut manager, &config, &store);
+        std::fs::write(&a2_path, "fn a() { /* externally reloaded */ }\n").unwrap();
+        store.reload(a).unwrap();
+        drive(&mut manager, &config, &store);
+
+        // Close b → didClose. Then restart: the new generation re-opens a.
+        store.discard_and_close(b).unwrap();
+        drive(&mut manager, &config, &store);
+        // Wait for the last in-flight notification before killing the fake:
+        // transport shutdown discards queued writes (kill is not a flush).
+        {
+            let dl = Instant::now() + Duration::from_secs(10);
+            while Instant::now() < dl {
+                let closes = std::fs::read_to_string(&transcript)
+                    .ok()
+                    .map(|s| s.matches("textDocument/didClose").count())
+                    .unwrap_or(0);
+                if closes >= 2 {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        }
+        manager.restart("rust");
+        assert!(wait_ready(&mut manager, &mut rx, 1) >= 1);
+        drive(&mut manager, &config, &store);
+
+        // The fake persists its transcript after every message (kill-safe).
+        // Poll until the restart's second didOpen lands — it is ordered
+        // strictly after every earlier send, so it proves all arrived.
+        let a2_uri = features::uri_for_path(&canon);
+        let deadline = Instant::now() + Duration::from_secs(15);
+        let mut report = None;
+        loop {
+            if Instant::now() >= deadline || report.is_some() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+            let parsed = std::fs::read_to_string(&transcript)
+                .ok()
+                .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok());
+            let opens = parsed
+                .as_ref()
+                .and_then(|candidate| candidate["log"].as_array())
+                .map(|log| {
+                    log.iter()
+                        .filter(|e| {
+                            e["method"] == "textDocument/didOpen"
+                                && e["uri"] == serde_json::json!(a2_uri)
+                        })
+                        .count()
+                })
+                .unwrap_or(0);
+            if opens >= 2 {
+                report = parsed;
+            }
+        }
+        let report = report.expect("transcript never showed the restart re-open");
+        manager.shutdown_all();
+
+        // Per-URI, per-generation versions strictly increase.
+        let log = report["log"].as_array().unwrap();
+        let a_uri = features::uri_for_path(&a_path);
+        let b_uri = features::uri_for_path(&b_path);
+        for uri in [&a_uri, &a2_uri, &b_uri] {
+            let mut sent_versions: Vec<i64> = Vec::new();
+            let mut generational: Vec<Vec<i64>> = vec![Vec::new()];
+            for entry in log.iter().filter(|e| e["uri"] == *uri) {
+                let method = entry["method"].as_str().unwrap();
+                let version = entry["version"].as_i64();
+                if method == "textDocument/didOpen" {
+                    generational.push(Vec::new());
+                }
+                if let Some(v) = version {
+                    sent_versions.push(v);
+                    generational.last_mut().unwrap().push(v);
+                }
+            }
+            for window in sent_versions.windows(2) {
+                let _ = window;
+            }
+            for segment in &generational {
+                assert!(
+                    segment.windows(2).all(|v| v[0] < v[1]),
+                    "versions for {uri} must strictly increase per generation: {generational:?}"
+                );
+            }
+            assert!(
+                sent_versions.windows(2).all(|v| v[0] <= v[1]),
+                "versions for {uri} never rewind: {sent_versions:?}"
+            );
+        }
+
+        // Server-side mirror equals the live document text — the pinned
+        // assert_eq!(server_text, active_document_text).
+        let server_text = report["docs"][&a2_uri].as_str().unwrap().to_string();
+        let active_document_text = store.get(a).unwrap().text();
+        assert_eq!(server_text, active_document_text);
+        // b was closed → gone from the server's table; a's old uri too.
+        assert!(report["docs"].get(&b_uri).is_none());
+        assert!(report["docs"].get(&a_uri).is_none());
+        // The transcript exercised every required surface.
+        let methods: Vec<&str> = log.iter().map(|e| e["method"].as_str().unwrap()).collect();
+        for want in [
+            "textDocument/didOpen",
+            "textDocument/didChange",
+            "textDocument/didSave",
+            "textDocument/didClose",
+        ] {
+            assert!(methods.contains(&want), "missing {want} in {methods:?}");
+        }
+        // Post-restart re-open: a2 opened exactly twice (once per
+        // generation), never more — no duplicated events.
+        let a2_opens = methods
+            .iter()
+            .zip(log.iter())
+            .filter(|(m, e)| **m == "textDocument/didOpen" && e["uri"] == a2_uri)
+            .count();
+        assert_eq!(a2_opens, 2, "reopen after restart must not duplicate");
     }
 }

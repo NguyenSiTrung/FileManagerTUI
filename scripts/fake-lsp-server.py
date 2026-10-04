@@ -14,6 +14,10 @@ Modes:
   apply-edit         success, then send the client a workspace/applyEdit
                      request (id 9001) and report its reply via a
                      `custom/serverSawReply` notification
+  sync <file>        incremental document sync (utf-16, change:2, save with
+                     text); applies didOpen/didChange/didClose to its own
+                     document table and dumps {"log", "docs"} JSON to <file>
+                     on exit/EOF
 
 The script writes nothing to stdout that is not a protocol frame; progress
 noise goes to stderr. No network, no filesystem mutation.
@@ -76,7 +80,7 @@ def handle_request(msg, mode_opts):
             "result": {
                 "capabilities": {
                     "positionEncoding": "utf-16",
-                    "textDocumentSync": 1,
+                    "textDocumentSync": mode_opts.get("sync", 1),
                 }
             },
         }
@@ -156,6 +160,88 @@ def run_oversized(w_out):
     return 1
 
 
+def utf16_col_to_index(line, col):
+    """UTF-16 code-unit column -> Python str index (surrogates count 2)."""
+    units = 0
+    for i, ch in enumerate(line):
+        if units == col:
+            return i
+        units += 2 if ord(ch) > 0xFFFF else 1
+    return len(line) if units == col else None
+
+
+def apply_change(text, change):
+    """Apply one TextDocumentContentChangeEvent (utf-16 positions)."""
+    if "range" not in change:
+        return change["text"]
+    lines = text.split("\n")
+    rng = change["range"]
+    sl, sc = rng["start"]["line"], rng["start"]["character"]
+    el, ec = rng["end"]["line"], rng["end"]["character"]
+    if sl >= len(lines) or el >= len(lines):
+        return text  # out-of-range: leave mirror untouched (client bug bait)
+    start = sum(len(l) + 1 for l in lines[:sl]) + (utf16_col_to_index(lines[sl], sc) or 0)
+    end = sum(len(l) + 1 for l in lines[:el]) + (utf16_col_to_index(lines[el], ec) or 0)
+    return text[:start] + change["text"] + text[end:]
+
+
+def run_sync(r_in, w_out, transcript_path):
+    """Full-sync server: incremental apply + transcript dump for tests."""
+    docs = {}
+    # A restarted server continues the transcript log (its document table
+    # starts empty — the client must re-open every doc).
+    log = []
+    if os.path.exists(transcript_path):
+        try:
+            with open(transcript_path) as f:
+                log = json.load(f).get("log", [])
+        except (ValueError, OSError):
+            log = []
+    opts = {
+        "echo_result": True,
+        "sync": {"openClose": True, "change": 2, "save": {"includeText": True}},
+    }
+
+    # Persist after EVERY message via atomic replace: a client that kills us
+    # (SIGKILL after the bounded shutdown deadline, or EOF on restart) must
+    # still leave a complete transcript — a torn write reads as none at all.
+    def flush(reason):
+        tmp = transcript_path + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump({"reason": reason, "log": log, "docs": docs}, f)
+        os.replace(tmp, transcript_path)
+
+    while True:
+        body = read_message(r_in)
+        if body is None:
+            flush("eof")
+            return 0
+        try:
+            msg = json.loads(body)
+        except ValueError:
+            flush("bad-json")
+            return 2
+        if is_request(msg):
+            write_message(w_out, handle_request(msg, opts))
+            continue
+        method = msg.get("method")
+        if method == "exit":
+            flush("exit")
+            return 0
+        params = msg.get("params") or {}
+        td = params.get("textDocument") or {}
+        uri = td.get("uri")
+        if method == "textDocument/didOpen":
+            docs[uri] = td.get("text", "")
+        elif method == "textDocument/didChange":
+            for ch in params.get("contentChanges", []):
+                docs[uri] = apply_change(docs.get(uri, ""), ch)
+        elif method == "textDocument/didClose":
+            docs.pop(uri, None)
+        log.append({"method": method, "uri": uri, "version": td.get("version")})
+        flush("live")
+
+
 def run_apply_edit(r_in, w_out):
     body = read_message(r_in)
     if body is None:
@@ -232,6 +318,9 @@ def main():
         sys.exit(run_oversized(w_out))
     if mode == "noexit":
         sys.exit(run_success(r_in, w_out, {"echo_result": True, "ignore_exit": True}))
+    if mode == "sync":
+        transcript = sys.argv[2] if len(sys.argv) > 2 else "/tmp/fake-lsp-sync.json"
+        sys.exit(run_sync(r_in, w_out, transcript))
     if mode == "apply-edit":
         sys.exit(run_apply_edit(r_in, w_out))
     eprint("fake-lsp-server: unknown mode", mode)
