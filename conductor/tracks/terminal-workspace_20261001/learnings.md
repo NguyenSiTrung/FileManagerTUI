@@ -1111,3 +1111,14 @@ verification evidence, and reusable patterns.
   built in earlier phases — the delta was the reply drain + two mode arms +
   pinning tests (9 new: 2 emulator fixtures, 2 handler unit, 4 main-loop PTY
   integration, 1 pty busy-shutdown).
+
+## 2026-10-04 - Phase 9 Task 3 checkpoint: terminal compatibility closed
+
+- **LCOV `SF:` paths are absolute** — the strict-basis script must key by
+  `os.getcwd()`-prefixed paths or every diff line silently lands in "no-DA".
+- **A 0-hit closing `}` is structural, not a miss.** Report it honestly
+  (24/27 hit, 2 doc no-DA, 1 `}` 0-hit) rather than claiming "100%".
+- **SIGINT delivery needs ISIG on.** `stty raw` disables it — a raw-mode cat
+  receives 0x03 as a literal byte; the interrupt fixture uses `stty -echo`
+  (echo off for clean output, ISIG preserved) so ^C kills the foreground
+  process group and produces TerminalClosed.

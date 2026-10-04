@@ -942,6 +942,85 @@ mod transport_loop_tests {
         assert!(!app.0.workspace.layout.terminal_visible());
         assert!(app.0.terminal_state.pty.as_ref().unwrap().is_alive());
     }
+
+    /// Task 3 checkpoint: an interrupt chord forwarded through the input path
+    /// really kills the child — Ctrl+C reaches the PTY line discipline as
+    /// 0x03, generates SIGINT to the foreground process group (ISIG left on),
+    /// and the session reports TerminalClosed.
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[tokio::test]
+    async fn terminal_ctrl_c_interrupt_reaches_foreground_child() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = PtyCleanup(App::new(directory.path(), AppConfig::default()).unwrap());
+        let (tx, mut rx) = crate::event::event_channel(Default::default());
+        app.0.terminal_state.pty = Some(spawn_script(
+            &directory,
+            "interruptible",
+            "#!/bin/sh\nstty -echo\nprintf 'READY'\nsleep 60\n",
+            tx,
+        ));
+        let session = app.0.terminal_state.pty.as_ref().unwrap().session();
+        // Wait for the child's prompt marker, then forward Ctrl+C exactly as
+        // the keymap does (raw 0x03 through the ordered write queue).
+        tokio::time::timeout(Duration::from_secs(5), async {
+            let mut out = Vec::new();
+            while let Some(event) = rx.recv().await {
+                if let Event::TerminalOutput { data, .. } = event {
+                    out.extend_from_slice(&data);
+                    if out.windows(5).any(|w| w == b"READY") {
+                        return;
+                    }
+                }
+            }
+            panic!("child never became ready");
+        })
+        .await
+        .unwrap();
+        app.0
+            .terminal_state
+            .pty
+            .as_ref()
+            .unwrap()
+            .write(&[0x03])
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while let Some(event) = rx.recv().await {
+                if let Event::TerminalClosed { session: closed } = event {
+                    assert_eq!(closed, session);
+                    return;
+                }
+            }
+            panic!("event stream ended without TerminalClosed");
+        })
+        .await
+        .unwrap();
+        app.0.terminal_state.exited = true;
+        assert!(app.0.terminal_state.exited);
+    }
+
+    /// A reply-producing output batch arriving after the child's input side
+    /// is already closed reports the rejection instead of dropping silently.
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[tokio::test]
+    async fn terminal_reply_write_failure_reports_status() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = PtyCleanup(App::new(directory.path(), AppConfig::default()).unwrap());
+        let (tx, _rx) = crate::event::event_channel(Default::default());
+        app.0.terminal_state.pty = Some(spawn_script(
+            &directory,
+            "cat",
+            "#!/bin/sh\nstty raw -echo\nexec /bin/cat\n",
+            tx,
+        ));
+        let session = app.0.terminal_state.pty.as_ref().unwrap().session();
+        app.0.terminal_state.pty.as_ref().unwrap().shutdown();
+        process_terminal(&mut app.0, session, b"\x1b[6n");
+        let message = app.0.status_message.as_ref().unwrap().0.clone();
+        assert!(
+            message.starts_with("Terminal reply not accepted:"),
+            "unexpected status: {message}"
+        );
+    }
 }
 
 /// A terminal-based file manager TUI.

@@ -1,9 +1,9 @@
 {
-  "current_phase": "Embedded-Terminal Compatibility",
-  "current_phase_index": 8,
-  "current_task_index": 3,
+  "current_phase": "LSP Positions, Transport, Client, and Trust",
+  "current_phase_index": 9,
+  "current_task_index": 1,
   "active_tasks": [
-    "phase9_task3"
+    "phase10_task1"
   ],
   "completed_phases": [
     "Collision-Safe Operations and Safe Saves",
@@ -13,7 +13,8 @@
     "Adaptive Layout and Workspace Presentation",
     "Background Work, Search, and Mounted Storage",
     "Sessions and Private Recovery",
-    "Read-Only Git State"
+    "Read-Only Git State",
+    "Embedded-Terminal Compatibility"
   ],
   "status": "in_progress",
   "verification_policy": "automated_only",
@@ -30,5 +31,5 @@
       "note": "Phases 1-8 closed; Phase 9 Task 1 approved with a six-item fix round pending (its worker was cancelled mid-flight and the tree was restored to the verified revision 4cd0559f)."
     }
   ],
-  "last_updated": "2026-10-04T16:40:00Z"
+  "last_updated": "2026-10-04T16:55:00Z"
 }

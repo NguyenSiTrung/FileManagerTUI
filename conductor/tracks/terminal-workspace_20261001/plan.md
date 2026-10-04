@@ -834,11 +834,21 @@ exist. Add a module's declarations in the task that introduces it. Avoid broad
     (57 terminal-filtered + full suite 1363 green; both clippy gates, release
     build, fmt clean.)
 
-- [ ] Task 3: Automated checkpoint for terminal compatibility
+- [x] Task 3: Automated checkpoint for terminal compatibility
 
   **Requirements:** AC-9, AC-11, AC-12.
-  - [ ] Run full gates plus scripted PTY compatibility fixtures; verify child
+  - [x] Run full gates plus scripted PTY compatibility fixtures; verify child
     cleanup and ordinary Esc/autocomplete/interrupt delivery.
+    (Full suite 1365 green; `cargo clippy --all-targets -- -D warnings` and
+    `--bin fm` clean; `cargo fmt --check` clean; release build ok; pyte
+    reference PTY fixtures 11/11; strict literal diff coverage vs baseline:
+    24/27 added lines hit, 2 doc-comment no-DA, 1 structural `}` 0-hit —
+    every executable path covered. Esc/Tab/autocomplete byte-exact through a
+    real `cat` PTY; SIGINT propagation proven end-to-end by
+    `terminal_ctrl_c_interrupt_reaches_foreground_child` (0x03 → child death
+    → TerminalClosed); child cleanup by
+    `test_shutdown_of_busy_child_is_bounded_and_reaped`; reply-drain error
+    path by `terminal_reply_write_failure_reports_status`.)
 
 ## Phase 10: LSP Positions, Transport, Client, and Trust
 
