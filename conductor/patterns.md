@@ -225,4 +225,24 @@ Merged from 25 archived tracks' learnings. Most repeated lines across per-track 
 - Some entries above are credited to sources with no archived track directory (`editor-selection`, `editor-mouse`, `clipboard-ux standalone commits`, bare commit hashes `80243ef`, `c3f0924`, `9efcdb5`, `f9658df`) — the corresponding learnings were never appended to their archived learnings.md files.
 - Entries credited to `shallow-dir-preview_20260302` and `terminal-mouse-copy_20260302` cannot be re-derived from those archive learnings.md files (inherited block only); verify against plan.md/spec.md if needed.
 
-Last refreshed: 2026-09-30 (learnings consolidation across 25 archived tracks)
+## Elevated Patterns (archive terminal-workspace_20261001, 2026-10-04)
+
+### Testing / PTY Fixtures
+- Ratatui diff-renders only changed cells and emits styled spans separately — match assertions on ANSI-stripped text or a decoded screen, never on raw bytes for contiguous strings; trust atomic single-span markers (dialog titles, candidate rows), not sentences that can garble across overlapping frames (from: terminal-workspace_20261001, archived 2026-10-04)
+- `pgrep -f <path>` is not a process check — it matches any cmdline mention (strace wrappers, `bash -c` heredocs, the pgrep shell itself); filter `/proc/<pid>/exe` realpath == binary (zombies have no exe link) (from: terminal-workspace_20261001, archived 2026-10-04)
+- PTY harness hygiene: retry idempotent chord entry (a startup race can swallow the first input), wait for results-present markers before Enter (async index warm-up), deadline-bound every read, assert clean exit + reaped children, and poll state files for full content before killing a process (mid-burst snapshots capture partial state) (from: terminal-workspace_20261001, archived 2026-10-04)
+- A `}` closing line counts the false arm in coverage — manufacture the Err arm instead of folding tests (from: terminal-workspace_20261001, archived 2026-10-04)
+- Strict diff-inclusive coverage basis for changed-code gates: `git diff -U0` hunks ∩ LCOV `DA:` lines; never mislabel whole-repo totals as new-core coverage (from: terminal-workspace_20261001, archived 2026-10-04)
+
+### Gotchas
+- `watcher.enabled` defaults false — opt-in only; `mode = "polling"` gives deterministic external-change marks in fixtures (from: terminal-workspace_20261001, archived 2026-10-04)
+- `git status` opens working-tree dirs → notify events can self-feed refreshes → a coalescing floor is required between refreshes (from: terminal-workspace_20261001, archived 2026-10-04)
+- Compiler/repro copies need unique target dirs — a shared target dir reuses stale test binaries (from: terminal-workspace_20261001, archived 2026-10-04)
+- musl builds need the `musl-tools` package (`x86_64-linux-musl-gcc`), not just `rustup target add` (from: terminal-workspace_20261001, archived 2026-10-04)
+
+### Discipline
+- Before a fix-only delta: reconstruct the prior reviewed state and hash-check it; capture the red by removing the guarded behavior, then restore byte-identical and re-run green (from: terminal-workspace_20261001, archived 2026-10-04)
+- Evidence honesty: controlled PTY/tmux transport is not a live SSH/browser/deployment claim; a conditional projection is not a platform build; a missing harness is a blocked check, not a silent skip (from: terminal-workspace_20261001, archived 2026-10-04)
+- Project-local config must never self-grant execution — durable grants belong to trusted layers only (from: terminal-workspace_20261001, archived 2026-10-04)
+
+Last refreshed: 2026-10-04 (terminal-workspace_20261001 archive elevation)
