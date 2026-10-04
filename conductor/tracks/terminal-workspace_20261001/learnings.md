@@ -1139,3 +1139,21 @@ verification evidence, and reusable patterns.
   blocks past the wall-clock bound; test helpers take `recv_timeout`.
 - **Channel-close shutdown ordering:** drop sender → kill/wait child → join
   writer, reader, stderr. Any earlier join can block on the live channel.
+
+## 2026-10-04 - Phase 10 Task 3: LSP client lifecycle over scripted + fake peers
+
+- **Split lifecycle logic from spawn so most tests need no child process.**
+  `Client::over(Box<dyn LspIo>)` accepts any scripted peer; `ScriptedIo`
+  records sends/shutdowns and replays queued `Inbound`s. Only the 9 tests
+  that prove pipe behavior spawn `scripts/fake-lsp-server.py`.
+- **Generation tagging is the cheap staleness fix.** Every `ClientEvent`
+  carries the server generation; `restart` bumps it and clears pending, so
+  late results are dropped by consumers checking `accepts(gen, version)`
+  rather than needing response timestamps.
+- **Server-initiated requests need an explicit refusal path, not a handler.**
+  `id + method` in one message → reply `-32601 MethodNotFound` and emit a
+  `$/unsupportedServerRequest` notification for status display. The
+  `apply-edit` fake closes the loop end-to-end by reporting the code back.
+- **`shutdown()` must tolerate a server that ignores `exit`.** Wait for the
+  shutdown reply inside `shutdown_timeout`, send `exit` regardless, then
+  let the transport kill+wait — bounded even for the `noexit` fake.

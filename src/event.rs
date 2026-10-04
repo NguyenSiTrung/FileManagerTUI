@@ -115,6 +115,10 @@ pub enum Event {
     /// Legacy untargeted envelope, ignored after typed clipboard migration.
     #[allow(dead_code)]
     ShowCopyableText(String),
+    /// An outcome from a language-server session (generation-tagged).
+    /// Staged for Phase 10 Task 4: produced once server startup is wired.
+    #[allow(dead_code)]
+    Lsp(crate::lsp::client::ClientEvent),
     /// Async S3 directory listing completed.
     /// Legacy untargeted envelope, ignored by main after pool migration.
     #[allow(dead_code)]

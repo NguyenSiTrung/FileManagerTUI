@@ -904,23 +904,30 @@ exist. Add a module's declarations in the task that introduces it. Avoid broad
     (10 tests green incl. real-child echo, stderr drain, bounded send,
     spawn-failure error paths.)
 
-- [ ] Task 3: Implement server/request lifecycle with fake peers
+- [x] Task 3: Implement server/request lifecycle with fake peers
 
   **Files:** create `src/lsp/client.rs`; modify `src/lsp/mod.rs`, `src/event.rs`;
   create `scripts/fake-lsp-server.py`.
   **Requirements:** FR-10, AC-8.
   **Produces:** client initialization/capabilities, request IDs/pending requests,
   cancellation/timeouts, shutdown/exit, server generation and crash cleanup.
-  - [ ] Use deterministic fake-server modes for success, unsupported method,
+  - [x] Use deterministic fake-server modes for success, unsupported method,
     delayed response, crash, malformed frame, oversized output, and ignored exit.
     ```rust
     assert!(client.accepts(server_generation, document_version));
     assert!(!client.accepts(old_server_generation, document_version));
     ```
-  - [ ] Reply explicitly to unsupported server requests; never auto-apply
+    (eight `scripts/fake-lsp-server.py` modes — success, unsupported, delayed,
+    crash, malformed, oversized, noexit, apply-edit — exercised over real
+    pipes; generation/`accepts` staleness contract pinned by unit tests.)
+  - [x] Reply explicitly to unsupported server requests; never auto-apply
     workspace edits or run execute-command requests. Limit/restart failures
     without an infinite restart loop.
-  - [ ] Run `cargo test lsp::client` against fake peers, not installed real servers.
+    (every server-initiated request gets a `-32601` reply — proven end-to-end
+    by the `apply-edit` fake reporting our error code back; restart budget
+    exhausts at 3.)
+  - [x] Run `cargo test lsp::client` against fake peers, not installed real servers.
+    (19 tests: 10 scripted-peer unit tests + 9 real-child fake-server tests.)
 
 - [ ] Task 4: Add installed-server configuration and project execution trust
 

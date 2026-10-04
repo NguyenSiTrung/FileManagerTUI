@@ -1498,6 +1498,8 @@ async fn main() -> error::Result<()> {
                     // Generation-tagged: stale results are refused in the state.
                     let _ = app.accept_git_refresh(refresh);
                 }
+                // Staged: consumed once Task 4 wires server startup into App.
+                Event::Lsp(_) => {}
             }
 
             // Throttled, bounded snapshot pass for dirty documents. Runs
