@@ -1,10 +1,13 @@
 {
-    "last_refresh": "2026-09-30T01:58:08+07:00",
+    "last_refresh": "2026-10-04T16:30:00+00:00",
     "changes": [
-        "tech-stack.md: release automation now documents .deb (cargo-deb) + AppImage + GitHub Release aggregation; Windows x86_64-pc-windows-msvc target and cfg(unix) guards; tempfile dev-dependency; [[bin]] fm; corrected CI/CD description (ci.yml runs test/clippy/fmt only — no musl build)",
-        "product.md: S3 streaming head preview (s3_head_lines, --s3-head-lines) and theme-aware S3 colors (s3_dir_fg/s3_file_fg/s3_border_fg) from tracks s3-head-preview_20260311 + s3-tree-colors_20260311; single-level undo (Ctrl+Z); Nerd Font icons/--no-icons; Windows environment with POSIX-shell caveat; prebuilt distribution artifacts (.deb/AppImage/musl)",
-        "patterns.md: consolidated learnings from 25 archived tracks — new/merged entries for clone-before-borrow umbrella, canonical async pipeline, spawn_blocking bridging, _pub wrapper convention, config/theme field touch points, live-apply side effects, keybinding conflict audit, snapshot-based pagination, terminal config surface, S3 visual semantics, byte-offset cursor, match-guard OR gotcha, render-state test seeding, test helpers, plus provenance notes",
-        "beads: drift check skipped — bd CLI blocked by legacy Dolt workspace (bd 0.56.1) migration requirement"
+        "workflow.md: commit convention corrected to 'Phase <n> Task <m>' + git notes (conductor(<id>): was stale); coverage language updated (spec-driven floor, 94.6%L/94.8%F measured, no repo-total-as-new-core reporting); Phase Verification now spec-driven (automated acceptance evidence allowed); new Test Tiers section (Rust gates / PTY matrix / browser suite / check-terminal-workspace.sh quality runner); self-review checklist adds --all-targets and the quality runner",
+        "product.md: verified current — features 16-20 (documents/tabs, command menu, read-only Git, private recovery, installed-server LSP) already synced by terminal-workspace_20261001 Task 3",
+        "tech-stack.md: verified current — release-builds CI matrix, Test Harness section, module map already synced",
+        "product-guidelines.md: verified current — config path + safety standards already synced",
+        "tracks.md: verified current — terminal-workspace_20261001 archived 2026-10-04, no active tracks",
+        "patterns.md: consolidated at archive time — 12 patterns elevated from terminal-workspace_20261001 (PTY assertion model, process-check realpath filter, watcher opt-in, coalescing floor, diff-inclusive coverage, evidence honesty, trust layering); no additional 2+-track recurring patterns found",
+        "beads: drift check OK — 6 open beads are intentional filed follow-ups (9kk, e0y, nux, bte) + archived manual-verification artifacts (652.2.4, 652.4.4); no contradiction with conductor state"
     ],
-    "drift_source": "3 commits since last refresh (453ad6b Windows cfg guards, 10b116e .deb/AppImage packaging, bdfa206 .agents tooling); 2 tracks completed after the last product.md edit (s3-head-preview_20260311, s3-tree-colors_20260311); learnings consolidation across 25 archived tracks"
+    "drift_source": "22 commits since last refresh (2026-09-30): terminal-workspace_20261001 completed and archived (all 12 phases / 52 tasks); docs largely synced by its Task 3 documentation pass; only workflow.md drifted"
 }
