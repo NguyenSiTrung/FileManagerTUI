@@ -915,8 +915,8 @@ mod tests {
             .open(&ancestor.join("../a"), OpenDisposition::Pinned)
             .is_err());
         assert_eq!(s.active_id(), Some(id));
-        for mode in [0o444, 0o460] {
-            let q = file(&d, "readonly", b"keep");
+        for (idx, mode) in [0o444, 0o460].into_iter().enumerate() {
+            let q = file(&d, &format!("readonly{idx}"), b"keep");
             fs::set_permissions(&q, fs::Permissions::from_mode(mode)).unwrap();
             assert!(matches!(
                 s.open(&q, OpenDisposition::Pinned),
