@@ -1190,3 +1190,16 @@ verification evidence, and reusable patterns.
   line wrapped onto the same inner row the `[y/Enter]`/`[n/Esc]` hint is
   painted on — split long dialog lines explicitly and budget the box height
   instead of relying on wrap.
+
+## Phase 10, Task 5 (checkpoint) — LSP foundation
+
+- **"Cleanup asserted" needs a reaped status, not just bounded timing.**
+  `LspTransport::shutdown` already did kill+wait, but nothing recorded the
+  result — capturing `child.wait()`'s `ExitStatus` (into
+  `exit_status: Option<ExitStatus>`) makes "the child is gone and reaped"
+  a testable fact: `Some` = reaped (no zombie), `!success()` = killed not
+  clean-exited. Cheap addition, hardens AC-8.
+- **Checkpoint diffs should be all-comment residuals.** The only
+  uncoverage lines were doc comments and test comments — LCOV doesn't
+  instrument comments, so a clean checkpoint diff should show 100%
+  executable coverage.

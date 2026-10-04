@@ -962,11 +962,21 @@ exist. Add a module's declarations in the task that introduces it. Avoid broad
     tests. Full suite 1438 green; diff coverage 98.9% — residuals are
     defensive catch-alls, test internals, and `main()` wiring.)
 
-- [ ] Task 5: Automated checkpoint for LSP foundation
+- [x] Task 5: Automated checkpoint for LSP foundation
 
   **Requirements:** AC-8, AC-11, AC-12.
-  - [ ] Run full gates, fake-server fault suite, position encodings, and process
+  - [x] Run full gates, fake-server fault suite, position encodings, and process
     cleanup assertions. No optional executable is needed for the default suite.
+    (1439 tests green; clippy `-D warnings`, `fmt --check`, release build all
+    clean. Fault suite: `fake_unsupported_method`, `fake_delayed_response`,
+    `fake_crash_marks_dead`, `fake_malformed_output`, `fake_oversized_reply`,
+    `fake_ignored_exit`, `fake_apply_edit_unsupported`, restart-budget
+    exhaustion. Encodings: `lsp::positions` 8 tests + negotiated-encoding
+    handshake tests. Cleanup: `shutdown()` now captures the reaped
+    `ExitStatus` and `transport_shutdown_reaps_the_child_and_records_status`
+    asserts it — a real cleanup assertion, not just bounded timing. Every
+    fake is the bundled `scripts/fake-lsp-server.py` or a tempdir script;
+    no installed server is required. Diff coverage 100% executable.)
 
 ## Phase 11: Language Features and Diagnostics
 

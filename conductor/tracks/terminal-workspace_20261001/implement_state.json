@@ -1,9 +1,9 @@
 {
-  "current_phase": "LSP Positions, Transport, Client, and Trust",
-  "current_phase_index": 9,
-  "current_task_index": 5,
+  "current_phase": "Language Features and Diagnostics",
+  "current_phase_index": 10,
+  "current_task_index": 1,
   "active_tasks": [
-    "phase10_task5"
+    "phase11_task1"
   ],
   "completed_phases": [
     "Collision-Safe Operations and Safe Saves",
@@ -14,7 +14,8 @@
     "Background Work, Search, and Mounted Storage",
     "Sessions and Private Recovery",
     "Read-Only Git State",
-    "Embedded-Terminal Compatibility"
+    "Embedded-Terminal Compatibility",
+    "LSP Positions, Transport, Client, and Trust"
   ],
   "status": "in_progress",
   "verification_policy": "automated_only",
@@ -31,5 +32,5 @@
       "note": "Phases 1-8 closed; Phase 9 Task 1 approved with a six-item fix round pending (its worker was cancelled mid-flight and the tree was restored to the verified revision 4cd0559f)."
     }
   ],
-  "last_updated": "2026-10-04T16:20:00Z"
+  "last_updated": "2026-10-04T16:35:00Z"
 }

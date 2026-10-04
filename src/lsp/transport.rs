@@ -225,6 +225,9 @@ pub struct LspTransport {
     writer: Option<JoinHandle<()>>,
     reader: Option<JoinHandle<()>>,
     stderr: Option<JoinHandle<()>>,
+    /// The child's final status once reaped — proof of cleanup, not just
+    /// of bounded shutdown. `None` while the child is (or was) running.
+    exit_status: Option<std::process::ExitStatus>,
 }
 
 impl LspTransport {
@@ -338,6 +341,7 @@ impl LspTransport {
             writer: Some(writer),
             reader: Some(reader),
             stderr: Some(stderr),
+            exit_status: None,
         })
     }
 
@@ -377,13 +381,22 @@ impl LspTransport {
     pub fn shutdown(&mut self) {
         drop(self.out_tx.take());
         let _ = self.child.kill();
-        let _ = self.child.wait();
+        if let Ok(status) = self.child.wait() {
+            self.exit_status = Some(status);
+        }
         for handle in [self.writer.take(), self.reader.take(), self.stderr.take()]
             .into_iter()
             .flatten()
         {
             let _ = handle.join();
         }
+    }
+
+    /// The child's exit status after `shutdown` — `Some` proves the child
+    /// was reaped (no zombie), `None` means never reaped. Checkpoint tests
+    /// assert cleanup through this, not just bounded teardown.
+    pub fn exit_status(&self) -> Option<std::process::ExitStatus> {
+        self.exit_status
     }
 }
 
@@ -637,5 +650,23 @@ mod tests {
         assert!(LspTransport::spawn(&argv, dir.path()).is_err());
         let empty: Vec<String> = vec![];
         assert!(LspTransport::spawn(&empty, dir.path()).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn transport_shutdown_reaps_the_child_and_records_status() {
+        // Process cleanup is asserted, not just bounded: after shutdown the
+        // child is reaped (exit status recorded — no zombie), and a killed
+        // child reports a non-success (signaled) status.
+        let dir = tempfile::tempdir().unwrap();
+        let argv = script_runner(&dir, "stays", "#!/bin/sh\nexec cat\n");
+        let mut transport = LspTransport::spawn(&argv, dir.path()).unwrap();
+        assert!(transport.exit_status().is_none());
+        transport.shutdown();
+        let status = transport.exit_status().expect("child must be reaped");
+        assert!(!status.success(), "killed child must not report success");
+        // Idempotent: a second shutdown re-records nothing and cannot hang.
+        transport.shutdown();
+        assert!(transport.exit_status().is_some());
     }
 }
