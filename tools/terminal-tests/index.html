@@ -21,8 +21,10 @@
     term.loadAddon(fit);
     term.open(document.getElementById('term'));
     fit.fit();
+    addEventListener('resize', () => fit.fit());
 
     const ws = new WebSocket(`ws://${location.host}/pty`);
+    window._ws = ws;
     ws.onmessage = (ev) => {
       const msg = JSON.parse(ev.data);
       if (msg.type === 'output') term.write(msg.data);

@@ -1323,3 +1323,40 @@ verification evidence, and reusable patterns.
 - **PTY runner stdlib-only**: `pty.fork` + `TIOCSWINSZ` + `select` drain +
   `waitpid(WNOHANG)` reap with SIGKILL fallback; smoke covers launch →
   chrome text → 'q' → WIFEXITED(0) → `kill(pid,0)` raises.
+
+## Phase 12 Task 2 — Acceptance matrix PTY automation (2026-10-04)
+
+- **Ratatui diff-rendering is THE failure model for PTY asserts**: ratatui
+  emits only changed cells, and styled spans emit separately with ANSI codes
+  between them. A needle like `a.py!` or `N results` is never contiguous in
+  the raw byte stream — and text once rendered is never re-emitted unless
+  its cells change. Two consequences:
+  1. Match needles against ANSI-stripped text (`_ANSI_RE.sub`), not raw
+     bytes; `screen_text()` for every boundary-crossing assert.
+  2. Needles must be *freshly-emitting* content — buffer text, a new tab
+     title, or a changed-cell marker — never static chrome that emitted
+     before the read started. `read_until` accumulates only bytes written
+     after it was called.
+- **Overlapping frames garble accumulated text**: multi-frame tail slices
+  show mangled blends (`a 2 rsult`, `Typ to search...`) because later
+  partial draws overwrite earlier cells in the byte stream. Trust single
+  atomic spans (`▸ {name}` candidate row, `! [pin]` marker, `Fuzzy
+  Finder` title) over sentences.
+- **QuickOpen signals**: dialog title is `Fuzzy Finder` (footer 'Quick
+  Open:' paragraph renders garbled/late); the `▸ {name}` candidate row is
+  the reliable results-present marker — the `{count} result` status row
+  garbles and the async index warm-up can leave Enter on an empty set.
+  A startup race can swallow the first `Alt+G o`; retry once.
+- **`watcher.enabled` defaults false**: `watcher_enabled()` is
+  `unwrap_or(false)` — `--no-watcher` is belt-and-braces. Use polling mode
+  (`mode = "polling"`, `poll_interval_ms = 500`) for deterministic `!
+  [pin]` markers; event/inotify timing is flaky in short-lived fixtures.
+- **Recovery snapshot poll**: `snapshot_dirty_documents` fires per-event on
+  a 2s pass — an early pass can write a partial buffer mid-burst. Before
+  SIGKILL, poll the record file until `text` contains the whole edit.
+- **`E:1` needs 120 cols**: the status-bar diagnostics segment truncates at
+  80 cols — size the PTY wide rather than fighting the layout.
+- **Document label grammar**: `{name}{*}{!}{[RO]}{ [pin]|[preview]}` —
+  external-change marker is `!` before ` [pin]`, so the emitted cells read
+  `! [pin]` after strip.
+- **Suite status**: 13/13 PTY scenarios + 7/7 Playwright tests pass.

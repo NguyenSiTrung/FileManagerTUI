@@ -1213,7 +1213,7 @@ exist. Add a module's declarations in the task that introduces it. Avoid broad
     tests green via `npm test`. Requires `target/release/fm` —
     BLOCKED-with-code-2 when absent rather than a silent skip.)
 
-- [ ] Task 2: Automate the complete acceptance and failure matrix
+- [x] Task 2: Automate the complete acceptance and failure matrix
 
   **Files:** modify `scripts/test-terminal-workspace.py`,
   `tools/terminal-tests/workspace.spec.mjs`, `scripts/fake-lsp-server.py`;
@@ -1221,20 +1221,39 @@ exist. Add a module's declarations in the task that introduces it. Avoid broad
   **Requirements:** AC-1 through AC-11.
   **Produces:** automated multi-document/tree/shell/paste/save/restart/Git/LSP
   scenarios, meaningful terminal screen assertions, and exact file-byte checks.
-  - [ ] Run the 80x24 workflow, resize to 120x40/60x20, and verify YAML bytes,
+  - [x] Run the 80x24 workflow, resize to 120x40/60x20, and verify YAML bytes,
     retained dirty document, shell output, tabs, diagnostics, and Git markers.
     ```javascript
     expect(await readFixtureFile('config.yaml'))
       .toBe('training:\n  lr: 0.001\n');
     ```
-  - [ ] Cover browser-reserved shortcut exclusions, browser-copy fallback,
+    (`workflow` scenario: a.py edit + Quick-Open switch, terminal `echo
+    shell-ok`, bracketed YAML paste, Ctrl+S → `readFixtureFile` byte assert,
+    dirty-quit cancel via decision dialog, retained buffer on re-open.
+    `resize` scenario: 80x24 → 120x40 → 60x20 chrome re-verified. Diagnostics
+    via `fake_lsp_diagnostics` at 120 cols `E:1`; Git via `git_markers`
+    zeta-branch.)
+  - [x] Cover browser-reserved shortcut exclusions, browser-copy fallback,
     no mouse/icons/watcher/terminal, missing executables, malformed/slow LSP,
     external saves, crashes, and corrupt/private recovery.
-  - [ ] Add automated TERM variants and nested tmux transport where configured.
+    (Browser spec covers shortcut exclusions + copy fallback; PTY scenarios
+    `feature_flags_off`, `missing_lsp_executable`, `fake_lsp_diagnostics`,
+    `external_save` (polling watcher → `! [pin]` marker),
+    `crash_then_recovery_prompt` (SIGKILL → prompt → decline & restore),
+    `corrupt_recovery_is_ignored` (bad record refused, disk bytes opened).)
+  - [x] Add automated TERM variants and nested tmux transport where configured.
     Record untested live SSH/Jupyter/Kubeflow deployment boundaries explicitly;
     controlled transport evidence is not a production-deployment claim.
-  - [ ] Enforce timeouts and process cleanup. A missing mandatory harness is a
+    (`term_variants`: xterm-256color/screen-256color/tmux-256color/linux
+    chrome; `nested_tmux`: fm inside tmux session, keys+exit through transport.
+    Live SSH/Jupyter/Kubeflow remain untested deployment boundaries —
+    controlled PTY/tmux evidence is not a production-deployment claim.)
+  - [x] Enforce timeouts and process cleanup. A missing mandatory harness is a
     blocked check, not a silent skip or a request for manual verification.
+    (Every `read_until` is deadline-bounded; `reap_or_kill`/`quit_cleanly`
+    assert exit 0 and reap children; missing `target/release/fm`, node-pty or
+    Playwright block with nonzero exit — `13/13 PTY scenarios + 7/7 browser
+    tests pass`.)
 
 - [ ] Task 3: Document configuration and automate release compatibility checks
 

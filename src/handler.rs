@@ -59,7 +59,10 @@ pub fn handle_paste_event(app: &mut App, input: &str) {
                 editor.update_find_matches();
                 return;
             }
-            let text = input.replace("\r\n", "\n");
+            // Bracketed-paste payloads carry whatever line endings the sender
+            // used: CRLF, LF, or (xterm.js `term.paste`, hardware terminals)
+            // bare CR.
+            let text = input.replace("\r\n", "\n").replace('\r', "\n");
             let current_bytes: usize =
                 editor.buffer.iter().map(String::len).sum::<usize>() + editor.buffer.len() - 1;
             let selected = editor.selected_text();
@@ -5464,6 +5467,34 @@ keys = ["F9"]
                 .buffer
                 .join("\n"),
             ""
+        );
+    }
+
+    #[test]
+    fn bracketed_paste_cr_line_endings_normalize_to_lf() {
+        // Web terminals (xterm.js `term.paste`) and some hardware terminals
+        // deliver CR-only line endings inside the bracketed-paste payload.
+        // They must land as real line breaks, never as literal 0x0d bytes in
+        // the buffer or on disk.
+        let (_dir, mut app) = setup_app();
+        install_editor(
+            &mut app,
+            crate::editor::EditorState::new("", "config.yaml".into()),
+        );
+        app.workspace.focus.overlay = AppMode::Normal;
+        app.workspace.focus.panel = FocusedPanel::Editor;
+
+        handle_paste_event(&mut app, "training:\r  lr: 0.001\r");
+
+        assert_eq!(
+            app.workspace
+                .documents
+                .active()
+                .map(|d| &d.editor)
+                .unwrap()
+                .buffer
+                .join("\n"),
+            "training:\n  lr: 0.001\n"
         );
     }
 

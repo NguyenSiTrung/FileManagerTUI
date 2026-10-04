@@ -685,7 +685,7 @@ impl EditorState {
         let start = TextPosition { line: sl, byte: sc };
         let end = TextPosition { line: el, byte: ec };
         let removed = self.selected_text();
-        let inserted = input.replace("\r\n", "\n");
+        let inserted = input.replace("\r\n", "\n").replace('\r', "\n");
         let after_cursor = self.replace_text_range(start, end, &inserted);
         self.selection = None;
         self.cursor_line = after_cursor.line;
