@@ -2446,4 +2446,197 @@ mod tests {
 
         manager.shutdown_all();
     }
+
+    /// Phase 11 Task 4 — capstone: versioned diagnostics pushed by a real
+    /// fake server across multiple documents, then lifecycle cleanup
+    /// (didClose in the transcript, Clear on server death).
+    #[test]
+    fn diagnostics_multi_doc_publish_and_cleanup_against_fake_server() {
+        use std::time::Instant;
+        let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("scripts")
+            .join("fake-lsp-server.py");
+        let dir = tempfile::tempdir().unwrap();
+        let transcript = dir.path().join("transcript.json");
+        // The fake server pushes one versioned publishDiagnostics per
+        // didOpen, echoing the opened document's version.
+        let opts = serde_json::json!({
+            "diagnostics": {
+                "version": "open",
+                "items": [{
+                    "line": 0, "character": 0, "end_character": 3,
+                    "severity": 1, "source": "fake", "message": "server boom",
+                }],
+            },
+        });
+        let mut manager = LspManager::new();
+        let (tx, mut rx) = crate::event::event_channel(crate::event::TransportLimits::default());
+        let resolved = ResolvedServer {
+            spec: config::ServerSpec {
+                language: "rust".to_string(),
+                argv: vec![
+                    script.to_string_lossy().into_owned(),
+                    "sync".to_string(),
+                    transcript.to_string_lossy().into_owned(),
+                    opts.to_string(),
+                ],
+                root_markers: vec![],
+                source: ConfigSource::Global,
+            },
+            root: dir.path().to_path_buf(),
+            executable: None,
+        };
+        manager.spawn_session(resolved, &tx);
+
+        // Ready, then two documents sync through the real transport — each
+        // didOpen triggers a server push carrying the opened version.
+        let deadline = Instant::now() + Duration::from_secs(15);
+        let mut is_ready = false;
+        while !is_ready && Instant::now() <= deadline {
+            match rx.try_recv() {
+                Ok(crate::event::Event::Lsp {
+                    language,
+                    generation,
+                    event,
+                }) => {
+                    is_ready = matches!(&event, ClientEvent::Ready { .. });
+                    manager.handle_event(&language, generation, event);
+                }
+                _ => std::thread::sleep(Duration::from_millis(25)),
+            }
+        }
+        assert!(is_ready);
+
+        let path_a = dir.path().join("a.rs");
+        let path_b = dir.path().join("b.rs");
+        std::fs::write(&path_a, "fn a() {}\n").unwrap();
+        std::fs::write(&path_b, "fn b() {}\n").unwrap();
+        use crate::workspace::documents::{DocumentStore, OpenDisposition};
+        let mut store = DocumentStore::new();
+        let a = store.open(&path_a, OpenDisposition::Pinned).unwrap();
+        store.open(&path_b, OpenDisposition::Pinned).unwrap();
+        drive(&mut manager, &LspConfig::default(), &store);
+
+        // Pump until both publishes have flowed through handle_event →
+        // diagnostics queue → store.
+        fn drain_queue(
+            diagnostics: &mut crate::diagnostics::Diagnostics,
+            manager: &mut LspManager,
+        ) {
+            for ev in manager.take_diagnostics() {
+                match ev {
+                    crate::diagnostics::DiagnosticEvent::Publish(p) => {
+                        let tracked = manager.synced_version(&p.language, &p.uri);
+                        diagnostics.apply(p, tracked);
+                    }
+                    crate::diagnostics::DiagnosticEvent::Clear { language } => {
+                        diagnostics.clear_language(&language);
+                    }
+                }
+            }
+        }
+        let mut diagnostics = crate::diagnostics::Diagnostics::default();
+        let mut published = 0;
+        let deadline = Instant::now() + Duration::from_secs(15);
+        while published < 2 && Instant::now() <= deadline {
+            match rx.try_recv() {
+                Ok(crate::event::Event::Lsp {
+                    language,
+                    generation,
+                    event,
+                }) => {
+                    let hit = matches!(&event, ClientEvent::Notification {
+                        method, ..
+                    } if method.as_str() == "textDocument/publishDiagnostics");
+                    manager.handle_event(&language, generation, event);
+                    drain_queue(&mut diagnostics, &mut manager);
+                    published += hit as usize;
+                }
+                _ => std::thread::sleep(Duration::from_millis(20)),
+            }
+        }
+        assert_eq!(published, 2, "both opened documents were diagnosed");
+
+        // Per-server versioning landed: the version-1 pushes applied.
+        let uri_a = features::uri_for_path(&std::fs::canonicalize(&path_a).unwrap());
+        let uri_b = features::uri_for_path(&std::fs::canonicalize(&path_b).unwrap());
+        assert_eq!(diagnostics.for_document(&uri_a).len(), 1);
+        assert_eq!(diagnostics.for_document(&uri_b).len(), 1);
+        assert_eq!(
+            diagnostics.for_document(&uri_a)[0].severity,
+            crate::diagnostics::Severity::Error
+        );
+
+        // Closing a document emits didClose end-to-end (transcript) and its
+        // diagnostics die via the app layer's removal hook.
+        manager.close_tracked(a);
+        diagnostics.remove_document(&uri_a);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut closed_logged = false;
+        while !closed_logged && Instant::now() <= deadline {
+            std::thread::sleep(Duration::from_millis(40));
+            closed_logged = std::fs::read_to_string(&transcript)
+                .is_ok_and(|r| r.contains("textDocument/didClose"));
+        }
+        assert!(closed_logged);
+        assert!(diagnostics.for_document(&uri_a).is_empty());
+        assert_eq!(diagnostics.for_document(&uri_b).len(), 1);
+
+        // Server death queues a Clear scoped to that language only.
+        assert!(manager.notify("rust", "exit", serde_json::json!({})));
+        let deadline = Instant::now() + Duration::from_secs(15);
+        let mut died = false;
+        while !died && Instant::now() <= deadline {
+            match rx.try_recv() {
+                Ok(crate::event::Event::Lsp {
+                    language,
+                    generation,
+                    event,
+                }) => {
+                    died = matches!(&event, ClientEvent::ServerDied { .. });
+                    manager.handle_event(&language, generation, event);
+                    drain_queue(&mut diagnostics, &mut manager);
+                }
+                _ => std::thread::sleep(Duration::from_millis(25)),
+            }
+        }
+        assert!(died);
+        assert!(diagnostics.is_empty());
+
+        // Lifecycle cleanup is observable end-to-end: the transcript shows a
+        // clean exit finish, both didOpens, both pushes, and the didClose.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut settled = false;
+        while !settled && Instant::now() <= deadline {
+            std::thread::sleep(Duration::from_millis(40));
+            settled = std::fs::read_to_string(&transcript).is_ok_and(|r| {
+                r.contains("\"reason\": \"exit\"") || r.contains("\"reason\":\"exit\"")
+            });
+        }
+        assert!(settled);
+        let report: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&transcript).unwrap()).unwrap();
+        let methods: Vec<_> = report["log"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| e["method"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            methods
+                .iter()
+                .filter(|m| **m == "textDocument/didOpen")
+                .count(),
+            2
+        );
+        assert_eq!(
+            methods
+                .iter()
+                .filter(|m| **m == "textDocument/publishDiagnostics")
+                .count(),
+            2
+        );
+        assert!(methods.contains(&"textDocument/didClose"));
+        manager.shutdown_all();
+    }
 }

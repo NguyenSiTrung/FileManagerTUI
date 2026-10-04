@@ -1290,3 +1290,20 @@ verification evidence, and reusable patterns.
 - **`CommandMenu.selected` indexes `filtered()`, not `rows`**: `rows` is only the rendered hit-target subset. Regression fix: after `key(End)`, position `RecoveryDisable` via `filtered().iter().position(...)` — new diagnostics commands appended to REGISTRY shifted the last row.
 - **Per-severity render coverage**: one `apply` REPLACES a `(language,uri)` entry — republish single-item publishes (Error→Warning→Information→Hint) and assert gutter `fg`+`modifier` per severity; Hint must assert `Modifier::UNDERLINED` since its fg equals plain gutter color.
 - **Gates**: 27 `cargo test diagnostics` green; suite 1522 green; both clippy gates, release build, fmt clean. Diff coverage 776/777 = 99.9% — sole residual `main.rs:1530` (`drain_lsp_diagnostics` inside systematically-uncovered `run()`; same accepted class as Tasks 1–2).
+
+## Phase 11 Task 4 — Checkpoint: fake-server diagnostics e2e (2026-10-04)
+
+- **Capstone pattern**: fake server `sync` mode accepts `"diagnostics"` opt —
+  `{"version": "open"|int|null, "items":[{line,character,end_line,end_character,severity,source,message}]}`
+  pushes one `publishDiagnostics` per didOpen. `"open"` echoes the didOpen
+  version so `Diagnostics::apply` sees a matching baseline — a real-transport
+  proof of the version policy, not just the injected-event tests.
+- **Shared drain helper for dual pump loops**: a post-death loop can never
+  observe `Publish` again — repeating the match leaves its arm uncovered.
+  `fn drain_queue(&mut Diagnostics, &mut LspManager)` inside the test keeps
+  each arm executing in the loop that can produce it (Publish before death,
+  Clear after).
+- **Clean exit proof**: `notify("rust","exit",{})` → fake server `exit`
+  handler → `flush("exit")` → pump `ServerDied` → `Clear{language}`.
+  Transcript `reason: "exit"` distinguishes clean shutdown from EOF/crash.
+- Phase 11 closed: epic `cen.11`, tasks 11.1–11.4.

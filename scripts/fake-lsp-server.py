@@ -254,6 +254,57 @@ def run_sync(r_in, w_out, transcript_path):
         uri = td.get("uri")
         if method == "textDocument/didOpen":
             docs[uri] = td.get("text", "")
+            # Optional push: "diagnostics": {"version": "open"|int|null,
+            #   "items": [{"line","character","end_line","end_character",
+            #   "severity","source","message"}]} — emits one
+            # publishDiagnostics per opened document.
+            dopt = opts.get("diagnostics")
+            if dopt:
+                dversion = (
+                    td.get("version")
+                    if dopt.get("version") == "open"
+                    else dopt.get("version")
+                )
+                items = [
+                    {
+                        "range": {
+                            "start": {
+                                "line": i.get("line", 0),
+                                "character": i.get("character", 0),
+                            },
+                            "end": {
+                                "line": i.get("end_line", i.get("line", 0)),
+                                "character": i.get(
+                                    "end_character", i.get("character", 0) + 1
+                                ),
+                            },
+                        },
+                        "severity": i.get("severity", 1),
+                        "source": i.get("source", "fake"),
+                        "message": i.get("message", "diag"),
+                    }
+                    for i in dopt.get("items", [])
+                ]
+                write_message(
+                    w_out,
+                    {
+                        "jsonrpc": "2.0",
+                        "method": "textDocument/publishDiagnostics",
+                        "params": {
+                            "uri": uri,
+                            "version": dversion,
+                            "diagnostics": items,
+                        },
+                    },
+                )
+                log.append(
+                    {
+                        "method": "textDocument/publishDiagnostics",
+                        "uri": uri,
+                        "version": dversion,
+                        "pushed": True,
+                    }
+                )
         elif method == "textDocument/didChange":
             for ch in params.get("contentChanges", []):
                 docs[uri] = apply_change(docs.get(uri, ""), ch)

@@ -1136,11 +1136,32 @@ exist. Add a module's declarations in the task that introduces it. Avoid broad
     `drain_lsp_diagnostics` in the run loop, and URI removal hooks on
     close/discard/rename/save-as/undo-rename paths.
 
-- [ ] Task 4: Automated checkpoint for language features
+- [x] Task 4: Automated checkpoint for language features
 
   **Requirements:** AC-1, AC-5, AC-8, AC-11, AC-12.
-  - [ ] Run full gates and end-to-end fake-server workflows with multiple documents,
+  - [x] Run full gates and end-to-end fake-server workflows with multiple documents,
     unsupported capabilities, startup failures, and all lifecycle cleanup.
+    (Full suite 1523 green; `cargo clippy -- -D warnings` and
+    `--all-targets -- -D warnings` clean; `cargo fmt --check` clean;
+    release build ok; diff coverage 139/139 = 100%. Capstone
+    `diagnostics_multi_doc_publish_and_cleanup_against_fake_server` drives
+    the real stdio transport: two documents sync via `didOpen`, the fake
+    server pushes one versioned `publishDiagnostics` per document
+    (echoing the open version), both apply through
+    `handle_event` → `take_diagnostics` → `Diagnostics::apply`;
+    `close_tracked` emits a real `didClose` (transcript-verified) and the
+    URI removal hook clears that document's rows while the sibling's
+    survive; `exit` → `ServerDied` → `Clear{language}` empties the store
+    scoped to that server only. Multi-document sync
+    (`document_sync_transcript_matches_active_documents_end_to_end`),
+    unsupported capability replies
+    (`fake_unsupported_method_returns_error_result`,
+    `fake_apply_edit_gets_explicit_unsupported_reply`), startup failure
+    surfaces (`missing_executable_is_status_not_blocker`,
+    `lsp_disabled_config_is_a_silent_noop`,
+    `stale_generation_events_are_dropped`, transport crash/malformed/
+    oversized/noexit modes), and trust/regating flows were already
+    covered by Phases 10–11 tests and all remain green.)
 
 ## Phase 12: Automated Terminal/Browser Acceptance and Handoff
 

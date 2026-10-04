@@ -1,9 +1,9 @@
 {
-  "current_phase": "Language Features and Diagnostics",
-  "current_phase_index": 10,
-  "current_task_index": 4,
+  "current_phase": "Automated Terminal/Browser Acceptance and Handoff",
+  "current_phase_index": 11,
+  "current_task_index": 1,
   "active_tasks": [
-    "phase11_task4"
+    "phase12_task1"
   ],
   "completed_phases": [
     "Collision-Safe Operations and Safe Saves",
@@ -15,7 +15,8 @@
     "Sessions and Private Recovery",
     "Read-Only Git State",
     "Embedded-Terminal Compatibility",
-    "LSP Positions, Transport, Client, and Trust"
+    "LSP Positions, Transport, Client, and Trust",
+    "Language Features and Diagnostics"
   ],
   "status": "in_progress",
   "verification_policy": "automated_only",
@@ -32,5 +33,5 @@
       "note": "Phases 1-8 closed; Phase 9 Task 1 approved with a six-item fix round pending (its worker was cancelled mid-flight and the tree was restored to the verified revision 4cd0559f)."
     }
   ],
-  "last_updated": "2026-10-04T16:15:00Z"
+  "last_updated": "2026-10-04T16:30:00Z"
 }
