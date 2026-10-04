@@ -1255,7 +1255,7 @@ exist. Add a module's declarations in the task that introduces it. Avoid broad
     Playwright block with nonzero exit — `13/13 PTY scenarios + 7/7 browser
     tests pass`.)
 
-- [ ] Task 3: Document configuration and automate release compatibility checks
+- [x] Task 3: Document configuration and automate release compatibility checks
 
   **Files:** modify `README.md`, `PLAN.md`, `conductor/product.md`,
   `conductor/tech-stack.md`, `conductor/product-guidelines.md`;
@@ -1264,14 +1264,29 @@ exist. Add a module's declarations in the task that introduces it. Avoid broad
   **Requirements:** FR-5 through FR-11, AC-12.
   **Produces:** matching docs, server argv/trust examples, safe-save limits,
   recovery policy, keymap profiles, browser-test commands, coverage/build evidence.
-  - [ ] Document explicit installed-server examples for Python/YAML/Rust while
+  - [x] Document explicit installed-server examples for Python/YAML/Rust while
     keeping tests on fake peers. Avoid implying every server supports every feature.
-  - [ ] Add automated Linux/static-musl and available macOS/Windows build checks;
+    (README gains Git-recovery-LSP sections with `pylsp`/`pyright-langserver`,
+    `yaml-language-server --stdio`, `rust-analyzer` argv examples, the
+    `(root, argv)` trust model, and the "tests run fake peers only" note;
+    `[lsp]`/`[git]`/`[recovery]` config blocks documented inline.)
+  - [x] Add automated Linux/static-musl and available macOS/Windows build checks;
     keep existing tag/manual CI triggers unchanged.
-  - [ ] Measure binary size and new-core coverage; document unsupported platform
+    (`release-builds` matrix job in ci.yml: linux-musl + macos + windows
+    `--release` build + size report, same tags/dispatch triggers; local
+    `rustup target add x86_64-unknown-linux-musl` + `musl-tools` verified
+    a real static build: 4,158,072-byte statically-linked ELF.)
+  - [x] Measure binary size and new-core coverage; document unsupported platform
     behavior and blockers rather than weakening safety to pass a build.
-  - [ ] The shell quality runner executes Rust, PTY, browser, coverage, and
+    (gnu 4,034,400 B ≈ 3.85 MiB, musl 4,158,072 B ≈ 3.97 MiB — both under the
+    10 MiB NFR; llvm-cov totals 94.6% lines / 94.8% functions; coverage +
+    musl are optional evidence in the runner, loud SKIP when tooling absent.)
+  - [x] The shell quality runner executes Rust, PTY, browser, coverage, and
     configured build gates with nonzero exit on mandatory failures.
+    (`scripts/check-terminal-workspace.sh`: fmt, both clippys, tests, release
+    build, size check, PTY matrix, npm browser suite (auto `npm ci`),
+    llvm-cov summary, musl build when installed; summary exits 1 on any
+    mandatory FAIL/BLOCK — full run: all mandatory gates passed.)
 
 - [ ] Task 4: Final automated acceptance checkpoint and tracking handoff
 

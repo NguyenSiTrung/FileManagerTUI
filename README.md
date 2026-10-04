@@ -153,8 +153,9 @@ The rendered button and menu title reflect current bindings; the button remains
 clickable when keyboard entry is unbound. Menu dismissal uses its own configured
 Menu-context bindings plus native Esc. Help (`?` in tree/preview) lists the
 originating context's active bindings, unbound commands and disabled reasons.
-Unavailable adaptive-layout/recovery commands are placeholders, not features;
-Git integration, LSP, recovery and adaptive layout are not implemented.
+Git indicators, private recovery and installed-server LSP are implemented and
+described below. Commands remain context-gated: an unavailable action reports
+its reason rather than running in the wrong context.
 
 Both profiles provide **Alt+G, then a suffix** in ordinary tree/preview/editor/shell
 contexts:
@@ -442,6 +443,44 @@ debounce_ms = 300
 mode = "event"           # "event" (native notifications) or "polling" (mounted storage)
 poll_interval_ms = 2000  # polling only; clamped to 250..=60000
 
+[git]
+enabled = true           # read-only branch/status indicators; --no-git overrides
+
+[recovery]
+enabled = true           # private snapshots of dirty documents
+# state_dir = "~/.local/state/fm-tui/recovery"  # defaults to the platform state dir
+max_records = 32         # retained snapshots per workspace, clamped 1..=1024
+max_age_secs = 604800    # 7 days; clamped 3600..=~100 years
+min_interval_ms = 2000   # throttle between snapshot writes
+
+[lsp]
+enabled = true           # subsystem gate; servers still need a resolvable argv
+
+# Installed-server examples — executable must exist on PATH (or absolute path).
+[lsp.servers.python]
+argv = ["pylsp"]                    # pip install python-lsp-server
+# argv = ["pyright-langserver", "--stdio"]  # npm i -g pyright
+root_markers = ["pyproject.toml", "setup.py", ".git"]
+
+[lsp.servers.yaml]
+argv = ["yaml-language-server", "--stdio"]  # npm i -g yaml-language-server
+root_markers = [".git"]
+
+[lsp.servers.rust]
+argv = ["rust-analyzer"]            # rustup component add rust-analyzer
+root_markers = ["Cargo.toml"]
+
+# Map an extension to a configured language.
+[lsp.languages]
+templ = "html"
+
+# Durable execution grant — global config only. Project-local
+# [[lsp.trust]] entries are ignored on purpose: a checked-out repo must
+# not be able to grant its own argv execution.
+[[lsp.trust]]
+root = "~/src/myproject"
+argv = ["pylsp"]
+
 [terminal]
 enabled = true
 scrollback_lines = 1000  # clamped to 0..100000, live without shell restart
@@ -464,6 +503,78 @@ preview_fg = "#cdd6f4"
 dialog_bg = "#313244"
 dialog_fg = "#cdd6f4"
 ```
+
+## Git indicators (read-only)
+
+Inside a Git work tree the status bar shows the branch label, and the tree
+marks modified/untracked files and directories containing them. The backend
+is strictly read-only: the only query ever run is
+`git status --porcelain=v2 -z --branch`, always with `--no-optional-locks`
+and `GIT_OPTIONAL_LOCKS=0`, so status can never take `index.lock` or write
+to the repository. A missing or failing `git` executable degrades silently
+to no indicators. Disable with `--no-git` or `[git] enabled = false`; both
+remove every decoration and stop further queries.
+
+## Language servers (LSP)
+
+fm can talk to **installed** language servers over stdio JSON-RPC for
+diagnostics and language features (completion, hover, definition,
+references, symbols). Nothing is downloaded — a server is spawned only
+when its argv resolves to an executable.
+
+```toml
+[lsp]
+enabled = true
+
+[lsp.servers.python]
+argv = ["pylsp"]
+root_markers = ["pyproject.toml", "setup.py", ".git"]
+```
+
+See the example `config.toml` above for Python (`pylsp` /
+`pyright-langserver`), YAML (`yaml-language-server --stdio`) and Rust
+(`rust-analyzer`) setups, plus `[lsp.languages]` extension overrides.
+Not every server implements every feature; missing capabilities degrade
+to their absence, never to a crash.
+
+**Trust model.** A server argv from the *global* config (`~/.config/fm-tui/config.toml`)
+is trusted configuration. An argv found only in a **project-local** config is
+untrusted: the first matching document opens a trust prompt, and approval is
+bound to the exact `(workspace root, argv)` pair for this session only —
+nothing is persisted. Durable grants are written by you, in the global
+config, as `[[lsp.trust]] root = "…" argv = […]`; `[[lsp.trust]]` entries in
+a project-local file are ignored (a checked-out repo cannot grant its own
+execution). Session restore never carries execution trust. Headless runs
+deny untrusted argv outright instead of prompting.
+
+`lsp.status` shows the negotiated capability/encoding state; `lsp.restart`
+restarts the current document's server. A missing executable or a server
+that never completes `initialize` surfaces as a status note and otherwise
+behaves like no server. The automated test matrix exercises fake peers —
+including malformed and slow servers — over the real stdio transport; it
+never downloads or runs a real language server.
+
+## Private recovery
+
+If fm exits while a document has unsaved changes (crash, `kill -9`,
+terminal loss), the next launch offers a recovery prompt: restore the
+snapshot into a dirty buffer (`r`), discard it (`d`), or dismiss (`Esc`/`n`)
+— dismissing keeps the record. Restoring never writes the original file;
+it produces an ordinary dirty buffer you can edit or save.
+
+Snapshots are bounded and private:
+
+- **Dirty documents only**, keyed by (workspace root, path, disk revision)
+  so a record from a stale disk state can't overwrite a newer one.
+- Written to a user-private state directory (`0700` directory, `0600`
+  records, atomic rename); symlinked, foreign-owned or world-readable
+  records are refused.
+- Retention: `max_records` per workspace (default 32, clamped 1..=1024) and
+  `max_age_secs` (default 7 days, minimum 1 hour); writes are throttled by
+  `min_interval_ms` (default 2000).
+- Commands: `recovery.restore` / `recovery.discard` / `recovery.clear` /
+  `recovery.enable` / `recovery.disable` — or `[recovery] enabled = false`
+  to turn snapshots off entirely.
 
 ## Built-in Themes
 
@@ -554,15 +665,46 @@ src/
 # Run tests
 cargo test
 
-# Run with clippy
+# Run with clippy (the local gate also checks all targets)
 cargo clippy -- -D warnings
+cargo clippy --all-targets -- -D warnings
 
 # Format check
 cargo fmt --check
 
+# Release build
+cargo build --release
+
 # Run in development
 cargo run -- .
 ```
+
+### Workspace acceptance harness
+
+The terminal-workspace acceptance matrix runs against a **release** binary:
+
+```bash
+cargo build --release
+
+# PTY scenarios — 13 automated runs (workflow, resize, TERM variants,
+# nested tmux, feature flags, missing/fake LSP, external save, crash
+# recovery, corrupt records, missing git, git markers). Exits nonzero on
+# any failure or a missing harness/binary — never a silent skip.
+python3 scripts/test-terminal-workspace.py
+
+# Browser-terminal suite — xterm.js + ws fixture served locally, driven by
+# Playwright: paste paths, browser-reserved shortcut exclusions, copy
+# fallback, resize, full workflow. `npm ci` first if node_modules is absent.
+npm --prefix tools/terminal-tests ci
+npm --prefix tools/terminal-tests test
+
+# All of the above plus Rust gates in one place, nonzero exit on any
+# mandatory failure:
+scripts/check-terminal-workspace.sh
+```
+
+Live SSH/Jupyter/Kubeflow deployment remains a manual boundary: controlled
+PTY/tmux transport evidence is not a production-deployment claim.
 
 ## License
 

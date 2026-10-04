@@ -109,7 +109,19 @@ async function readFixtureFile(fixtureRoot, name) {
 function fmProcesses() {
   try {
     const out = execFileSync('pgrep', ['-f', FM_BIN], { encoding: 'utf8' }).trim();
-    return out ? out.split('\n') : [];
+    const pids = out ? out.split('\n') : [];
+    // `pgrep -f` matches ANY process whose cmdline mentions the path —
+    // strace wrappers, `bash -c` scripts embedding the path, an editor's
+    // open command. Filter to processes whose executable actually IS the
+    // fm binary; zombies have no /proc/<pid>/exe link and drop out too.
+    const target = fs.realpathSync(FM_BIN);
+    return pids.filter((pid) => {
+      try {
+        return fs.realpathSync(`/proc/${pid}/exe`) === target;
+      } catch {
+        return false; // dead, reaped, or not our binary
+      }
+    });
   } catch {
     return [];
   }

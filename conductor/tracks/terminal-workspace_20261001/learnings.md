@@ -1360,3 +1360,24 @@ verification evidence, and reusable patterns.
   external-change marker is `!` before ` [pin]`, so the emitted cells read
   `! [pin]` after strip.
 - **Suite status**: 13/13 PTY scenarios + 7/7 Playwright tests pass.
+
+## Phase 12 Task 3 — Docs, quality runner, release build checks (2026-10-04)
+
+- **`pgrep -f <path>` is not a process check**: it matches ANY cmdline
+  containing the path — a leaked `strace fm` wrapper, a `bash -c` heredoc
+  embedding the path, even the pgrep's own shell. The robust check is
+  `realpath(/proc/<pid>/exe) == realpath(bin)` — zombies have no exe link
+  and drop out for free. Fixed `fmProcesses()` accordingly.
+- **Session debris poisons process asserts**: a debugging strace+f m left
+  running from an earlier sub-task produced 3 phantom "fm" processes in
+  the browser teardown test. Always reap debugging processes; when a
+  cleanup assert fails, `pgrep -af` FIRST to see what's really matching.
+- **musl local build**: `rustup target add x86_64-unknown-linux-musl`
+  alone fails in cc-rs crates (`x86_64-linux-musl-gcc` missing);
+  `apt-get install musl-tools` supplies it. Result: 4,158,072 B
+  statically-linked binary vs 4,034,400 B gnu — both < 10 MiB NFR.
+- **README drift**: the doc still said "Git/LSP/recovery not implemented"
+  two phases after they shipped — stale-claim audit belongs in every docs
+  task, not just new-section writing.
+- **Gate evidence**: llvm-cov 94.6% lines / 94.8% functions; quality
+  runner reports SKIP (not silent pass) for absent optional tooling.

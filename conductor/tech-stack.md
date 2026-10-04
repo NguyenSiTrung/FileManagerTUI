@@ -33,13 +33,19 @@
 - **Release profile**: `opt-level = "z"`, LTO, single codegen unit, stripped
 - **Static binary**: `x86_64-unknown-linux-musl` target for container deployment
 - **Binary size target**: < 10MB
-- **CI/CD**: GitHub Actions `ci.yml` — runs on release tags (`v*`) and manual dispatch only (no per-commit runs): `cargo test`, `cargo clippy -- -D warnings`, `cargo fmt --check`
+- **CI/CD**: GitHub Actions `ci.yml` — runs on release tags (`v*`) and manual dispatch only (no per-commit runs): `cargo test`, `cargo clippy -- -D warnings`, `cargo fmt --check`, plus a release-compatibility build matrix (Linux `x86_64-unknown-linux-musl`, macOS, Windows) that builds `--release` and reports binary size
 - **Release automation**: GitHub Actions `release.yml` on `v*` tags — 4-target cross-compile (`x86_64-unknown-linux-musl`, `x86_64-apple-darwin`, `aarch64-apple-darwin`, `x86_64-pc-windows-msvc`), plus `.deb` package (cargo-deb via `[package.metadata.deb]`) and AppImage (appimagetool), aggregated into a GitHub Release with generated notes
 - **Windows support**: `#[cfg(unix)]` / `#[cfg(not(unix))]` guards where platform-specific (permission formatting); S3 browse mode shells out to `which` + `sh -c` and therefore requires a POSIX shell with the AWS CLI
+
+## Test Harness
+- **Rust gates**: `cargo test`, `cargo clippy -- -D warnings`, `cargo clippy --all-targets -- -D warnings`, `cargo fmt --check`, `cargo build --release`; coverage evidence via `cargo llvm-cov` when installed
+- **PTY acceptance matrix**: `scripts/test-terminal-workspace.py` — stdlib-only runner (pty.fork + TIOCSWINSZ + select) driving the release binary through 13 scenarios (workflow, resize, TERM variants, nested tmux, feature flags, missing/fake LSP, external save, crash recovery, corrupt records, missing git, git markers); ANSI-stripped needle matching for ratatui's diff-rendered output; deadline-bounded reads with assert-on-cleanup
+- **Browser-terminal suite**: `tools/terminal-tests/` — node-pty + ws bridge + vendored `@xterm/xterm`, driven by Playwright (`npm --prefix tools/terminal-tests test`); covers paste paths, browser-reserved shortcut exclusions, copy fallback, resize and the full workflow; fake LSP peer `scripts/fake-lsp-server.py` exercises the stdio transport without downloading real servers
+- **Quality runner**: `scripts/check-terminal-workspace.sh` — executes all gates, binary-size check and optional coverage/musl evidence; nonzero exit on mandatory failures; a missing harness is a blocked check, not a silent skip
 
 ## Architecture
 - Single-binary monolith (no plugins, no IPC)
 - Event-driven TUI loop (crossterm poll → handler dispatch → render)
 - Lazy directory loading (on-demand tree expansion with pagination)
 - Async file operations (tokio tasks for large copy/delete, directory expansion, preview)
-- Module structure: `main.rs`, `app.rs`, `event.rs`, `handler.rs`, `ui.rs`, `tui.rs`, `error.rs`, `config.rs`, `theme.rs`, `editor.rs`, `preview_content.rs`, `components/` (tree, preview, editor, status_bar, dialog, search, search_action, help, settings, terminal), `fs/` (mod, tree, operations, watcher, clipboard), `terminal/` (mod, pty, emulator), `s3/` (mod, types, parser, backend)
+- Module structure: `main.rs`, `app.rs`, `app_jobs.rs`, `event.rs`, `handler.rs`, `ui.rs`, `tui.rs`, `error.rs`, `config.rs`, `theme.rs`, `editor.rs`, `keymap.rs`, `commands.rs`, `diagnostics.rs`, `git.rs`, `recovery.rs`, `session.rs`, `search.rs`, `text.rs`, `preview_content.rs`, `highlighting.rs`, `background.rs`, `workspace/` (mod, documents, focus, layout), `components/` (tree, preview, editor, status_bar, dialog, search, content_search, search_action, help, settings, terminal, command_menu, language_features, diagnostics, document_tabs, workspace_chrome), `fs/` (mod, tree, operations, save, watcher, clipboard), `terminal/` (mod, pty, emulator), `s3/` (mod, types, parser, backend), `lsp/` (mod, config, client, transport, positions, features)

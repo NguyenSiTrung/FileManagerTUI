@@ -852,33 +852,38 @@ cargo build --release --target x86_64-unknown-linux-musl
 
 ### 11.3. CI/CD (GitHub Actions)
 
-```yaml
-# .github/workflows/ci.yml
-name: CI
-on: [push, pull_request]
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - run: cargo test
-      - run: cargo clippy -- -D warnings
-      - run: cargo fmt --check
+`ci.yml` runs on **release tags (`v*`) and manual dispatch only** — not on
+every push. Jobs: `test` (`cargo test`), `clippy`
+(`cargo clippy -- -D warnings`), `fmt` (`cargo fmt --check`), and a
+`release-builds` matrix covering Linux `x86_64-unknown-linux-musl`, macOS
+and Windows `cargo build --release` with a binary-size report.
+`release.yml` on `v*` tags packages the four release artifacts.
 
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-unknown-linux-musl
-      - run: cargo build --release --target x86_64-unknown-linux-musl
-      - uses: actions/upload-artifact@v4
-        with:
-          name: fm-linux-amd64
-          path: target/x86_64-unknown-linux-musl/release/fm
+### 11.4. Workspace acceptance harness
+
+The terminal-workspace acceptance matrix is fully automated; no criterion
+is satisfied by a manual test.
+
+```bash
+cargo build --release                          # harness drives the release binary
+python3 scripts/test-terminal-workspace.py     # 13 PTY scenarios (AC-1..AC-11)
+npm --prefix tools/terminal-tests ci && npm --prefix tools/terminal-tests test
+scripts/check-terminal-workspace.sh            # every gate in one place
 ```
+
+- **PTY runner** (`scripts/test-terminal-workspace.py`, stdlib-only):
+  spawns `target/release/fm` on a real pseudo-terminal; asserts against
+  ANSI-stripped output (ratatui re-emits only changed cells, so needles
+  must be freshly-emitting content); every read is deadline-bounded and
+  every run asserts a clean `WIFEXITED` exit and reaped children. A
+  missing binary/harness is a blocked check, not a skip.
+- **Browser suite** (`tools/terminal-tests/`): node-pty → ws → vendored
+  `xterm.js` fixture driven by Playwright — paste paths, browser-reserved
+  shortcut exclusions, copy fallback, resize, full workflow.
+- **Fake LSP peer** (`scripts/fake-lsp-server.py`): stdio JSON-RPC server
+  used by the matrix — real servers are never downloaded.
+- Untested boundaries are recorded honestly: controlled PTY/tmux evidence
+  is not a live SSH/Jupyter/Kubeflow deployment claim.
 
 ---
 
