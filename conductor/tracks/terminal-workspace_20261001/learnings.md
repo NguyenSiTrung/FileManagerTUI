@@ -1307,3 +1307,19 @@ verification evidence, and reusable patterns.
   handler → `flush("exit")` → pump `ServerDied` → `Clear{language}`.
   Transcript `reason: "exit"` distinguishes clean shutdown from EOF/crash.
 - Phase 11 closed: epic `cen.11`, tasks 11.1–11.4.
+
+## Phase 12 Task 1 — PTY + browser-terminal fixtures (2026-10-04)
+
+- **`tools/terminal-tests` stack**: `node-pty` spawn (TIOCSWINSZ resize via
+  `pty.resize`) + `ws` bridge + vendored `@xterm/xterm` — no CDN. Server is
+  loopback-only (`listen(0,'127.0.0.1')`), prints `READY http://...` which IS
+  the `fixtureUrl` contract. Deps pinned exact; `npm ci` reproducible.
+- **Late-join replay is required**: a second page that connects after fm
+  already rendered sees an empty xterm — server keeps a 256KB bounded raw
+  buffer and replays it on WS connect. Without it every multi-test file sees
+  an empty terminal after the first test.
+- **`server.once('exit')` resolves to exit code**: `resolve(code)` with
+  code 0 is falsy — assert with `() => resolve(true)` not the raw value.
+- **PTY runner stdlib-only**: `pty.fork` + `TIOCSWINSZ` + `select` drain +
+  `waitpid(WNOHANG)` reap with SIGKILL fallback; smoke covers launch →
+  chrome text → 'q' → WIFEXITED(0) → `kill(pid,0)` raises.

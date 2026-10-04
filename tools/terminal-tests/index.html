@@ -1,0 +1,38 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>fm terminal fixture</title>
+  <link rel="stylesheet" href="/xterm.css">
+  <style>
+    html, body { margin: 0; height: 100%; background: #000; }
+    #bar { position: fixed; top: 0; left: 0; z-index: 2; }
+    #term { position: absolute; inset: 0; padding-top: 28px; }
+  </style>
+</head>
+<body>
+  <div id="bar"><button id="focus">Focus terminal</button></div>
+  <div id="term"></div>
+  <script src="/xterm.js"></script>
+  <script src="/addon-fit.js"></script>
+  <script>
+    const term = new Terminal({ cols: 80, rows: 24, fontSize: 13 });
+    const fit = new FitAddon.FitAddon();
+    term.loadAddon(fit);
+    term.open(document.getElementById('term'));
+    fit.fit();
+
+    const ws = new WebSocket(`ws://${location.host}/pty`);
+    ws.onmessage = (ev) => {
+      const msg = JSON.parse(ev.data);
+      if (msg.type === 'output') term.write(msg.data);
+      if (msg.type === 'exit') term.write(`\r\n[child exited ${msg.code}]\r\n`);
+    };
+    term.onData((data) => ws.send(JSON.stringify({ type: 'input', data })));
+    term.onResize(({ cols, rows }) => ws.send(JSON.stringify({ type: 'resize', cols, rows })));
+
+    document.getElementById('focus').addEventListener('click', () => term.focus());
+    window.term = term;  // terminalText(page) reads this buffer.
+  </script>
+</body>
+</html>

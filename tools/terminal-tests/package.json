@@ -1,0 +1,16 @@
+{
+  "name": "fm-terminal-tests",
+  "version": "1.0.0",
+  "description": "Isolated browser-terminal acceptance fixtures for fm (dev-only)",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "dependencies": {
+    "@playwright/test": "1.56.1",
+    "@xterm/addon-fit": "0.10.0",
+    "@xterm/xterm": "5.5.0",
+    "node-pty": "1.1.0",
+    "ws": "8.22.0"
+  },
+  "private": true
+}

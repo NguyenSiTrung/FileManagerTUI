@@ -1165,12 +1165,13 @@ exist. Add a module's declarations in the task that introduces it. Avoid broad
 
 ## Phase 12: Automated Terminal/Browser Acceptance and Handoff
 
-- [ ] Task 1: Build isolated automated PTY and browser-terminal fixtures
+- [x] Task 1: Build isolated automated PTY and browser-terminal fixtures
 
   **Files:** create `scripts/test-terminal-workspace.py`,
   `tools/terminal-tests/package.json`, `tools/terminal-tests/package-lock.json`,
   `tools/terminal-tests/server.mjs`, `tools/terminal-tests/index.html`,
-  `tools/terminal-tests/workspace.spec.mjs`.
+  `tools/terminal-tests/workspace.spec.mjs` (plus `playwright.config.mjs`
+  config helper).
   **Requirements:** AC-9, AC-10.
   **Produces:** bounded PTY runner and Playwright/xterm.js-style test fixture
   launching the local binary with temporary workspace/config/state directories.
@@ -1178,7 +1179,7 @@ exist. Add a module's declarations in the task that introduces it. Avoid broad
   xterm buffer and `readFixtureFile(name) -> Promise<string>` confined to the
   generated fixture root. `fixtureUrl` comes from the server's ready message;
   import `test`/`expect` from Playwright in the test module.
-  - [ ] Add a smoke test that launches/closes the binary and verifies child
+  - [x] Add a smoke test that launches/closes the binary and verifies child
     cleanup before implementing complete acceptance scenarios.
     ```javascript
     test('web profile has a usable command route', async ({ page }) => {
@@ -1188,12 +1189,29 @@ exist. Add a module's declarations in the task that introduces it. Avoid broad
         .toContain('Commands');
     });
     ```
-  - [ ] Bind test transport only to loopback with an ephemeral port, no saved
+    (Implemented verbatim plus three cleanup proofs: `'q'` quits fm →
+    `[child exited]` marker reaches the page; SIGTERM reaps the child and
+    the server exits inside a 5s bound; `pgrep -f FM_BIN` returns empty
+    after teardown. The PTY runner's own smoke proves the same on the raw
+    path: 80x24 spawn, `Commands` + `hello.txt` bytes in output, `'q'` →
+    `WIFEXITED && status==0`, `kill(pid,0)` raises.)
+  - [x] Bind test transport only to loopback with an ephemeral port, no saved
     auth, and no external service. Pin development dependencies and keep them
     out of production builds.
-  - [ ] Provide `python3 scripts/test-terminal-workspace.py` and
+    (`server.listen(0, '127.0.0.1')` — kernel-assigned ephemeral port;
+    xterm.js vendored from `node_modules/@xterm` (no CDN); WebSocket bridge
+    carries input/resize/output/exit with a 256KB bounded replay buffer so
+    reconnecting pages see the current frame. Deps pinned exact:
+    `@playwright/test` 1.56.1, `node-pty` 1.1.0, `ws` 8.22.0,
+    `@xterm/xterm` 5.5.0, `@xterm/addon-fit` 0.10.0 — all dev-only, zero
+    Cargo/production changes; `npm audit` clean.)
+  - [x] Provide `python3 scripts/test-terminal-workspace.py` and
     `npm --prefix tools/terminal-tests ci` /
     `npm --prefix tools/terminal-tests test` as deterministic entry points.
+    (PTY runner: `PASS smoke: launch, chrome, clean quit, child reaped
+    (0.7s)` → 1/1. `npm ci` from a deleted node_modules → 2/2 Playwright
+    tests green via `npm test`. Requires `target/release/fm` —
+    BLOCKED-with-code-2 when absent rather than a silent skip.)
 
 - [ ] Task 2: Automate the complete acceptance and failure matrix
 

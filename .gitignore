@@ -34,3 +34,7 @@ build/
 .beads-credential-key
 .beads/proxieddb/
 *.gate.lock*
+
+# Playwright fixture artifacts
+tools/terminal-tests/test-results/
+tools/terminal-tests/playwright-report/
