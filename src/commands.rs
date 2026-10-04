@@ -63,6 +63,11 @@ commands! {
     RecoveryEnable => ("recovery.enable", "Enable recovery", "Enable private recovery snapshots (Phase 7)"),
     LspStatus => ("lsp.status", "LSP status", "Show language-server capability/session status"),
     LspRestart => ("lsp.restart", "Restart LSP server", "Restart the current document's language server"),
+    LspCompletion => ("lsp.completion", "Completion", "Request completion items at the cursor"),
+    LspHover => ("lsp.hover", "Hover", "Request hover information at the cursor"),
+    LspDefinition => ("lsp.definition", "Go to definition", "Jump to the symbol's definition"),
+    LspReferences => ("lsp.references", "Find references", "List references to the symbol at the cursor"),
+    LspSymbols => ("lsp.symbols", "Document symbols", "List this document's symbols"),
 
 }
 
@@ -248,8 +253,16 @@ pub fn unavailable_reason(
             Some("Explorer has no resizable split")
         }
         ToggleTerminal if app.event_tx.is_none() => Some("Terminal event routing is unavailable"),
-        LspStatus | LspRestart if !app.config.lsp.enabled() => {
+        LspStatus | LspRestart | LspCompletion | LspHover | LspDefinition | LspReferences
+        | LspSymbols
+            if !app.config.lsp.enabled() =>
+        {
             Some("LSP disabled by configuration")
+        }
+        LspCompletion | LspHover | LspDefinition | LspReferences | LspSymbols
+            if app.current_lsp_language().is_none() =>
+        {
+            Some("No LSP language for the current document")
         }
         LspRestart
             if app
@@ -399,6 +412,11 @@ pub fn dispatch_command(app: &mut App, id: CommandId) -> Result<(), String> {
         CyclePreview => app.cycle_view_mode(),
         LspStatus => app.show_lsp_status(),
         LspRestart => app.restart_lsp_current()?,
+        LspCompletion => app.lsp_completion()?,
+        LspHover => app.lsp_hover()?,
+        LspDefinition => app.lsp_definition()?,
+        LspReferences => app.lsp_references()?,
+        LspSymbols => app.lsp_document_symbols()?,
         Wrap => {
             if let Some(document) = context.text_view_document(app) {
                 app.workspace
@@ -480,7 +498,7 @@ mod tests {
 
     #[test]
     fn commands_metadata_is_complete_and_unique() {
-        assert_eq!(REGISTRY.len(), 40);
+        assert_eq!(REGISTRY.len(), 45);
         let ids: std::collections::HashSet<_> = REGISTRY.iter().map(|m| m.id.as_str()).collect();
         assert_eq!(ids.len(), REGISTRY.len());
         for m in REGISTRY {
@@ -896,6 +914,29 @@ mod tests {
                 unavailable_reason(&app, &context, id),
                 Some("LSP disabled by configuration")
             );
+        }
+    }
+
+    #[test]
+    fn lsp_feature_commands_dispatch_to_app_methods() {
+        // With LSP enabled and an editor open on a mapped language, all five
+        // feature commands reach their dispatch arm — they fail inside the
+        // app method (no ready session), which means the arm executed.
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("main.rs");
+        std::fs::write(&file, "fn main() {}\n").unwrap();
+        let mut app = App::new(dir.path(), crate::config::AppConfig::default()).unwrap();
+        app.open_document_path(&file, true);
+        for id in [
+            CommandId::LspCompletion,
+            CommandId::LspHover,
+            CommandId::LspDefinition,
+            CommandId::LspReferences,
+            CommandId::LspSymbols,
+        ] {
+            let context = CommandContext::capture(&app);
+            assert!(unavailable_reason(&app, &context, id).is_none(), "{id:?}");
+            assert!(dispatch_command(&mut app, id).is_err(), "{id:?}");
         }
     }
 

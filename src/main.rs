@@ -1525,6 +1525,7 @@ async fn main() -> error::Result<()> {
             // source that just ran (typing, paste, undo, fs changes, Lsp
             // events flipping a session to Ready).
             app.sync_lsp_documents();
+            app.drain_lsp_results();
 
             // Throttled, bounded snapshot pass for dirty documents. Runs
             // outside render and outside the input handlers; the throttle keeps

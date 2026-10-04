@@ -203,6 +203,39 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent, event_tx: &crate::ev
         }
         return;
     }
+    if app.workspace.focus.overlay == AppMode::LanguageFeatures {
+        match mouse.kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                let hit = app
+                    .language_features
+                    .as_ref()
+                    .and_then(|f| f.hit(mouse.column, mouse.row));
+                if hit.is_some() {
+                    if let (Some(features), Some(index)) = (app.language_features.as_mut(), hit) {
+                        features.selected = index;
+                    }
+                    app.apply_language_selection();
+                } else if app
+                    .language_features
+                    .as_ref()
+                    .is_some_and(|f| !f.area.contains((mouse.column, mouse.row).into()))
+                {
+                    app.dismiss_language_features();
+                }
+            }
+            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
+                if let Some(features) = app.language_features.as_mut() {
+                    features.move_selection(if mouse.kind == MouseEventKind::ScrollUp {
+                        -1
+                    } else {
+                        1
+                    });
+                }
+            }
+            _ => {}
+        }
+        return;
+    }
     if app.workspace.focus.overlay == AppMode::Normal
         && app
             .command_entry_area
@@ -806,6 +839,7 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent, event_tx: &crate::event::E
 
     match &app.workspace.focus.overlay {
         AppMode::CommandMenu => handle_command_menu(app, key),
+        AppMode::LanguageFeatures => handle_language_features(app, key),
         AppMode::Normal => handle_normal_mode(app, key, event_tx),
         AppMode::Dialog(_) => handle_dialog_mode(app, key),
         AppMode::Search => handle_search_mode(app, key),
@@ -860,6 +894,29 @@ fn handle_command_menu(app: &mut App, key: KeyEvent) {
                 {
                     menu.input(&ch.to_string())
                 }
+                _ => {}
+            }
+        }
+    }
+}
+
+/// Keys while the language-feature overlay is up: navigation only — the
+/// list is read-only. Enter applies a completion or jumps to a location.
+fn handle_language_features(app: &mut App, key: KeyEvent) {
+    match key.code {
+        KeyCode::Esc => app.dismiss_language_features(),
+        KeyCode::Enter => app.apply_language_selection(),
+        _ => {
+            let Some(features) = app.language_features.as_mut() else {
+                return;
+            };
+            match key.code {
+                KeyCode::Up => features.move_selection(-1),
+                KeyCode::Down => features.move_selection(1),
+                KeyCode::PageUp => features.move_selection(-8),
+                KeyCode::PageDown => features.move_selection(8),
+                KeyCode::Home => features.move_selection(isize::MIN),
+                KeyCode::End => features.move_selection(isize::MAX),
                 _ => {}
             }
         }
@@ -8017,6 +8074,177 @@ keys = ["F9"]
         handle_mouse_event(&mut app, make_mouse_click(10, 2), &tx);
         assert_eq!(app.tree_state.selected_index, 1);
         assert_eq!(app.workspace.focus.panel, FocusedPanel::Tree);
+    }
+
+    #[test]
+    fn language_features_overlay_keys_navigate_apply_and_dismiss() {
+        use crate::components::language_features::{FeatureView, LanguageFeatures};
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("f.rs");
+        std::fs::write(&path, "x").unwrap();
+        let mut app = App::new(dir.path(), crate::config::AppConfig::default()).unwrap();
+        let tx = make_event_tx();
+        // Manually install an overlay: a small completion list.
+        let item = crate::lsp::features::CompletionEntry {
+            label: "a".into(),
+            detail: None,
+            kind: None,
+            documentation: None,
+            edit: crate::lsp::features::CompletionEdit::Insert { text: "a".into() },
+            additional_edits: vec![],
+            snippet: false,
+            has_command: false,
+            deprecated: false,
+        };
+        app.open_document_path(&path, true);
+        let doc = app.workspace.documents.active_id().unwrap();
+        app.workspace
+            .focus
+            .open_overlay(crate::app::AppMode::LanguageFeatures, Some(doc))
+            .unwrap();
+        app.language_features = Some(LanguageFeatures::new(
+            doc,
+            "file:///f".into(),
+            0,
+            FeatureView::Completion {
+                items: vec![item.clone()],
+            },
+        ));
+
+        // Arrows + page keys move selection (list len 1 → stays 0, covered).
+        for code in [
+            KeyCode::Down,
+            KeyCode::Up,
+            KeyCode::PageUp,
+            KeyCode::PageDown,
+            KeyCode::Home,
+            KeyCode::End,
+            KeyCode::Char('j'),
+        ] {
+            handle_key_event(&mut app, make_key(code), &tx);
+        }
+        assert!(app.language_features.is_some());
+        // Keys with the overlay mode open but no surface state → no-op.
+        app.language_features = None;
+        handle_key_event(&mut app, make_key(KeyCode::Down), &tx);
+        // Esc dismisses the open overlay.
+        app.language_features = Some(LanguageFeatures::new(
+            doc,
+            "file:///f".into(),
+            0,
+            FeatureView::Completion {
+                items: vec![item.clone()],
+            },
+        ));
+        handle_key_event(&mut app, make_key(KeyCode::Esc), &tx);
+        assert!(app.language_features.is_none());
+        // Reopen: Enter applies the (empty-range) completion — overlay closes.
+        app.workspace
+            .focus
+            .open_overlay(crate::app::AppMode::LanguageFeatures, Some(doc))
+            .unwrap();
+        app.language_features = Some(LanguageFeatures::new(
+            doc,
+            "file:///f".into(),
+            0,
+            FeatureView::Completion {
+                items: vec![item.clone()],
+            },
+        ));
+        handle_key_event(&mut app, make_key(KeyCode::Enter), &tx);
+        assert!(app.language_features.is_none());
+        assert_eq!(app.workspace.focus.overlay, crate::app::AppMode::Normal);
+    }
+
+    #[test]
+    fn language_features_overlay_mouse_click_scroll_and_dismiss() {
+        use crate::components::language_features::{FeatureView, LanguageFeatures};
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("f.rs");
+        std::fs::write(&path, "x").unwrap();
+        let mut app = App::new(dir.path(), crate::config::AppConfig::default()).unwrap();
+        let tx = make_event_tx();
+        app.open_document_path(&path, true);
+        let doc = app.workspace.documents.active_id().unwrap();
+        app.workspace
+            .focus
+            .open_overlay(crate::app::AppMode::LanguageFeatures, Some(doc))
+            .unwrap();
+        let loc = crate::lsp::features::LocationEntry {
+            uri: "untitled:u1".into(),
+            start_line: 0,
+            start_character: 0,
+            end_line: 0,
+            end_character: 0,
+        };
+        let mut features = LanguageFeatures::new(
+            doc,
+            "file:///f".into(),
+            0,
+            FeatureView::Locations {
+                title: "References".into(),
+                items: vec![loc.clone(), loc],
+            },
+        );
+        // Geometry the mouse handler consumes.
+        features.area = ratatui::layout::Rect::new(10, 4, 40, 14);
+        features.rows = vec![
+            ratatui::layout::Rect::new(10, 5, 40, 1),
+            ratatui::layout::Rect::new(10, 6, 40, 1),
+        ];
+        app.language_features = Some(features);
+
+        // Click row 2 → selection moves and applies (untitled URI →
+        // navigate refuses visibly, overlay dismissed).
+        handle_mouse_event(&mut app, make_mouse_click(15, 6), &tx);
+        assert!(app.language_features.is_none());
+        let note = app
+            .status_message
+            .as_ref()
+            .map(|(m, _)| m.clone())
+            .unwrap_or_default();
+        assert!(note.contains("unsupported URI scheme"), "{note}");
+
+        // Reopen: scroll + click-outside dismiss.
+        app.workspace
+            .focus
+            .open_overlay(crate::app::AppMode::LanguageFeatures, Some(doc))
+            .unwrap();
+        let mut features = LanguageFeatures::new(
+            doc,
+            "file:///f".into(),
+            0,
+            FeatureView::Text {
+                title: "Hover".into(),
+                lines: vec!["a".into(), "b".into()],
+            },
+        );
+        features.area = ratatui::layout::Rect::new(10, 4, 40, 14);
+        features.rows = vec![ratatui::layout::Rect::new(10, 5, 40, 1)];
+        app.language_features = Some(features);
+        handle_mouse_event(&mut app, make_mouse_scroll_down(15, 5), &tx);
+        handle_mouse_event(&mut app, make_mouse_scroll_up(15, 5), &tx);
+        assert_eq!(app.language_features.as_ref().unwrap().selected, 0);
+        // Click outside the surface dismisses the overlay.
+        handle_mouse_event(&mut app, make_mouse_click(60, 40), &tx);
+        assert!(app.language_features.is_none());
+        // Scroll/other kinds with no overlay state installed → no-op arms.
+        app.workspace
+            .focus
+            .open_overlay(crate::app::AppMode::LanguageFeatures, Some(doc))
+            .unwrap();
+        handle_mouse_event(&mut app, make_mouse_scroll_down(15, 5), &tx);
+        handle_mouse_event(
+            &mut app,
+            MouseEvent {
+                kind: MouseEventKind::Moved,
+                column: 15,
+                row: 5,
+                modifiers: KeyModifiers::NONE,
+            },
+            &tx,
+        );
+        app.dismiss_language_features();
     }
 
     #[test]

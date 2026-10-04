@@ -74,18 +74,29 @@ def is_request(msg):
 def handle_request(msg, mode_opts):
     method = msg.get("method")
     if method == "initialize":
+        capabilities = {
+            "positionEncoding": "utf-16",
+            "textDocumentSync": mode_opts.get("sync", 1),
+        }
+        # Tests advertise feature providers (and any other capability)
+        # through the argv JSON's "capabilities" map.
+        capabilities.update(mode_opts.get("capabilities", {}))
         return {
             "jsonrpc": "2.0",
             "id": msg["id"],
-            "result": {
-                "capabilities": {
-                    "positionEncoding": "utf-16",
-                    "textDocumentSync": mode_opts.get("sync", 1),
-                }
-            },
+            "result": {"capabilities": capabilities},
         }
     if method == "shutdown":
         return {"jsonrpc": "2.0", "id": msg["id"], "result": None}
+    # Canned feature responses: {"features": {"textDocument/hover": {...}}}
+    # — an entry may be a plain result body or {"error": {...}} to exercise
+    # the error path.
+    features = mode_opts.get("features", {})
+    if method in features:
+        canned = features[method]
+        if isinstance(canned, dict) and "error" in canned:
+            return {"jsonrpc": "2.0", "id": msg["id"], "error": canned["error"]}
+        return {"jsonrpc": "2.0", "id": msg["id"], "result": canned}
     if mode_opts.get("echo_result"):
         return {"jsonrpc": "2.0", "id": msg["id"], "result": {"echo": method}}
     return {"jsonrpc": "2.0", "id": msg["id"], "result": {"ok": True, "method": method}}
@@ -201,6 +212,12 @@ def run_sync(r_in, w_out, transcript_path):
         "echo_result": True,
         "sync": {"openClose": True, "change": 2, "save": {"includeText": True}},
     }
+    # argv[3] (optional): {"capabilities": {...}, "features": {...}}
+    if len(sys.argv) > 3 and sys.argv[3]:
+        try:
+            opts.update(json.loads(sys.argv[3]))
+        except ValueError:
+            eprint("fake-lsp-server: bad argv JSON", sys.argv[3][:80])
 
     # Persist after EVERY message via atomic replace: a client that kills us
     # (SIGKILL after the bounded shutdown deadline, or EOF on restart) must
@@ -222,7 +239,11 @@ def run_sync(r_in, w_out, transcript_path):
             flush("bad-json")
             return 2
         if is_request(msg):
+            # Requests land in the same transcript (flagged), then flush —
+            # tests can prove a request crossed the pipe verbatim.
+            log.append({"method": msg.get("method"), "id": msg.get("id"), "request": True})
             write_message(w_out, handle_request(msg, opts))
+            flush("live")
             continue
         method = msg.get("method")
         if method == "exit":

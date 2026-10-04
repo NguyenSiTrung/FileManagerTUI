@@ -86,6 +86,8 @@ pub enum ClientEvent {
         encoding: PositionEncoding,
         /// The negotiated document-sync surface (Task 11 did*/versioning).
         sync: crate::lsp::features::TextSync,
+        /// Feature capabilities advertised in initialize.result.
+        features: crate::lsp::features::ServerFeatures,
     },
     /// A response resolved a pending request. `result`/`error` are the raw
     /// JSON bodies from the server.
@@ -178,6 +180,8 @@ pub struct Client {
     encoding: PositionEncoding,
     /// Negotiated `textDocumentSync` from the initialize result.
     sync: crate::lsp::features::TextSync,
+    /// Feature capabilities from the initialize result.
+    features: crate::lsp::features::ServerFeatures,
     /// Highest document version issued per URI — responses bearing an older
     /// version are stale (the document moved on while the request was in
     /// flight).
@@ -213,6 +217,7 @@ impl Client {
             state: ClientState::Starting,
             encoding: PositionEncoding::default(),
             sync: crate::lsp::features::TextSync::default(),
+            features: crate::lsp::features::ServerFeatures::default(),
             doc_versions: HashMap::new(),
             latest_doc_version: 0,
             options,
@@ -309,14 +314,27 @@ impl Client {
 
     /// Issue a request. Returns the JSON-RPC id that will resolve it.
     pub fn request(&mut self, method: &str, params: Value) -> Result<u64, ClientError> {
+        let id = self.next_id;
+        self.request_with_id(id, method, params)
+    }
+
+    /// Issue a request with a caller-allocated id — the session owner picks
+    /// the id so it can correlate the response without a second channel.
+    /// `next_id` is bumped past the id so internally allocated ids can
+    /// never collide with it.
+    pub fn request_with_id(
+        &mut self,
+        id: u64,
+        method: &str,
+        params: Value,
+    ) -> Result<u64, ClientError> {
         if matches!(self.state, ClientState::Dead | ClientState::Closed) {
             return Err(ClientError::Io(io::Error::new(
                 io::ErrorKind::BrokenPipe,
                 "LSP client is not running",
             )));
         }
-        let id = self.next_id;
-        self.next_id += 1;
+        self.next_id = self.next_id.max(id + 1);
         let body = json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
         self.io.send(body.to_string().as_bytes())?;
         self.pending.insert(
@@ -517,6 +535,7 @@ impl Client {
                         generation: self.generation,
                         encoding: self.encoding,
                         sync: self.sync,
+                        features: self.features,
                     });
                 }
                 let outcome = match (message.get("result"), message.get("error")) {
@@ -548,6 +567,7 @@ impl Client {
         self.encoding = PositionEncoding::from_capability(offered);
         self.sync =
             crate::lsp::features::TextSync::from_capability(capabilities.get("textDocumentSync"));
+        self.features = crate::lsp::features::ServerFeatures::from_capability(capabilities);
         // `initialized` is fire-and-forget; a broken pipe here surfaces on the
         // next poll as ServerDied.
         let _ = self.notify("initialized", json!({}));

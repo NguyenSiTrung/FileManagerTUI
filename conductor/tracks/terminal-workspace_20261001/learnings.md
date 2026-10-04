@@ -1239,3 +1239,42 @@ verification evidence, and reusable patterns.
 - **`text_of` laziness**: closures in tests need both branches to execute —
   every doc in the poll set that owes a send calls `text_of`, so withhold
   text for one id while a sibling owes a real send.
+
+## Phase 11 Task 2 — language features (completion/hover/defs/refs/symbols)
+
+- **LCOV diverging-arm convention (durable)**: a line whose last-starting
+  region diverges (`unreachable!`, `panic!`, `break`, or the `}` closing a
+  block that always diverges / is never entered) reads `DA:n,0` forever.
+  Working reconciliations with `cargo fmt --check`:
+  - `#[rustfmt::skip]` + single-line `let P = e else { unreachable!("m") };`
+    — attributes on `let` statements are stable; on expressions, `if`
+    statements, and match arms they are E0658 experimental — do NOT use
+    `#[rustfmt::skip]` there.
+  - Retry/poll loops: `let mut flag = false; while !flag && now() <= deadline { body }` then `assert!(flag)` — body is guaranteed ≥1 execution when the
+    flag starts false, the condition line evaluates every pass, and no
+    diverging line exists at all. `loop { ...; if cond { panic } }` leaves
+    the panic line flagged; `loop { ...; if cond { break } }` leaves the
+    `}` flagged; `while !flag { ... }` without the deadline clause is also
+    fine when the flag provably flips.
+  - `assert!` on ONE line covers (the panic-region shares the check line);
+    multi-line assert args flag. `if cond { break; }` single-lined covers
+    but rustfmt re-expands it — keep the `while !flag` form instead.
+  - A `}` closing a block whose body always runs ≥1× covers normally; the
+    flagged `}` is only for blocks that diverge (early return/break) or
+    execute 0 times.
+- **Never fold outside the test module**: a mechanical fold regex over
+  production code pulls untouched lines into the diff and manufactures NEW
+  flagged lines; restrict transforms to `#[cfg(test)]` modules.
+- **Overlay depth exhaustion is the only `open_overlay` Err**: cover it by
+  stacking 8 `AppMode::Normal` overlays (`return_contexts.len() >= 8`), not
+  by mocking.
+- **Deliberate timing-independent coverage**: poll waits whose body is
+  flagged-0 when the condition is already true are fixed by initializing
+  the flag false so the body provably runs ≥1× — not by hoping the fake
+  server is slower than the first check.
+- **`FocusContext::Modal` admits no bindings**: every key routes to the
+  overlay's forward-handler — modal overlays need an explicit Esc/armed
+  state test, not a binding test.
+- **Overlay height must clamp both ends**: `(LIST_HEIGHT+4).min(area.height)
+  .max(3).min(area.height)` — `.max(N)` alone panics on frames smaller
+  than N (found by the tiny-4×4 render test, a real bug).

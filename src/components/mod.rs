@@ -4,6 +4,7 @@ pub mod dialog;
 pub mod document_tabs;
 pub mod editor;
 pub mod help;
+pub mod language_features;
 pub mod preview;
 pub mod search;
 pub mod search_action;

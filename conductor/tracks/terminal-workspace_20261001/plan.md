@@ -1027,7 +1027,7 @@ exist. Add a module's declarations in the task that introduces it. Avoid broad
     systematically-uncovered `run()` event-loop region in main.rs
     (all neighboring pre-existing lines are 0-hit too).)
 
-- [ ] Task 2: Add completion, hover, definition, references, and symbols
+- [x] Task 2: Add completion, hover, definition, references, and symbols
 
   **Files:** modify `src/lsp/features.rs`, `src/app.rs`, `src/handler.rs`,
   `src/commands.rs`, `src/ui.rs`, `src/editor.rs`;
@@ -1035,7 +1035,7 @@ exist. Add a module's declarations in the task that introduces it. Avoid broad
   **Requirements:** FR-10, AC-1, AC-8.
   **Produces:** bounded feature overlays/results, command routes, capability
   fallback, safe completion edit application as one undo transaction.
-  - [ ] Test completion lists/item defaults, insert/replace forms, additional
+  - [x] Test completion lists/item defaults, insert/replace forms, additional
     edits, unsupported snippets, stale results, overlapping/invalid edits,
     hover sanitization, and definitions/references in another file.
     ```rust
@@ -1043,10 +1043,36 @@ exist. Add a module's declarations in the task that introduces it. Avoid broad
     document.editor.undo();
     assert_eq!(document.text(), before_completion);
     ```
-  - [ ] Never execute completion commands; unsupported formats fail visibly
+    (Done — `parse_completion` covers item defaults, Insert/Replace edits,
+    additionalTextEdits (incl. malformed-range rejection and unnamed-item
+    skip), snippet opt-out, empty/overlapping/out-of-bounds rejection;
+    `EditorState::apply_edit_ranges` applies the batch then undoes to the
+    exact pre-completion text as pinned; multi-line and disjoint-batch
+    edits each revert in one undo; hover sanitization strips ANSI/OSC/C1
+    including mid-scalar bounds; cross-file definitions/references open
+    the target document and clamp the target position.)
+  - [x] Never execute completion commands; unsupported formats fail visibly
     without partial application. Navigation preserves the originating dirty
     document/cursor and rejects unsupported URI schemes.
-  - [ ] Run language-feature tests using fake-server transcripts.
+    (Done — completion `command` payloads are parsed but never dispatched
+    (no LspCommand path exists for them); unsupported kinds and invalid
+    edit ranges surface a status note with the document untouched;
+    navigation keeps the dirty originating document and its cursor,
+    refuses non-`file:` URIs with a visible note, and drops busy/stale
+    results without clobbering an open overlay.)
+  - [x] Run language-feature tests using fake-server transcripts.
+    (Done — `feature_request_round_trips_against_fake_server` sends
+    completion + string-id workspace/symbol requests through the fake
+    stdio server and asserts the transcript contents; 1495 tests green.
+    Diff coverage 100% executable (2487/2488) — sole residual is the
+    `app.drain_lsp_results()` call line inside the
+    systematically-uncovered `run()` event-loop region in main.rs
+    (same class as the accepted Task-1 residual; every neighboring
+    pre-existing line is 0-hit). Diverging test arms
+    (`unreachable!`/`panic!`/`break`-block `}`) that LCOV reports as
+    0-hit are either single-lined onto an executing `let` under
+    `#[rustfmt::skip]` or restructured to `while`-condition loops so
+    `cargo fmt --check` and coverage both stay green.)
 
 - [ ] Task 3: Add versioned diagnostics state and navigable panel
 

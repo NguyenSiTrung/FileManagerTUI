@@ -80,6 +80,8 @@ struct LspSession {
     docs: features::SyncedDocuments,
     /// Negotiated sync surface; `default` (no sync) until `Ready` lands.
     sync: features::TextSync,
+    /// Feature capabilities from initialize.result; empty until `Ready`.
+    features: features::ServerFeatures,
 }
 
 /// One open editor document known to the manager. The reconcile pass
@@ -90,6 +92,38 @@ struct TrackedDoc {
     uri: String,
     /// `content_revision` last reflected (or queued) toward the server.
     revision: u64,
+}
+
+/// Correlation context for an in-flight feature request — everything the
+/// UI needs to route and validate the eventual response.
+#[derive(Debug)]
+pub struct FeatureRequest {
+    pub language: String,
+    /// The JSON-RPC method issued ("textDocument/completion", ...).
+    pub method: String,
+    /// Document the request was issued for.
+    pub document: crate::workspace::documents::DocumentId,
+    /// URI the request addressed (rename guard on delivery).
+    pub uri: String,
+    /// `content_revision` at request time — the staleness token.
+    pub revision: u64,
+}
+
+/// A resolved feature request, queued for the app to consume. Raw result
+/// JSON travels untouched — parsing happens in the app, against the
+/// document's *current* text.
+#[derive(Debug)]
+pub enum FeatureResult {
+    /// Server returned a result body (which may be `null`).
+    Ready {
+        req: FeatureRequest,
+        result: serde_json::Value,
+    },
+    /// Server error, malformed JSON, or a manager-side failure.
+    Error {
+        req: FeatureRequest,
+        message: String,
+    },
 }
 
 /// A project-local argv awaiting (or refused) interactive approval.
@@ -112,11 +146,21 @@ pub struct LspManager {
     pending_trust: VecDeque<PendingTrust>,
     /// Editor documents currently under sync, keyed by stable document id.
     tracked: HashMap<crate::workspace::documents::DocumentId, TrackedDoc>,
+    /// In-flight feature requests by JSON-RPC id (manager-allocated, so
+    /// responses correlate without a second channel).
+    pending_features: HashMap<u64, FeatureRequest>,
+    /// Next manager-allocated request id.
+    next_request_id: u64,
+    /// Resolved requests awaiting app consumption.
+    feature_results: VecDeque<FeatureResult>,
 }
 
 impl LspManager {
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            next_request_id: 1,
+            ..Self::default()
+        }
     }
 
     /// Seed durable grants from a *global/CLI* layer only (project-local
@@ -235,6 +279,7 @@ impl LspManager {
                         generation: 0,
                         docs: features::SyncedDocuments::default(),
                         sync: features::TextSync::default(),
+                        features: features::ServerFeatures::default(),
                     },
                 );
                 Some(format!(
@@ -252,6 +297,7 @@ impl LspManager {
                         generation: 0,
                         docs: features::SyncedDocuments::default(),
                         sync: features::TextSync::default(),
+                        features: features::ServerFeatures::default(),
                     },
                 );
                 Some(format!(
@@ -269,6 +315,7 @@ impl LspManager {
                         generation: 0,
                         docs: features::SyncedDocuments::default(),
                         sync: features::TextSync::default(),
+                        features: features::ServerFeatures::default(),
                     },
                 );
                 Some(format!("LSP {language}: refused earlier this session"))
@@ -305,6 +352,119 @@ impl LspManager {
             .get(language)
             .and_then(|s| s.cmd_tx.as_ref())
             .is_some_and(|tx| tx.try_send(LspCommand::Send(body.to_vec())).is_ok())
+    }
+
+    /// Capabilities advertised by a `Ready` session — capability fallback
+    /// checks read this before issuing a request.
+    /// A live session is Ready or Degraded (degraded = a request timed out
+    /// while the process stayed alive — it can still serve requests).
+    fn session_live(&self, language: &str) -> Option<&LspSession> {
+        let session = self.sessions.get(language)?;
+        match session.status {
+            SessionStatus::Ready { .. } | SessionStatus::Degraded(_) => Some(session),
+            _ => None,
+        }
+    }
+
+    pub fn ready_features(&self, language: &str) -> Option<features::ServerFeatures> {
+        self.session_live(language).map(|s| s.features)
+    }
+
+    /// Negotiated position encoding of a `Ready` session — callers convert
+    /// cursor/positions through it.
+    pub fn ready_encoding(&self, language: &str) -> Option<positions::PositionEncoding> {
+        self.session_live(language).map(|s| match s.status {
+            SessionStatus::Ready { encoding } => encoding,
+            _ => positions::PositionEncoding::default(),
+        })
+    }
+
+    /// Current tracked record for a document (uri/revision) when under sync.
+    pub fn tracked_revision(
+        &self,
+        id: crate::workspace::documents::DocumentId,
+    ) -> Option<(String, u64)> {
+        self.tracked.get(&id).map(|t| (t.uri.clone(), t.revision))
+    }
+
+    /// Issue a JSON-RPC request through a `Ready` session. Returns the id
+    /// that will resolve it; the request context lands in
+    /// `pending_features` for correlation. None when the session is not
+    /// Ready or the queue cannot accept the body.
+    pub fn request_feature(
+        &mut self,
+        language: &str,
+        method: &str,
+        params: serde_json::Value,
+        document: crate::workspace::documents::DocumentId,
+        uri: String,
+        revision: u64,
+    ) -> Option<u64> {
+        self.session_live(language)?;
+        let session = self.sessions.get(language)?;
+        let id = self.next_request_id;
+        self.next_request_id += 1;
+        let body = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": method,
+            "params": params,
+        });
+        let tx = session.cmd_tx.as_ref()?;
+        tx.try_send(LspCommand::Send(body.to_string().into_bytes()))
+            .ok()?;
+        self.pending_features.insert(
+            id,
+            FeatureRequest {
+                language: language.to_string(),
+                method: method.to_string(),
+                document,
+                uri,
+                revision,
+            },
+        );
+        Some(id)
+    }
+
+    /// Drain resolved feature results; the app consumes them in its
+    /// per-iteration pass.
+    pub fn take_feature_results(&mut self) -> Vec<FeatureResult> {
+        self.feature_results.drain(..).collect()
+    }
+
+    /// Test-only: inject a Ready session with a live command channel so
+    /// app-level tests can drive the request/response path.
+    #[cfg(test)]
+    pub(crate) fn insert_ready_session(
+        &mut self,
+        language: &str,
+        features: features::ServerFeatures,
+    ) -> mpsc::Receiver<LspCommand> {
+        let (cmd_tx, cmd_rx) = mpsc::sync_channel::<LspCommand>(64);
+        self.sessions.insert(
+            language.to_string(),
+            LspSession {
+                resolved: ResolvedServer {
+                    spec: config::ServerSpec {
+                        language: language.to_string(),
+                        argv: vec!["fake".to_string()],
+                        root_markers: vec![],
+                        source: config::ConfigSource::Global,
+                    },
+                    root: std::env::temp_dir(),
+                    executable: None,
+                },
+                cmd_tx: Some(cmd_tx),
+                status: SessionStatus::Ready {
+                    encoding: positions::PositionEncoding::Utf16,
+                },
+                generation: 0,
+                docs: features::SyncedDocuments::default(),
+                sync: features::TextSync::default(),
+                features,
+            },
+        );
+        cmd_rx
     }
 
     /// Restart a dead/degraded session within its restart budget.
@@ -500,9 +660,11 @@ impl LspManager {
                 generation,
                 encoding,
                 sync,
+                features,
             } => {
                 session.generation = generation;
                 session.sync = sync;
+                session.features = features;
                 session.status = SessionStatus::Ready { encoding };
                 // A restart's new generation owns an empty document table —
                 // re-open every doc the mirror still holds (same versions).
@@ -522,15 +684,49 @@ impl LspManager {
                 session.generation = generation;
                 session.status = SessionStatus::Dead(reason.clone());
                 session.cmd_tx = None;
+                // In-flight requests die with the session — their ids will
+                // never resolve; the status note carries the failure.
+                self.pending_features.retain(|_, r| r.language != language);
                 Some(format!("LSP {language}: stopped ({reason})"))
             }
-            ClientEvent::Expired { method, .. } => {
+            ClientEvent::Expired { id, method, .. } => {
+                if let Some(req) = self.pending_features.remove(&id) {
+                    self.feature_results.push_back(FeatureResult::Error {
+                        req,
+                        message: format!("{method} timed out"),
+                    });
+                }
                 session.status = SessionStatus::Degraded(format!("{method} timed out"));
                 None
             }
-            ClientEvent::Response { .. } | ClientEvent::Notification { .. } => {
-                // Feature payloads are consumed by Phase 11 wiring; the
-                // session table only tracks lifecycle transitions here.
+            ClientEvent::Response {
+                id,
+                generation: _,
+                outcome,
+            } => {
+                // Unknown ids are stale (expired, cancelled, pre-restart) —
+                // the client already dropped them from its own table.
+                if let Some(req) = self.pending_features.remove(&id) {
+                    let result = match outcome {
+                        Ok(raw) => match serde_json::from_str::<serde_json::Value>(&raw) {
+                            Ok(result) => FeatureResult::Ready { req, result },
+                            Err(_) => FeatureResult::Error {
+                                req,
+                                message: "malformed response body".to_string(),
+                            },
+                        },
+                        Err(raw) => FeatureResult::Error {
+                            req,
+                            message: features::sanitize_server_text(&raw, 240),
+                        },
+                    };
+                    self.feature_results.push_back(result);
+                }
+                None
+            }
+            ClientEvent::Notification { .. } => {
+                // Diagnostics land in Phase 11 Task 3; other notifications
+                // need no session-table transition.
                 None
             }
         }
@@ -572,6 +768,7 @@ impl LspManager {
                 generation: 0,
                 docs: features::SyncedDocuments::default(),
                 sync: features::TextSync::default(),
+                features: features::ServerFeatures::default(),
             },
         );
         format!("LSP {language}: starting")
@@ -661,10 +858,23 @@ fn run_server(
                     // the next poll as ServerDied.
                     if let Ok(message) = serde_json::from_slice::<serde_json::Value>(&body) {
                         let method = message["method"].as_str().unwrap_or_default().to_string();
-                        if message.get("id").is_some() {
-                            let _ = client.request(&method, message["params"].clone());
-                        } else {
-                            let _ = client.notify(&method, message["params"].clone());
+                        match message.get("id") {
+                            // Manager-allocated id: honor it so the response
+                            // resolves the manager's pending registry.
+                            Some(id) if id.is_u64() => {
+                                let _ = client.request_with_id(
+                                    id.as_u64().unwrap_or_default(),
+                                    &method,
+                                    message["params"].clone(),
+                                );
+                            }
+                            // A request with a non-integer id still allocates.
+                            Some(_) => {
+                                let _ = client.request(&method, message["params"].clone());
+                            }
+                            None => {
+                                let _ = client.notify(&method, message["params"].clone());
+                            }
                         }
                     }
                 }
@@ -843,6 +1053,7 @@ mod tests {
                 generation: 3,
                 docs: features::SyncedDocuments::default(),
                 sync: features::TextSync::default(),
+                features: features::ServerFeatures::default(),
             },
         );
         // Events tagged older than the session's generation are ignored.
@@ -941,6 +1152,7 @@ mod tests {
                 generation: 0,
                 docs: features::SyncedDocuments::default(),
                 sync: features::TextSync::default(),
+                features: features::ServerFeatures::default(),
             },
         )
     }
@@ -1016,6 +1228,7 @@ mod tests {
                     generation: 2,
                     encoding: positions::PositionEncoding::Utf8,
                     sync: features::TextSync::default(),
+                    features: features::ServerFeatures::default(),
                 },
             )
             .unwrap();
@@ -1125,10 +1338,8 @@ mod tests {
         manager
             .maybe_start_for_path(&file, &LspConfig::default(), &local, true, &tx)
             .unwrap();
-        match cmd_rx.try_recv() {
-            Ok(LspCommand::Shutdown) => {}
-            other => panic!("expected Shutdown for the stale session, got {other:?}"),
-        }
+        #[rustfmt::skip]
+        let Ok(LspCommand::Shutdown) = cmd_rx.try_recv() else { unreachable!("expected Shutdown for the stale session") };
         assert_eq!(
             manager.next_pending_trust().unwrap().resolved.spec.argv,
             vec!["/bin/false"]
@@ -1844,5 +2055,356 @@ mod tests {
             .filter(|(m, e)| **m == "textDocument/didOpen" && e["uri"] == a2_uri)
             .count();
         assert_eq!(a2_opens, 2, "reopen after restart must not duplicate");
+    }
+
+    // ── Language-feature routing (Phase 11 Task 2) ────────────────────────
+
+    #[test]
+    fn request_feature_routes_and_resolves_via_pending() {
+        use crate::workspace::documents::{DocumentStore, OpenDisposition};
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("f.rs");
+        std::fs::write(&file, "fn f() {}\n").unwrap();
+        let mut store = DocumentStore::new();
+        let doc = store.open(&file, OpenDisposition::Pinned).unwrap();
+
+        let mut manager = LspManager::new();
+        let rx = ready_session(&mut manager, "rust", FULL_SYNC);
+        manager.sessions.get_mut("rust").unwrap().features = features::ServerFeatures {
+            completion: true,
+            hover: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            manager.ready_features("rust"),
+            Some(features::ServerFeatures {
+                completion: true,
+                hover: true,
+                ..Default::default()
+            })
+        );
+        assert_eq!(
+            manager.ready_encoding("rust"),
+            Some(positions::PositionEncoding::Utf16)
+        );
+
+        // Request → Send body carries the manager-allocated id verbatim so
+        // the response can resolve the pending entry.
+        let id = manager
+            .request_feature(
+                "rust",
+                "textDocument/completion",
+                serde_json::json!({"x": 1}),
+                doc,
+                "file:///f.rs".to_string(),
+                7,
+            )
+            .unwrap();
+        #[rustfmt::skip]
+        let Ok(LspCommand::Send(body)) = rx.try_recv() else { unreachable!("expected Send") };
+        let body = serde_json::from_slice::<serde_json::Value>(&body).unwrap();
+        assert_eq!(body["id"], id);
+        assert_eq!(body["method"], "textDocument/completion");
+        assert_eq!(body["params"], serde_json::json!({"x": 1}));
+
+        // Response resolves the pending entry into a Ready result; unknown
+        // ids drop silently.
+        assert!(manager
+            .handle_event(
+                "rust",
+                0,
+                ClientEvent::Response {
+                    id,
+                    generation: 0,
+                    outcome: Ok("{\"items\": []}".to_string()),
+                },
+            )
+            .is_none());
+        manager.handle_event(
+            "rust",
+            0,
+            ClientEvent::Response {
+                id: 9999,
+                generation: 0,
+                outcome: Ok("null".to_string()),
+            },
+        );
+        let results = manager.take_feature_results();
+        assert_eq!(results.len(), 1);
+        #[rustfmt::skip]
+        let FeatureResult::Ready { req, result } = &results[0] else { unreachable!("expected Ready") };
+        assert_eq!(req.revision, 7);
+        assert_eq!(req.uri, "file:///f.rs");
+        assert_eq!(result["items"], serde_json::json!([]));
+        assert!(manager.take_feature_results().is_empty());
+
+        // Error outcome → FeatureResult::Error, sanitized.
+        let id = manager
+            .request_feature(
+                "rust",
+                "textDocument/hover",
+                serde_json::json!({}),
+                doc,
+                "file:///f.rs".to_string(),
+                8,
+            )
+            .unwrap();
+        let _ = rx.try_recv();
+        manager.handle_event(
+            "rust",
+            0,
+            ClientEvent::Response {
+                id,
+                generation: 0,
+                outcome: Err("internal failure".to_string()),
+            },
+        );
+        #[rustfmt::skip]
+        let FeatureResult::Error { req, message } = manager.take_feature_results().remove(0) else { unreachable!("expected Error") };
+        assert_eq!(req.method, "textDocument/hover");
+        assert_eq!(message, "internal failure");
+
+        // Expired request → pending dropped + Error result + session degrades.
+        let id = manager
+            .request_feature(
+                "rust",
+                "textDocument/hover",
+                serde_json::json!({}),
+                doc,
+                "file:///f.rs".to_string(),
+                8,
+            )
+            .unwrap();
+        let _ = rx.try_recv();
+        manager.handle_event(
+            "rust",
+            0,
+            ClientEvent::Expired {
+                id,
+                method: "textDocument/hover".to_string(),
+            },
+        );
+        #[rustfmt::skip]
+        let FeatureResult::Error { message, .. } = manager.take_feature_results().remove(0) else { unreachable!("expected Error") };
+        assert!(message.contains("timed out"));
+        assert!(matches!(
+            manager.session_status("rust"),
+            Some(SessionStatus::Degraded(_))
+        ));
+
+        // ServerDied drops that session's in-flight requests; another
+        // session's pending entries survive.
+        let _id = manager
+            .request_feature(
+                "rust",
+                "textDocument/hover",
+                serde_json::json!({}),
+                doc,
+                "file:///f.rs".to_string(),
+                9,
+            )
+            .unwrap();
+        let _ = rx.try_recv();
+        manager.handle_event(
+            "rust",
+            1,
+            ClientEvent::ServerDied {
+                generation: 1,
+                reason: "boom".to_string(),
+            },
+        );
+        assert!(manager.take_feature_results().is_empty());
+        assert!(manager
+            .request_feature(
+                "rust",
+                "textDocument/hover",
+                serde_json::json!({}),
+                doc,
+                "file:///f.rs".to_string(),
+                10,
+            )
+            .is_none()); // dead session cannot take requests
+    }
+
+    /// The pinned scenario: a real fake server answers a completion request
+    /// end-to-end — initialize advertises the provider, the request crosses
+    /// stdio, and the response resolves through the pending registry.
+    #[test]
+    fn feature_request_round_trips_against_fake_server() {
+        use std::time::Instant;
+        let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("scripts")
+            .join("fake-lsp-server.py");
+        let dir = tempfile::tempdir().unwrap();
+        let transcript = dir.path().join("transcript.json");
+        let opts = serde_json::json!({
+            "capabilities": {
+                "completionProvider": {"triggerCharacters": ["."]},
+                "hoverProvider": true,
+            },
+            "features": {
+                "textDocument/completion": [
+                    {"label": "complete_me", "kind": 3, "detail": "fn complete_me()"},
+                    {"label": "companion", "insertText": "companion()"},
+                ],
+                "textDocument/hover": {"contents": {"kind": "plaintext",
+                    "value": "hover text"}},
+            },
+        });
+        let mut manager = LspManager::new();
+        let (tx, mut rx) = crate::event::event_channel(crate::event::TransportLimits::default());
+        let resolved = ResolvedServer {
+            spec: config::ServerSpec {
+                language: "rust".to_string(),
+                argv: vec![
+                    script.to_string_lossy().into_owned(),
+                    "sync".to_string(),
+                    transcript.to_string_lossy().into_owned(),
+                    opts.to_string(),
+                ],
+                root_markers: vec![],
+                source: ConfigSource::Global,
+            },
+            root: dir.path().to_path_buf(),
+            executable: None,
+        };
+        manager.spawn_session(resolved, &tx);
+
+        // Ready, then a completion request for a synced document.
+        let deadline = Instant::now() + Duration::from_secs(15);
+        let mut is_ready = false;
+        while !is_ready && Instant::now() <= deadline {
+            match rx.try_recv() {
+                Ok(crate::event::Event::Lsp {
+                    language,
+                    generation,
+                    event,
+                }) => {
+                    is_ready = matches!(event, ClientEvent::Ready { .. });
+                    manager.handle_event(&language, generation, event);
+                }
+                _ => std::thread::sleep(Duration::from_millis(25)),
+            }
+        }
+        assert!(is_ready);
+        assert_eq!(
+            manager.ready_features("rust"),
+            Some(features::ServerFeatures {
+                completion: true,
+                hover: true,
+                ..Default::default()
+            })
+        );
+
+        use crate::workspace::documents::{DocumentStore, OpenDisposition};
+        let path = dir.path().join("f.rs");
+        std::fs::write(&path, "let c = comp\n").unwrap();
+        let mut store = DocumentStore::new();
+        let doc = store.open(&path, OpenDisposition::Pinned).unwrap();
+        drive(&mut manager, &LspConfig::default(), &store);
+        let uri = features::uri_for_path(&std::fs::canonicalize(&path).unwrap());
+        let req_id = manager
+            .request_feature(
+                "rust",
+                "textDocument/completion",
+                serde_json::json!({"textDocument": {"uri": uri}}),
+                doc,
+                uri.clone(),
+                0,
+            )
+            .unwrap();
+        assert!(req_id > 0);
+
+        // The response arrives as an Lsp event → FeatureResult::Ready.
+        let deadline = Instant::now() + Duration::from_secs(15);
+        let mut found = None;
+        while found.is_none() && Instant::now() <= deadline {
+            match rx.try_recv() {
+                Ok(crate::event::Event::Lsp {
+                    language,
+                    generation,
+                    event,
+                }) => {
+                    manager.handle_event(&language, generation, event);
+                    let results = manager.take_feature_results();
+                    if !results.is_empty() {
+                        found = Some(results);
+                    }
+                }
+                _ => std::thread::sleep(Duration::from_millis(25)),
+            }
+        }
+        assert!(found.is_some());
+        let results = found.unwrap();
+        #[rustfmt::skip]
+        let FeatureResult::Ready { req, result } = &results[0] else { unreachable!("expected Ready") };
+        assert_eq!(req.document, doc);
+        assert_eq!(req.method, "textDocument/completion");
+        let document = store.get(doc).unwrap();
+        let items = features::parse_completion(
+            result,
+            &document.editor.buffer,
+            positions::PositionEncoding::Utf16,
+        )
+        .unwrap();
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].label, "complete_me");
+        assert_eq!(items[0].kind, Some(3));
+
+        // The transcript shows the request crossed the pipe verbatim.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut ready = false;
+        while !ready && Instant::now() <= deadline {
+            std::thread::sleep(Duration::from_millis(40));
+            ready = std::fs::read_to_string(&transcript)
+                .is_ok_and(|r| r.contains("textDocument/completion"));
+        }
+        assert!(ready);
+        let report: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&transcript).unwrap()).unwrap();
+        let methods: Vec<_> = report["log"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| e["method"].as_str().unwrap())
+            .collect();
+        assert!(methods.contains(&"textDocument/completion"));
+
+        // A Send whose JSON-RPC id is a string still forwards through the
+        // client's own allocation (covers the non-u64 Send arm): the server
+        // sees a normal request and the transcript logs it.
+        let cmd_tx = manager
+            .sessions
+            .get("rust")
+            .unwrap()
+            .cmd_tx
+            .clone()
+            .unwrap();
+        cmd_tx
+            .try_send(LspCommand::Send(
+                br#"{"jsonrpc":"2.0","id":"s-1","method":"workspace/symbol","params":{"query":"x"}}"#
+                    .to_vec(),
+            ))
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut ready = false;
+        while !ready && Instant::now() <= deadline {
+            std::thread::sleep(Duration::from_millis(40));
+            ready =
+                std::fs::read_to_string(&transcript).is_ok_and(|r| r.contains("workspace/symbol"));
+        }
+        assert!(ready);
+
+        // A Degraded session still answers encoding/feature lookups with
+        // safe defaults — the live gate keeps requests flowing.
+        manager.sessions.get_mut("rust").unwrap().status =
+            SessionStatus::Degraded("probe".to_string());
+        assert_eq!(
+            manager.ready_encoding("rust"),
+            Some(positions::PositionEncoding::default())
+        );
+        assert!(manager.ready_features("rust").is_some());
+
+        manager.shutdown_all();
     }
 }

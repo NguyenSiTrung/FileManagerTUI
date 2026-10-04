@@ -453,6 +453,13 @@ pub fn render_in_area(app: &mut App, frame: &mut Frame, area: ratatui::layout::R
         }
     }
 
+    if app.workspace.focus.overlay == AppMode::LanguageFeatures {
+        if let Some(mut features) = app.language_features.take() {
+            features.render(app, frame);
+            app.language_features = Some(features);
+        }
+    }
+
     // Render dialog overlay on top if in dialog mode
     if matches!(app.workspace.focus.overlay, AppMode::Dialog(_)) {
         let dialog_widget =
@@ -660,6 +667,55 @@ mod tests {
             .collect();
         assert!(text.contains("Content Search"));
         assert!(text.contains("Content search: Enter opens hit"));
+    }
+
+    #[test]
+    fn language_features_overlay_renders_title_rows_and_hint() {
+        use super::{render, App};
+        use crate::components::language_features::{FeatureView, LanguageFeatures};
+        use crate::lsp::features::{CompletionEdit, CompletionEntry};
+        use ratatui::{backend::TestBackend, Terminal};
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("f.rs");
+        std::fs::write(&path, "let x = 1\n").unwrap();
+        let mut app = App::new(dir.path(), crate::config::AppConfig::default()).unwrap();
+        app.open_document_path(&path, true);
+        let doc = app.workspace.documents.active_id().unwrap();
+        app.workspace
+            .focus
+            .open_overlay(crate::app::AppMode::LanguageFeatures, Some(doc))
+            .unwrap();
+        app.language_features = Some(LanguageFeatures::new(
+            doc,
+            "file:///f".into(),
+            0,
+            FeatureView::Completion {
+                items: vec![CompletionEntry {
+                    label: "complete_me".into(),
+                    detail: None,
+                    kind: None,
+                    documentation: None,
+                    edit: CompletionEdit::Insert { text: "x".into() },
+                    additional_edits: vec![],
+                    snippet: false,
+                    has_command: false,
+                    deprecated: false,
+                }],
+            },
+        ));
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let text: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(text.contains("Completion"), "{text}");
+        assert!(text.contains("complete_me"), "{text}");
+        // The take/restore arm leaves the overlay owned by the app.
+        assert!(app.language_features.is_some());
     }
 
     #[test]

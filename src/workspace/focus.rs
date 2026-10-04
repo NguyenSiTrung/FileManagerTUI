@@ -25,6 +25,8 @@ pub enum InputOverlay {
     Help,
     CopyOverlay,
     CommandMenu,
+    /// Language-feature results (completion/hover/locations/symbols).
+    LanguageFeatures,
 }
 
 /// Explicit input destination. A focused empty editor must not dispatch tree keys.

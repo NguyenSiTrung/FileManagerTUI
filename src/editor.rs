@@ -1324,6 +1324,90 @@ impl EditorState {
         self.ensure_cursor_visible();
     }
 
+    /// Apply a batch of byte-position replacements atomically: every range
+    /// validates before anything is written (so failure leaves the buffer
+    /// and undo stack untouched), then all edits land inside ONE `Compound`
+    /// undo entry. `edits` may be unordered and are applied in descending
+    /// document order so earlier coordinates stay valid; `primary` is the
+    /// index whose post-insert position becomes the cursor.
+    pub fn apply_edit_ranges(
+        &mut self,
+        edits: &[crate::lsp::features::RangeEdit],
+        primary: usize,
+    ) -> Result<(), &'static str> {
+        if edits.is_empty() {
+            return Ok(());
+        }
+        if primary >= edits.len() {
+            return Err("primary edit index out of range");
+        }
+        for e in edits {
+            if e.start.line >= self.buffer.len()
+                || e.end.line >= self.buffer.len()
+                || e.start > e.end
+                || e.start.byte > self.buffer[e.start.line].len()
+                || e.end.byte > self.buffer[e.end.line].len()
+                || !self.buffer[e.start.line].is_char_boundary(e.start.byte)
+                || !self.buffer[e.end.line].is_char_boundary(e.end.byte)
+            {
+                return Err("edit range is invalid");
+            }
+        }
+        let mut order: Vec<usize> = (0..edits.len()).collect();
+        order.sort_by_key(|&i| (edits[i].start.line, edits[i].start.byte));
+        for pair in order.windows(2) {
+            let (a, b) = (&edits[pair[0]], &edits[pair[1]]);
+            if a.end > b.start {
+                return Err("edits overlap");
+            }
+        }
+        self.flush_group();
+        let before_cursor = self.cursor_position();
+        let mut actions = Vec::with_capacity(order.len());
+        let mut after_cursor = before_cursor;
+        for &i in order.iter().rev() {
+            let e = &edits[i];
+            let removed = self.text_in_range(e.start, e.end);
+            let inserted = e.new_text.replace("\r\n", "\n");
+            let end = self.replace_text_range(e.start, e.end, &inserted);
+            if i == primary {
+                after_cursor = end;
+            }
+            actions.push(EditorAction::ReplaceText {
+                start: e.start,
+                removed,
+                inserted,
+                before_cursor,
+                after_cursor: end,
+            });
+        }
+        actions.reverse();
+        self.selection = None;
+        self.cursor_line = after_cursor.line;
+        self.cursor_col = after_cursor.byte;
+        self.record_action(EditorAction::Compound { actions });
+        self.mark_content_changed();
+        self.clamp_cursor();
+        self.ensure_cursor_visible();
+        Ok(())
+    }
+
+    /// Byte-slice of the buffer between two positions (positions must be
+    /// valid and ordered — validated by `apply_edit_ranges` beforehand).
+    fn text_in_range(&self, start: TextPosition, end: TextPosition) -> String {
+        if start.line == end.line {
+            return self.buffer[start.line][start.byte..end.byte].to_string();
+        }
+        let mut out = self.buffer[start.line][start.byte..].to_string();
+        for line in &self.buffer[start.line + 1..end.line] {
+            out.push('\n');
+            out.push_str(line);
+        }
+        out.push('\n');
+        out.push_str(&self.buffer[end.line][..end.byte]);
+        out
+    }
+
     // ── Save ──────────────────────────────────────────────────────────
 
     /// Save only if the loaded/saved revision still matches disk.
@@ -3092,5 +3176,105 @@ mod tests {
     #[test]
     fn test_byte_boundary_past_end() {
         assert_eq!(text::floor_grapheme_boundary("hi", 10), 2);
+    }
+
+    // ── Batched ranged edits (LSP completion application) ────────────────
+
+    #[test]
+    fn apply_edit_ranges_empty_and_bad_primary_are_noops() {
+        let mut e = EditorState::new("abc", "f".into());
+        assert!(e.apply_edit_ranges(&[], 0).is_ok());
+        let edit = crate::lsp::features::RangeEdit {
+            start: TextPosition { line: 0, byte: 0 },
+            end: TextPosition { line: 0, byte: 1 },
+            new_text: "x".into(),
+        };
+        assert!(e.apply_edit_ranges(&[edit], 1).is_err());
+        assert_eq!(e.buffer.join("\n"), "abc");
+    }
+
+    #[test]
+    fn apply_edit_ranges_rejects_every_invalid_range() {
+        let mut e = EditorState::new("ab\ncd", "f".into());
+        let mk = |start: TextPosition, end: TextPosition| crate::lsp::features::RangeEdit {
+            start,
+            end,
+            new_text: "x".into(),
+        };
+        // start > end
+        assert!(e
+            .apply_edit_ranges(
+                &[mk(
+                    TextPosition { line: 0, byte: 2 },
+                    TextPosition { line: 0, byte: 1 },
+                )],
+                0,
+            )
+            .is_err());
+        // line out of bounds
+        assert!(e
+            .apply_edit_ranges(
+                &[mk(
+                    TextPosition { line: 5, byte: 0 },
+                    TextPosition { line: 5, byte: 1 },
+                )],
+                0,
+            )
+            .is_err());
+        // byte beyond line end
+        assert!(e
+            .apply_edit_ranges(
+                &[mk(
+                    TextPosition { line: 0, byte: 0 },
+                    TextPosition { line: 0, byte: 99 },
+                )],
+                0,
+            )
+            .is_err());
+        // non-boundary byte (mid UTF-8 scalar)
+        let mut e2 = EditorState::new("é", "f".into());
+        assert!(e2
+            .apply_edit_ranges(
+                &[mk(
+                    TextPosition { line: 0, byte: 0 },
+                    TextPosition { line: 0, byte: 1 },
+                )],
+                0,
+            )
+            .is_err());
+        assert_eq!(e.buffer.join("\n"), "ab\ncd");
+        assert_eq!(e2.buffer.join("\n"), "é");
+    }
+
+    #[test]
+    fn apply_edit_ranges_multiline_edit_undoes_exactly() {
+        let mut e = EditorState::new("one\ntwo\nthree", "f".into());
+        let before = e.buffer.join("\n");
+        let edit = crate::lsp::features::RangeEdit {
+            start: TextPosition { line: 0, byte: 2 },
+            end: TextPosition { line: 2, byte: 1 },
+            new_text: "X".into(),
+        };
+        e.apply_edit_ranges(&[edit], 0).unwrap();
+        assert_eq!(e.buffer.join("\n"), "onXhree");
+        e.undo();
+        assert_eq!(e.buffer.join("\n"), before);
+        // Disjoint edits in one batch also revert together.
+        let edits = vec![
+            crate::lsp::features::RangeEdit {
+                start: TextPosition { line: 0, byte: 0 },
+                end: TextPosition { line: 0, byte: 3 },
+                new_text: "A".into(),
+            },
+            crate::lsp::features::RangeEdit {
+                start: TextPosition { line: 2, byte: 0 },
+                end: TextPosition { line: 2, byte: 5 },
+                new_text: "B".into(),
+            },
+        ];
+        e.apply_edit_ranges(&edits, 1).unwrap();
+        assert_eq!(e.buffer.join("\n"), "A\ntwo\nB");
+        e.undo();
+        assert_eq!(e.buffer.join("\n"), before);
     }
 }
