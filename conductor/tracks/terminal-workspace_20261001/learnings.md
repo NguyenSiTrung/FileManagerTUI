@@ -1122,3 +1122,20 @@ verification evidence, and reusable patterns.
   receives 0x03 as a literal byte; the interrupt fixture uses `stty -echo`
   (echo off for clean output, ISIG preserved) so ^C kills the foreground
   process group and produces TerminalClosed.
+
+## 2026-10-04 - Phase 10 Task 2: bounded LSP stdio transport
+
+- **A writer thread blocked on `recv()` outlives a killed child.** Shutdown
+  joined the writer while its `SyncSender` was still alive in `self` → the
+  recv never ended and every real-child test hung >60 s. The fix is dropping
+  the sender (`Option::take`) before joining — channel close ends the loop
+  and drops stdin → clean child EOF.
+- **Bound tests must out-fill the OS pipe, not the queue.** Asserting
+  `admitted <= slots + k` is timing luck: the writer drains into a ~64 KiB
+  pipe, so tiny messages never reject deterministically. 4 KiB bodies fill
+  the pipe in ~16 frames; only the channel's 64-slot bound then caps
+  in-flight packets, and `WouldBlock` is guaranteed.
+- **`recv()` in a deadline loop defeats the deadline.** `Receiver::recv`
+  blocks past the wall-clock bound; test helpers take `recv_timeout`.
+- **Channel-close shutdown ordering:** drop sender → kill/wait child → join
+  writer, reader, stderr. Any earlier join can block on the live channel.

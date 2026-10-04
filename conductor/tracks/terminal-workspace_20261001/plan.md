@@ -876,22 +876,33 @@ exist. Add a module's declarations in the task that introduces it. Avoid broad
     (8 tests green; staged-surface `#[allow(dead_code)]` documented until
     Task 2 transport consumes it.)
 
-- [ ] Task 2: Implement bounded stdio JSON-RPC framing
+- [x] Task 2: Implement bounded stdio JSON-RPC framing
 
   **Files:** create `src/lsp/transport.rs`; modify `src/lsp/mod.rs`.
   **Requirements:** FR-10, AC-8.
   **Produces:** frame decoder/encoder, bounded read/write channels, message-size
   errors, and executable/argument process spawn without a shell.
-  - [ ] Test fragmented/coalesced headers and payloads, malformed/oversized
+  - [x] Test fragmented/coalesced headers and payloads, malformed/oversized
     frames, EOF, Unicode lengths, slow peers, and stderr draining.
     ```rust
     let body = br#"{"jsonrpc":"2.0","id":1,"result":null}"#;
     let framed = encode_frame(body);
     assert_eq!(decode_one(&framed).unwrap(), body);
     ```
-  - [ ] Use byte Content-Length, bound buffered partial frames, and separate
+    (every split point of a two-frame wire decodes identically; EOF clean at
+    boundaries/`EofMidFrame` mid-frame; unicode bodies measured in bytes;
+    real-child round trip through `cat` echo; 400-line stderr flood capped
+    at the 200-line ring.)
+  - [x] Use byte Content-Length, bound buffered partial frames, and separate
     stderr from protocol messages. Keep transport independent of App.
-  - [ ] Run `cargo test lsp::transport`.
+    (`FrameDecoder` bounds headers at 8 KiB and declared bodies at 16 MiB;
+    `LspTransport::spawn` execs argv via `Command` with no shell; outbound
+    queue 64 slots, `send` reports `WouldBlock`/`BrokenPipe` rather than
+    stalling; shutdown drops the queue sender so writer `recv` ends and all
+    joins return.)
+  - [x] Run `cargo test lsp::transport`.
+    (10 tests green incl. real-child echo, stderr drain, bounded send,
+    spawn-failure error paths.)
 
 - [ ] Task 3: Implement server/request lifecycle with fake peers
 
