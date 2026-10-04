@@ -797,24 +797,42 @@ exist. Add a module's declarations in the task that introduces it. Avoid broad
     based only on colored shell output.
   - [x] Run `cargo test terminal::emulator` and terminal widget tests.
 
-- [ ] Task 2: Preserve shell input and bound PTY process lifecycle
+- [x] Task 2: Preserve shell input and bound PTY process lifecycle
 
   **Files:** modify `src/terminal/pty.rs`, `src/terminal/mod.rs`, `src/handler.rs`,
   `src/event.rs`, `src/app.rs`, `src/main.rs`.
   **Requirements:** FR-6, FR-11, AC-9.
   **Consumes:** emulator replies/keymap; **produces:** ordered paste/key/reply input,
   exit events, bounded output and shutdown, hide/show persistence.
-  - [ ] Test Tab/Esc/Ctrl+C/Alt-modified keys, multiline bracketed paste,
+  - [x] Test Tab/Esc/Ctrl+C/Alt-modified keys, multiline bracketed paste,
     shell exit/restart, rapidly changing dimensions, and slow/failed writes.
     ```rust
-    assert_eq!(key_event_to_bytes(&escape), vec![0x1b]);
-    assert_eq!(key_event_to_bytes(&tab), vec![b'\t']);
+    assert_eq!(key_event_to_bytes(&escape, false), vec![0x1b]);
+    assert_eq!(key_event_to_bytes(&tab, false), vec![b'\t']);
     ```
-  - [ ] Pass mode-correct input to interactive applications; reserve only explicit
+    (keys incl. Ctrl+C → 0x03 proven byte-exact through a real raw-mode `cat`
+    PTY child in `keymap_terminal_keys_reach_pty_unchanged`; DECCKM + bracketed
+    paste matrix in `keymap_decckm_selects_ss3_cursor_sequences` /
+    `keymap_bracketed_paste_wraps_only_when_child_enabled_it`; exit→fresh-session
+    in `terminal_exit_then_restart_spawns_fresh_session`; resize storm +
+    hide-keeps-child in `terminal_rapid_resizes_and_hide_keep_child_alive`;
+    full/closed budget behavior in `transport_stdin_*` pty tests.)
+  - [x] Pass mode-correct input to interactive applications; reserve only explicit
     workspace chords, and never auto-run commands from OSC output.
-  - [ ] Use async/bounded writer paths and process cleanup tests; hide does not
+    (DEC mode 1 → SS3 arrows/Home/End; DEC mode 2004 → `\x1b[200~…\x1b[201~`
+    wrap, end-to-end through a real PTY in
+    `terminal_bracketed_paste_wraps_when_child_requested`; OSC inertness pinned
+    by `fixture_osc_sequences_are_inert_never_executed`.)
+  - [x] Use async/bounded writer paths and process cleanup tests; hide does not
     kill the child, but quit cannot wait indefinitely on it.
-  - [ ] Run `cargo test terminal` and terminal input handler tests.
+    (`test_shutdown_of_busy_child_is_bounded_and_reaped`: SIGKILL+reap+joins
+    complete < 3 s while output floods and input is queued; emulator DSR/DA
+    replies now drain through `process_terminal` into the same ordered PTY
+    write queue — `terminal_dsr_reply_drains_to_child_stdin` proves the bytes
+    reach a real child blocked on `\x1b[6n`.)
+  - [x] Run `cargo test terminal` and terminal input handler tests.
+    (57 terminal-filtered + full suite 1363 green; both clippy gates, release
+    build, fmt clean.)
 
 - [ ] Task 3: Automated checkpoint for terminal compatibility
 

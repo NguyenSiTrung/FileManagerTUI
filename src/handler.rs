@@ -79,7 +79,9 @@ pub fn handle_paste_event(app: &mut App, input: &str) {
         }
         AppMode::Normal if app.workspace.focus.panel == FocusedPanel::Terminal => {
             if let Some(pty) = &app.terminal_state.pty {
-                if let Err(error) = pty.write(input.as_bytes()) {
+                let bytes =
+                    terminal_paste_bytes(input, app.terminal_state.emulator.bracketed_paste());
+                if let Err(error) = pty.write(&bytes) {
                     app.set_status_message(format!("Terminal paste failed: {error}"));
                 }
             } else {
@@ -1642,8 +1644,9 @@ fn handle_terminal_keys(app: &mut App, key: KeyEvent, event_tx: &crate::event::E
     app.terminal_state.selection.clear();
     app.terminal_state.scroll_offset = 0;
 
-    // Convert KeyEvent to bytes and send to PTY
-    let bytes = key_event_to_bytes(&key);
+    // Convert KeyEvent to bytes and send to PTY. DEC mode 1 (DECCKM) from
+    // the child selects application-cursor encoding for arrows/Home/End.
+    let bytes = key_event_to_bytes(&key, app.terminal_state.emulator.application_cursor_keys());
     if !bytes.is_empty() {
         if let Some(ref pty) = app.terminal_state.pty {
             if let Err(error) = pty.write(&bytes) {
@@ -1653,18 +1656,33 @@ fn handle_terminal_keys(app: &mut App, key: KeyEvent, event_tx: &crate::event::E
     }
 }
 
+/// Wrap pasted text in bracketed-paste markers when the child enabled
+/// DEC mode 2004; otherwise the literal bytes go through unchanged.
+fn terminal_paste_bytes(input: &str, bracketed_paste: bool) -> Vec<u8> {
+    if !bracketed_paste {
+        return input.as_bytes().to_vec();
+    }
+    let mut bytes = Vec::with_capacity(input.len() + 12);
+    bytes.extend_from_slice(b"\x1b[200~");
+    bytes.extend_from_slice(input.as_bytes());
+    bytes.extend_from_slice(b"\x1b[201~");
+    bytes
+}
+
 /// Convert a crossterm KeyEvent into the byte sequence expected by a PTY.
-fn key_event_to_bytes(key: &KeyEvent) -> Vec<u8> {
+/// `application_cursor_keys` is DEC mode 1 (DECCKM): when the child set it,
+/// arrows and Home/End use SS3 (`\x1bO`) sequences instead of CSI (`\x1b[`).
+fn key_event_to_bytes(key: &KeyEvent, application_cursor_keys: bool) -> Vec<u8> {
     let mut ordinary = *key;
     ordinary.modifiers.remove(KeyModifiers::ALT);
-    let mut bytes = key_event_to_bytes_without_alt(&ordinary);
+    let mut bytes = key_event_to_bytes_without_alt(&ordinary, application_cursor_keys);
     if key.modifiers.contains(KeyModifiers::ALT) && !bytes.is_empty() {
         bytes.insert(0, 0x1b);
     }
     bytes
 }
 
-fn key_event_to_bytes_without_alt(key: &KeyEvent) -> Vec<u8> {
+fn key_event_to_bytes_without_alt(key: &KeyEvent, application_cursor_keys: bool) -> Vec<u8> {
     match key.code {
         KeyCode::Char(c) => {
             if key.modifiers.contains(KeyModifiers::CONTROL) {
@@ -1683,12 +1701,12 @@ fn key_event_to_bytes_without_alt(key: &KeyEvent) -> Vec<u8> {
         KeyCode::Enter => vec![b'\r'],
         KeyCode::Backspace => vec![0x7f],
         KeyCode::Delete => b"\x1b[3~".to_vec(),
-        KeyCode::Up => b"\x1b[A".to_vec(),
-        KeyCode::Down => b"\x1b[B".to_vec(),
-        KeyCode::Right => b"\x1b[C".to_vec(),
-        KeyCode::Left => b"\x1b[D".to_vec(),
-        KeyCode::Home => b"\x1b[H".to_vec(),
-        KeyCode::End => b"\x1b[F".to_vec(),
+        KeyCode::Up => application_or_normal(b"\x1bOA", b"\x1b[A", application_cursor_keys),
+        KeyCode::Down => application_or_normal(b"\x1bOB", b"\x1b[B", application_cursor_keys),
+        KeyCode::Right => application_or_normal(b"\x1bOC", b"\x1b[C", application_cursor_keys),
+        KeyCode::Left => application_or_normal(b"\x1bOD", b"\x1b[D", application_cursor_keys),
+        KeyCode::Home => application_or_normal(b"\x1bOH", b"\x1b[H", application_cursor_keys),
+        KeyCode::End => application_or_normal(b"\x1bOF", b"\x1b[F", application_cursor_keys),
         KeyCode::PageUp => b"\x1b[5~".to_vec(),
         KeyCode::PageDown => b"\x1b[6~".to_vec(),
         KeyCode::Insert => b"\x1b[2~".to_vec(),
@@ -1710,6 +1728,18 @@ fn key_event_to_bytes_without_alt(key: &KeyEvent) -> Vec<u8> {
         KeyCode::Tab => vec![b'\t'],
         KeyCode::Esc => vec![0x1b],
         _ => vec![],
+    }
+}
+
+fn application_or_normal(
+    application: &[u8],
+    normal: &[u8],
+    application_cursor_keys: bool,
+) -> Vec<u8> {
+    if application_cursor_keys {
+        application.to_vec()
+    } else {
+        normal.to_vec()
     }
 }
 
@@ -3996,18 +4026,61 @@ keys = []
     #[test]
     fn keymap_unreserved_shell_alt_chords_preserve_escape_encoding() {
         assert_eq!(
-            key_event_to_bytes(&make_key_with_modifiers(
-                KeyCode::Char('b'),
-                KeyModifiers::ALT
-            )),
+            key_event_to_bytes(
+                &make_key_with_modifiers(KeyCode::Char('b'), KeyModifiers::ALT),
+                false,
+            ),
             b"\x1bb"
         );
         assert_eq!(
-            key_event_to_bytes(&make_key_with_modifiers(
-                KeyCode::Char('a'),
-                KeyModifiers::ALT | KeyModifiers::CONTROL
-            )),
+            key_event_to_bytes(
+                &make_key_with_modifiers(
+                    KeyCode::Char('a'),
+                    KeyModifiers::ALT | KeyModifiers::CONTROL
+                ),
+                false,
+            ),
             b"\x1b\x01"
+        );
+    }
+    #[test]
+    fn keymap_decckm_selects_ss3_cursor_sequences() {
+        for (code, normal, application) in [
+            (KeyCode::Up, b"\x1b[A" as &[u8], b"\x1bOA" as &[u8]),
+            (KeyCode::Down, b"\x1b[B" as &[u8], b"\x1bOB" as &[u8]),
+            (KeyCode::Right, b"\x1b[C" as &[u8], b"\x1bOC" as &[u8]),
+            (KeyCode::Left, b"\x1b[D" as &[u8], b"\x1bOD" as &[u8]),
+            (KeyCode::Home, b"\x1b[H" as &[u8], b"\x1bOH" as &[u8]),
+            (KeyCode::End, b"\x1b[F" as &[u8], b"\x1bOF" as &[u8]),
+        ] {
+            assert_eq!(key_event_to_bytes(&make_key(code), false), normal);
+            assert_eq!(key_event_to_bytes(&make_key(code), true), application);
+            // Alt prefix composes with either encoding.
+            let mut alt = vec![0x1b];
+            alt.extend_from_slice(application);
+            assert_eq!(
+                key_event_to_bytes(&make_key_with_modifiers(code, KeyModifiers::ALT), true),
+                alt
+            );
+        }
+        // Non-cursor keys ignore the mode entirely.
+        assert_eq!(key_event_to_bytes(&make_key(KeyCode::Tab), true), b"\t");
+        assert_eq!(
+            key_event_to_bytes(&make_key(KeyCode::Esc), true),
+            vec![0x1b]
+        );
+    }
+    #[test]
+    fn keymap_bracketed_paste_wraps_only_when_child_enabled_it() {
+        assert_eq!(terminal_paste_bytes("a\nb", false), b"a\nb");
+        assert_eq!(
+            terminal_paste_bytes("a\nb", true),
+            b"\x1b[200~a\nb\x1b[201~"
+        );
+        // Multiline control characters stay literal inside the markers.
+        assert_eq!(
+            terminal_paste_bytes("x\x1b[200~injected", true),
+            b"\x1b[200~x\x1b[200~injected\x1b[201~"
         );
     }
     #[test]

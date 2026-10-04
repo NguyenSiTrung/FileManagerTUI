@@ -1085,3 +1085,29 @@ verification evidence, and reusable patterns.
   requires it.** 20 pre-existing `byte_char_slices` warnings in test code
   blocked the `--all-targets` gate; mechanical auto-fix + retest beats a
   documented-red gate. Zero of them touched the changed file.
+
+## 2026-10-04 - Phase 9 Task 2: reply drain, mode-correct input, lifecycle bounds
+
+- **The reply queue is worthless until something drains it.** Task 1 staged
+  `take_replies()` behind `#[allow(dead_code)]` with a documented stall caveat;
+  the Task-2 wiring is three lines in `process_terminal` (`take_replies()` →
+  `pty.write(&replies)`) — the *test* is where the work went: a real PTY child
+  that emits `\x1b[6n` then hex-dumps 6 stdin bytes (`dd|od|tr`) proves the
+  reply crossed back, not just that the queue filled.
+- **Mode-correct input needs exactly two modes.** DEC mode 1 (DECCKM) → SS3
+  `\x1bO*` arrows/Home/End; DEC mode 2004 → bracketed-paste wrap. Both are
+  tracked on the emulator (`set_private_mode` arms + RIS reset) and read at
+  the input seam (`handle_terminal_keys`, `handle_paste_event`) — the
+  observable path is the only honest wiring point.
+- **Hyperlink OSC display text IS printable.** `OSC 8;;url BEL text` renders
+  `text` — the inertness test asserts the payload is consumed (no replies,
+  no commands) while its display text lands in the grid, not that nothing
+  prints.
+- **`assert!(!timeout)` is not a bounded-wait test.** A `spawn_blocking`
+  shutdown measured after `.await` hangs forever instead of failing; wrap the
+  join itself in `tokio::time::timeout` so a real regression reports red.
+- **Much of Task 2 already existed.** The ordered/bounded input queue, exit
+  events, session-keyed output, hide-keeps-child, and restart-on-dead were
+  built in earlier phases — the delta was the reply drain + two mode arms +
+  pinning tests (9 new: 2 emulator fixtures, 2 handler unit, 4 main-loop PTY
+  integration, 1 pty busy-shutdown).

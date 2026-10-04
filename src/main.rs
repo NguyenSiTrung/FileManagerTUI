@@ -135,13 +135,25 @@ fn loop_wait(app: &App, now: std::time::Instant, redraw: Option<Duration>) -> Op
 }
 
 fn process_terminal(app: &mut App, session: u64, data: &[u8]) {
-    if app
+    let live = app
         .terminal_state
         .pty
         .as_ref()
-        .is_some_and(|pty| pty.session() == session)
-    {
-        app.terminal_state.emulator.process(data);
+        .is_some_and(|pty| pty.session() == session);
+    if !live {
+        return;
+    }
+    app.terminal_state.emulator.process(data);
+    // Drain emulator replies (DSR/DA answers) into the same ordered PTY
+    // queue as keys and pastes — a child blocked on a query stalls
+    // without them.
+    let replies = app.terminal_state.emulator.take_replies();
+    if !replies.is_empty() {
+        if let Some(pty) = app.terminal_state.pty.as_ref() {
+            if let Err(error) = pty.write(&replies) {
+                app.set_status_message(format!("Terminal reply not accepted: {error}"));
+            }
+        }
     }
 }
 
@@ -733,6 +745,202 @@ mod transport_loop_tests {
             .map(|s| s.content.as_ref())
             .collect();
         assert_eq!(text.trim(), "NEW");
+    }
+
+    struct PtyCleanup(App);
+    impl Drop for PtyCleanup {
+        fn drop(&mut self) {
+            self.0.shutdown_terminal();
+        }
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn spawn_script(
+        dir: &tempfile::TempDir,
+        name: &str,
+        script: &str,
+        tx: crate::event::EventSender,
+    ) -> terminal::pty::PtyProcess {
+        use std::os::unix::fs::PermissionsExt;
+        let runner = dir.path().join(name);
+        std::fs::write(&runner, script).unwrap();
+        std::fs::set_permissions(&runner, std::fs::Permissions::from_mode(0o700)).unwrap();
+        terminal::pty::PtyProcess::spawn(runner.to_str().unwrap(), dir.path(), 24, 80, tx).unwrap()
+    }
+
+    /// Task 2: a child blocked on a terminal query (DSR) must receive the
+    /// emulator's reply — `process_terminal` drains replies into the same
+    /// ordered PTY write queue as keys and pastes.
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[tokio::test]
+    async fn terminal_dsr_reply_drains_to_child_stdin() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = PtyCleanup(App::new(directory.path(), AppConfig::default()).unwrap());
+        let (tx, mut rx) = crate::event::event_channel(Default::default());
+        // Child queries cursor position, then hex-dumps the 6 bytes it reads
+        // back from stdin — reaching the child proves the reply drained.
+        app.0.terminal_state.pty = Some(spawn_script(
+            &directory,
+            "dsr",
+            "#!/bin/sh\nstty raw -echo\nprintf '\\033[6n'\ndd bs=1 count=6 status=none | od -An -v -tx1 | tr -d ' \\n'\nprintf '\\nDSR_DONE\\n'\n",
+            tx,
+        ));
+        let output = tokio::time::timeout(Duration::from_secs(5), async {
+            let mut out = Vec::new();
+            while let Some(event) = rx.recv().await {
+                if let Event::TerminalOutput { session, data } = event {
+                    process_terminal(&mut app.0, session, &data);
+                    out.extend_from_slice(&data);
+                    if out.windows(8).any(|w| w == b"DSR_DONE") {
+                        return out;
+                    }
+                }
+            }
+            out
+        })
+        .await
+        .unwrap();
+        // Cursor home → reply is `\x1b[1;1R` → od hex "1b5b313b3152".
+        assert!(
+            output.windows(12).any(|w| w == b"1b5b313b3152"),
+            "DSR reply must reach the child; got {:?}",
+            String::from_utf8_lossy(&output)
+        );
+    }
+
+    /// Task 2: bracketed paste wraps only when the child armed DEC mode 2004 —
+    /// mode-correct input for interactive applications.
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[tokio::test]
+    async fn terminal_bracketed_paste_wraps_when_child_requested() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = PtyCleanup(App::new(directory.path(), AppConfig::default()).unwrap());
+        let (tx, mut rx) = crate::event::event_channel(Default::default());
+        app.0.terminal_state.pty = Some(spawn_script(
+            &directory,
+            "bracketed-cat",
+            "#!/bin/sh\nstty raw -echo\nprintf '\\033[?2004h'\nexec /bin/cat\n",
+            tx.clone(),
+        ));
+        app.0.workspace.focus.panel = crate::app::FocusedPanel::Terminal;
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while let Some(event) = rx.recv().await {
+                if let Event::TerminalOutput { session, data } = event {
+                    process_terminal(&mut app.0, session, &data);
+                }
+                if app.0.terminal_state.emulator.bracketed_paste() {
+                    return;
+                }
+            }
+            panic!("cat exited before mode request reached the emulator");
+        })
+        .await
+        .unwrap();
+        handler::handle_paste_event(&mut app.0, "multi\nline");
+        let output = tokio::time::timeout(Duration::from_secs(5), async {
+            let mut out = Vec::new();
+            while let Some(event) = rx.recv().await {
+                if let Event::TerminalOutput { session, data } = event {
+                    process_terminal(&mut app.0, session, &data);
+                    out.extend_from_slice(&data);
+                    if out
+                        .windows(22)
+                        .any(|w| w == b"\x1b[200~multi\nline\x1b[201~")
+                    {
+                        return out;
+                    }
+                }
+            }
+            out
+        })
+        .await
+        .unwrap();
+        assert!(
+            output
+                .windows(22)
+                .any(|w| w == b"\x1b[200~multi\nline\x1b[201~"),
+            "paste must carry bracket markers the child asked for; got {:?}",
+            String::from_utf8_lossy(&output)
+        );
+    }
+
+    /// Task 2: shell exit is observed (TerminalClosed → exited) and an explicit
+    /// reopen starts a fresh session — never silently reusing a dead child.
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[tokio::test]
+    async fn terminal_exit_then_restart_spawns_fresh_session() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = PtyCleanup(App::new(directory.path(), AppConfig::default()).unwrap());
+        let (tx, mut rx) = crate::event::event_channel(Default::default());
+        app.0.terminal_state.pty = Some(spawn_script(
+            &directory,
+            "quick-exit",
+            "#!/bin/sh\nprintf 'BYE'\nexit 0\n",
+            tx.clone(),
+        ));
+        let old_session = app.0.terminal_state.pty.as_ref().unwrap().session();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while let Some(event) = rx.recv().await {
+                if let Event::TerminalClosed { session } = event {
+                    assert_eq!(session, old_session);
+                    return;
+                }
+            }
+            panic!("closed child produced no TerminalClosed");
+        })
+        .await
+        .unwrap();
+        // The event loop marks the exited flag on TerminalClosed.
+        app.0.terminal_state.exited = true;
+        // Reopening with a long-lived shell yields a new session, clears the
+        // flag, and leaves a running child.
+        let cat = directory.path().join("long-cat");
+        std::fs::write(&cat, "#!/bin/sh\nstty raw -echo\nexec /bin/cat\n").unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&cat, std::fs::Permissions::from_mode(0o700)).unwrap();
+        app.0.config.terminal.default_shell = Some(cat.to_str().unwrap().to_string());
+        assert!(app.0.open_terminal(&tx));
+        let pty = app.0.terminal_state.pty.as_ref().unwrap();
+        assert_ne!(pty.session(), old_session);
+        assert!(pty.is_alive());
+        assert!(!app.0.terminal_state.exited);
+    }
+
+    /// Task 2: rapidly changing dimensions and hiding the panel leave the
+    /// bound child alive and functional — hide never kills the process.
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[tokio::test]
+    async fn terminal_rapid_resizes_and_hide_keep_child_alive() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = PtyCleanup(App::new(directory.path(), AppConfig::default()).unwrap());
+        let (tx, _rx) = crate::event::event_channel(Default::default());
+        app.0.terminal_state.pty = Some(spawn_script(
+            &directory,
+            "cat",
+            "#!/bin/sh\nstty raw -echo\nexec /bin/cat\n",
+            tx.clone(),
+        ));
+        {
+            let pty = app.0.terminal_state.pty.as_ref().unwrap();
+            for (rows, cols) in [(24, 80), (1, 1), (40, 120), (8, 24), (16, 50), (24, 80)] {
+                pty.resize(rows, cols).unwrap();
+                app.0
+                    .terminal_state
+                    .emulator
+                    .resize(usize::from(rows), usize::from(cols));
+            }
+            assert!(pty.is_alive());
+        }
+        assert_eq!(app.0.terminal_state.emulator.visible_rows(), 24);
+        assert_eq!(app.0.terminal_state.emulator.visible_cols(), 80);
+        // Hiding a live terminal detaches the panel only.
+        if !app.0.workspace.layout.terminal_visible() {
+            app.0.workspace.layout.toggle_terminal();
+        }
+        app.0.workspace.focus.panel = crate::app::FocusedPanel::Terminal;
+        assert!(!app.0.toggle_terminal(&tx));
+        assert!(!app.0.workspace.layout.terminal_visible());
+        assert!(app.0.terminal_state.pty.as_ref().unwrap().is_alive());
     }
 }
 

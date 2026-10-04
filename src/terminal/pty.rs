@@ -1197,6 +1197,31 @@ mod tests {
         assert!(!pty.is_alive(), "PTY should not be alive after shutdown");
     }
 
+    /// Task 2: quitting must not wait indefinitely on a busy child — shutdown
+    /// SIGKILLs, reaps, and joins writer/reader inside a wall-clock bound
+    /// even while output streams and input is still queued.
+    #[tokio::test]
+    async fn test_shutdown_of_busy_child_is_bounded_and_reaped() {
+        let (tx, _rx) = crate::event::event_channel(Default::default());
+        let cwd = env::temp_dir();
+        let pty = PtyProcess::spawn("/bin/sh", &cwd, 24, 80, tx).unwrap();
+        pty.write(b"yes flooding\n").unwrap();
+        pty.write(b"sleep 60\n").unwrap();
+        let mut pty = Some(pty);
+        let done = tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            tokio::task::spawn_blocking(move || {
+                let pty = pty.take().unwrap();
+                pty.shutdown();
+                pty.is_alive()
+            }),
+        )
+        .await
+        .expect("bounded shutdown must not wait on a busy child")
+        .unwrap();
+        assert!(!done, "shutdown must reap the owned child");
+    }
+
     #[tokio::test]
     async fn test_resize() {
         let (tx, _rx) = crate::event::event_channel(Default::default());

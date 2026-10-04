@@ -117,6 +117,10 @@ pub struct TerminalEmulator {
     alternate: bool,
     /// Primary screen saved when the alternate screen is entered.
     saved_primary: Option<SavedPrimary>,
+    /// DEC private mode 1 (DECCKM): application cursor keys.
+    application_cursor_keys: bool,
+    /// DEC private mode 2004: bracketed paste.
+    bracketed_paste: bool,
 }
 
 impl TerminalEmulator {
@@ -143,6 +147,8 @@ impl TerminalEmulator {
             scroll_bottom: rows.saturating_sub(1),
             alternate: false,
             saved_primary: None,
+            application_cursor_keys: false,
+            bracketed_paste: false,
         }
     }
 
@@ -176,11 +182,9 @@ impl TerminalEmulator {
 
     /// Take the reply bytes (DSR/DA responses) produced so far, oldest first.
     ///
-    /// Staged observer: Task 2 wires this drain into the PTY write path so
-    /// each reply reaches the child exactly once; until then the queue can
-    /// grow while a blocked child waits (see `replies`). Fixture tests use it
-    /// today to assert the produced bytes.
-    #[allow(dead_code)]
+    /// The output coordinator drains this after every `process` batch and
+    /// writes the bytes to the PTY, so each reply reaches the child exactly
+    /// once in the same ordered queue as keys and pastes.
     pub fn take_replies(&mut self) -> Vec<u8> {
         std::mem::take(&mut self.replies)
     }
@@ -215,6 +219,22 @@ impl TerminalEmulator {
     #[allow(dead_code)]
     pub fn scroll_region(&self) -> (usize, usize) {
         (self.scroll_top, self.scroll_bottom)
+    }
+
+    /// Whether the child enabled application cursor keys (DEC mode 1, DECCKM).
+    ///
+    /// Task 2 input routing reads this to emit SS3 (`\x1bOA`..) instead of
+    /// CSI (`\x1b[A`..) arrow/Home/End sequences for interactive applications.
+    pub fn application_cursor_keys(&self) -> bool {
+        self.application_cursor_keys
+    }
+
+    /// Whether the child enabled bracketed paste (DEC mode 2004).
+    ///
+    /// Task 2 paste routing wraps pasted text in `\x1b[200~`/`\x1b[201~`
+    /// markers only while this mode is on.
+    pub fn bracketed_paste(&self) -> bool {
+        self.bracketed_paste
     }
 
     /// Resize the emulator grid.
@@ -544,6 +564,8 @@ impl<'a> Performer<'a> {
         self.emu.cursor_shape = CursorShape::Block;
         self.emu.alternate = false;
         self.emu.saved_primary = None;
+        self.emu.application_cursor_keys = false;
+        self.emu.bracketed_paste = false;
         self.emu.replies.clear();
         self.emu.scroll_top = 0;
         self.emu.scroll_bottom = self.emu.rows.saturating_sub(1);
@@ -557,7 +579,9 @@ impl<'a> Performer<'a> {
     /// Handle DEC private mode set/reset (with the `?` intermediate).
     fn set_private_mode(&mut self, mode: u16, enabled: bool) {
         match mode {
+            1 => self.emu.application_cursor_keys = enabled,
             25 => self.emu.cursor_visible = enabled,
+            2004 => self.emu.bracketed_paste = enabled,
             47 | 1047 | 1049 => {
                 if enabled {
                     self.enter_alternate();
@@ -1456,6 +1480,53 @@ mod tests {
         assert_eq!(emu.grid[0][0].ch, 'Z');
         assert_eq!(emu.grid[0][1].ch, ' ');
         assert_eq!(emu.cursor_position(), (0, 1));
+    }
+
+    #[test]
+    fn fixture_application_cursor_keys_and_bracketed_paste_modes() {
+        let mut emu = TerminalEmulator::new(4, 10);
+        assert!(!emu.application_cursor_keys());
+        assert!(!emu.bracketed_paste());
+        emu.process(b"\x1b[?1h\x1b[?2004h");
+        assert!(emu.application_cursor_keys());
+        assert!(emu.bracketed_paste());
+        emu.process(b"\x1b[?1l");
+        assert!(!emu.application_cursor_keys());
+        assert!(emu.bracketed_paste());
+        emu.process(b"\x1b[?2004l");
+        assert!(!emu.bracketed_paste());
+        // Both modes re-arm and a full reset (RIS) clears them.
+        emu.process(b"\x1b[?1h\x1b[?2004h\x1bc");
+        assert!(!emu.application_cursor_keys());
+        assert!(!emu.bracketed_paste());
+    }
+
+    #[test]
+    fn fixture_osc_sequences_are_inert_never_executed() {
+        let mut emu = TerminalEmulator::new(4, 20);
+        // Title set, hyperlink, and clipboard OSCs must not move the cursor,
+        // write to the grid, queue replies, or run anything — `osc_dispatch`
+        // is a deliberate no-op so child output can never auto-run commands.
+        emu.process(b"\x1b]0;rm -rf /\x07");
+        emu.process(b"\x1b]8;;http://example.invalid/\x07x\x1b]8;;\x07");
+        emu.process(b"\x1b]52;c;AAAA\x07");
+        // The only printed byte is the hyperlink's display text — the OSC
+        // payloads themselves are consumed, never rendered or run.
+        assert_eq!(emu.cursor_position(), (0, 1));
+        assert_eq!(emu.grid[0][0].ch, 'x');
+        assert!(emu.take_replies().is_empty());
+        assert!(emu
+            .grid
+            .iter()
+            .flatten()
+            .skip(1)
+            .all(|cell| cell.ch == ' ' && cell.combining.is_empty()));
+        assert!(!emu.alternate_screen());
+        assert!(emu.cursor_visible());
+        // Printable text still flows afterwards (parser not wedged by OSC).
+        emu.process(b"ok");
+        assert_eq!(emu.grid[0][1].ch, 'o');
+        assert_eq!(emu.grid[0][2].ch, 'k');
     }
 
     // ---- Phase 9 Task 1 coverage of the adapted emulator surface -----------
