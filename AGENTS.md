@@ -68,28 +68,42 @@ This protocol applies when ending a Beads implementation workflow. It is subordi
 - If a required sync or push is blocked, stop and report the exact command and error.
 <!-- END BEADS INTEGRATION -->
 
-## Landing the Plane (Session Completion)
+## Git Policy (takes precedence over the managed blocks above)
 
-**When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
+This project runs Conductor tracks and Superpowers plans. Both commit per task.
+conductor/workflow.md §Commits is an explicit repository instruction, and the
+managed Beads blocks state they do not override repository, user, or
+orchestrator instructions — so the rules below win wherever they conflict.
 
-**MANDATORY WORKFLOW:**
+- Commit per task: ALLOWED, no approval needed. conductor/workflow.md
+  mandates a commit after each task completes and its tests pass (with a
+  `git notes add -m "..."` task summary). Superpowers
+  subagent-driven-development and executing-plans implementers commit per
+  task too. Do not defer these commits to session end.
+- `git push`: NEVER unless the user explicitly asks. Conductor commits
+  locally and never pushes; the user decides when to push.
+- `git pull` / `git fetch`: NEVER automatically. No auto-rebase, no
+  auto-sync at session end. Run only on explicit user request.
+- `bd dolt push`: NOT per task. Run once when the user asks, normally at
+  session end, alongside `bd close` and note updates.
+- `bd close` / `bd update --notes` for the task just finished: run as normal
+  during the session — task tracking is not gated by this policy.
+- Everything else in the managed Beads blocks stands unchanged.
 
-1. **File issues for remaining work** - Create issues for anything that needs follow-up
+## Session Close (repo override)
+
+When ending a work session:
+
+1. **File issues for remaining work** - Create beads for anything that needs follow-up
 2. **Run quality gates** (if code changed) - Tests, linters, builds
 3. **Update issue status** - Close finished work, update in-progress items
-4. **PUSH TO REMOTE** - This is MANDATORY:
-   ```bash
-   git pull --rebase
-   bd sync
-   git push
-   git status  # MUST show "up to date with origin"
-   ```
-5. **Clean up** - Clear stashes, prune remote branches
-6. **Verify** - All changes committed AND pushed
-7. **Hand off** - Provide context for next session
+4. **Hand off** - Summarize changes, validation, issue status, unpushed commits, and suggested next commands (`git push`, `bd dolt push`) for the user to run when ready
 
-**CRITICAL RULES:**
-- Work is NOT complete until `git push` succeeds
-- NEVER stop before pushing - that leaves work stranded locally
-- NEVER say "ready to push when you are" - YOU must push
-- If push fails, resolve and retry until it succeeds
+Do NOT run `git pull`, `git push`, or `bd sync` as part of session close; see Git Policy above.
+
+## External Research & Dependency Investigation
+
+The `firecrawl` CLI is installed globally and queryable keyless for developer index searches:
+- **API contracts, library bugs, and error traces**: Run `firecrawl developer "<query>" [--limit <n>]` (e.g. `firecrawl developer "fastify listen localhost" --limit 5`). It queries GitHub issues, merged PRs, READMEs, and curated docs, returning exact markdown passages. Put all scoping (library name, error text) in the query string.
+- **Full documentation extraction**: Run `firecrawl scrape <url>` when a target doc URL needs complete reading.
+- **Tooling boundary**: Use workspace tools (`read`, `grep`, `glob`, `lsp`) for local code; reserve `firecrawl` strictly for external libraries and dependencies.
