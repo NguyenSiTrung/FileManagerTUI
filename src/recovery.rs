@@ -471,7 +471,7 @@ impl RecoveryStore {
         let now_secs = unix_secs(now);
         let age_cutoff = now_secs.saturating_sub(policy.max_age_secs());
         let mut deleted = 0usize;
-        entries.sort_by(|a, b| a.0.cmp(&b.0));
+        entries.sort_by_key(|e| e.0);
         let mut retained: Vec<(i64, PathBuf)> = Vec::new();
         for (order, path) in entries {
             if order < age_cutoff {

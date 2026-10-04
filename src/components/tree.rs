@@ -408,11 +408,9 @@ impl<'a> Widget for TreeWidget<'a> {
             let thumb_size = (visible_height * visible_height / total_items).max(1);
 
             // Thumb position
-            let thumb_pos = if max_scroll > 0 {
-                scroll * (visible_height.saturating_sub(thumb_size)) / max_scroll
-            } else {
-                0
-            };
+            let thumb_pos = (scroll * (visible_height.saturating_sub(thumb_size)))
+                .checked_div(max_scroll)
+                .unwrap_or(0);
 
             let track_style = Style::default().fg(self.theme.scrollbar_track_fg);
             let thumb_style = Style::default().fg(self.theme.scrollbar_thumb_fg);

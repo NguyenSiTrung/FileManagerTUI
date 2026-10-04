@@ -588,9 +588,9 @@ fn parse_simple(record: &[u8], kind: GitEntryKind) -> Result<GitEntry, GitParseE
         ));
     };
     let status = match kind {
-        GitEntryKind::Untracked => [b'?', b'?'],
-        GitEntryKind::Ignored => [b'!', b'!'],
-        _ => [b'.', b'.'],
+        GitEntryKind::Untracked => *b"??",
+        GitEntryKind::Ignored => *b"!!",
+        _ => *b"..",
     };
     Ok(GitEntry {
         path: require_path(rest)?,

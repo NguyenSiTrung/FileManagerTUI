@@ -714,11 +714,7 @@ impl<'a> Widget for HelpOverlay<'a> {
                     // Show scroll position as percentage
                     let total = content_lines.len();
                     let visible_end = (scroll + content_height).min(total);
-                    let pct = if total > 0 {
-                        (visible_end * 100) / total
-                    } else {
-                        100
-                    };
+                    let pct = (visible_end * 100).checked_div(total).unwrap_or(100);
                     format!(" {}% ", pct)
                 }
             };

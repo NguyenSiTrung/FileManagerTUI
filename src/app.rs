@@ -356,7 +356,7 @@ impl RecoveryContext {
         policy: crate::recovery::RecoveryPolicy,
     ) -> Self {
         let mut records = store.load_all(&root, &policy, std::time::SystemTime::now());
-        records.sort_by(|a, b| b.captured_secs.cmp(&a.captured_secs));
+        records.sort_by_key(|r| std::cmp::Reverse(r.captured_secs));
         Self {
             throttle: crate::recovery::SnapshotThrottle::new(policy.min_interval),
             store,
@@ -372,7 +372,7 @@ impl RecoveryContext {
             .store
             .load_all(&self.root, &self.policy, std::time::SystemTime::now());
         self.records
-            .sort_by(|a, b| b.captured_secs.cmp(&a.captured_secs));
+            .sort_by_key(|r| std::cmp::Reverse(r.captured_secs));
     }
 
     /// Write recovery snapshots for every dirty pinned document, bounded by
@@ -420,7 +420,7 @@ impl RecoveryContext {
             });
             self.records.push(record);
             self.records
-                .sort_by(|a, b| b.captured_secs.cmp(&a.captured_secs));
+                .sort_by_key(|r| std::cmp::Reverse(r.captured_secs));
             self.records.truncate(self.policy.max_records.max(1));
         }
         None
@@ -4121,12 +4121,10 @@ impl App {
                     self.preview_state.total_lines = 1;
                 }
             }
-            Err(error) => {
-                if same_path {
-                    self.preview_state.content_lines =
-                        vec![Line::raw(format!("Preview failed: {error:?}"))];
-                    self.preview_state.total_lines = 1;
-                }
+            Err(error) if same_path => {
+                self.preview_state.content_lines =
+                    vec![Line::raw(format!("Preview failed: {error:?}"))];
+                self.preview_state.total_lines = 1;
             }
             _ => {}
         }
@@ -5630,7 +5628,7 @@ impl App {
             .collect();
 
         // Sort by score descending
-        results.sort_by(|a, b| b.score.cmp(&a.score));
+        results.sort_by_key(|r| std::cmp::Reverse(r.score));
         // Limit to top 50
         results.truncate(50);
 

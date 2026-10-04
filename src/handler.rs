@@ -2122,12 +2122,10 @@ fn handle_input_dialog(app: &mut App, key: KeyEvent, kind: DialogKind) {
         KeyCode::Right => app.dialog_move_cursor_right(),
         KeyCode::Home => app.dialog_cursor_home(),
         KeyCode::End => app.dialog_cursor_end(),
-        KeyCode::Delete => {
-            // Forward delete: move right then backspace
-            if app.dialog_state.cursor_position < app.dialog_state.input.len() {
-                app.dialog_move_cursor_right();
-                app.dialog_delete_char();
-            }
+        // Forward delete: move right then backspace
+        KeyCode::Delete if app.dialog_state.cursor_position < app.dialog_state.input.len() => {
+            app.dialog_move_cursor_right();
+            app.dialog_delete_char();
         }
         _ => {}
     }
