@@ -1288,21 +1288,31 @@ exist. Add a module's declarations in the task that introduces it. Avoid broad
     llvm-cov summary, musl build when installed; summary exits 1 on any
     mandatory FAIL/BLOCK — full run: all mandatory gates passed.)
 
-- [ ] Task 4: Final automated acceptance checkpoint and tracking handoff
+- [x] Task 4: Final automated acceptance checkpoint and tracking handoff
 
   **Requirements:** all Functional Requirements and AC-1 through AC-12.
-  - [ ] Run `cargo test`, `cargo clippy -- -D warnings`, `cargo fmt --check`,
+  - [x] Run `cargo test`, `cargo clippy -- -D warnings`, `cargo fmt --check`,
     `python3 scripts/test-terminal-workspace.py`,
     `npm --prefix tools/terminal-tests test`, and the coverage/build gates.
-  - [ ] Produce a requirement-to-test evidence table with failures/blockers
+    (1524/1524 tests; clippy/fmt clean; PTY 13/13; browser 7/7; llvm-cov
+    94.6%L/94.8%F; gnu + musl builds; `check-terminal-workspace.sh` exit 0.)
+  - [x] Produce a requirement-to-test evidence table with failures/blockers
     clearly identified. No criterion is satisfied by a manual test.
-  - [ ] Verify Git/LSP/runtime fallback, process cleanup, recovery privacy,
+    (`acceptance-evidence.md`: gate table + FR-1..FR-11 + AC-1..AC-12 →
+    test map + recorded boundaries.)
+  - [x] Verify Git/LSP/runtime fallback, process cleanup, recovery privacy,
     release artifact size, and cross-platform results from actual output.
-  - [ ] Update Beads/track status only after all mandatory checks pass. Capture
+    (missing_git/missing_lsp/feature_flags_off scenarios; reap/assert-exit
+    in every PTY run; private-dir modes + refuse-corrupt recovery;
+    3.85 MiB gnu / 3.97 MiB musl; macOS/Windows wired as CI evidence.)
+  - [x] Update Beads/track status only after all mandatory checks pass. Capture
     reusable learnings and file any remaining follow-up work without closing
     unrelated archived issues.
-  - [ ] Report changed files and Git status. Do not commit/push/sync remotely
+    (cen.12.4 + cen.12 + cen closed post-gates; earlier-phase follow-up
+    beads 9kk/e0y/nux/bte/652.* left open untouched — unrelated work.)
+  - [x] Report changed files and Git status. Do not commit/push/sync remotely
     without active authority. This track has no manual completion gate.
+    (Per-task commits through 12.4; no push/pull/dolt sync performed.)
 
 ## Requirement Coverage
 

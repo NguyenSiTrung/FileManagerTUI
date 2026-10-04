@@ -208,3 +208,35 @@ fixture runs. Phase 8 epic (FileManagerTUI-cen.8) closed; recorded gaps: AC-12
 cross-platform checks not re-run on Linux, stale-generation refusal unit-proven
 rather than runtime-proven, and the deferred-refresh deferral discriminated by
 unit test because the watcher's own events mask it in the PTY.
+
+Phase 12 (automated terminal/browser acceptance and handoff) — all four tasks
+closed, completing the track (12/12 phases, 52/52 tasks):
+
+- .12.1 built the isolated PTY + browser-terminal fixtures
+  (scripts/test-terminal-workspace.py stdlib runner; tools/terminal-tests
+  node-pty → ws → vendored xterm.js server driven by Playwright).
+- .12.2 automated the full AC-1..AC-11 matrix — 13 PTY scenarios +
+  7 browser tests. The governing discovery: ratatui diff-renders only
+  changed cells and emits styled spans separately, so screen assertions
+  must match ANSI-stripped text and use only freshly-emitting content
+  (candidate `▸` rows, `Fuzzy Finder` title, `! [pin]` markers), never
+  already-rendered chrome. Also shipped a product fix found red-first:
+  CR-only line endings in bracketed paste now normalize to LF.
+- .12.3 documented the shipped surface (README Git/LSP/recovery sections
+  + config blocks + harness commands; PLAN.md §11.3/11.4; conductor
+  product/tech-stack/guidelines), added the `release-builds` CI matrix
+  (linux-musl/macos/windows --release + size report, existing
+  tag/dispatch triggers only), and shipped
+  scripts/check-terminal-workspace.sh — the single quality runner with
+  nonzero exit on mandatory FAIL/BLOCK. Local musl toolchain installed
+  (rustup + musl-tools): 4,158,072-byte statically-linked binary vs the
+  4,034,400-byte gnu build, both under the 10 MiB NFR.
+- .12.4 produced acceptance-evidence.md (gate table + FR-1..FR-11 +
+  AC-1..AC-12 → test map + recorded boundaries), closed cen.12.4/cen.12/
+  cen, and flipped the track to completed. Unrelated earlier-phase
+  follow-up beads (9kk, e0y, nux, bte, 652.*) left open untouched.
+
+Final mandatory gates: 1524/1524 cargo tests, clippy (lib +
+all-targets) clean, fmt clean, PTY 13/13, browser 7/7, llvm-cov 94.6%
+lines / 94.8% functions, static musl build green — quality runner exit 0.
+No manual verification was used anywhere in the track.

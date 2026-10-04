@@ -1381,3 +1381,14 @@ verification evidence, and reusable patterns.
   task, not just new-section writing.
 - **Gate evidence**: llvm-cov 94.6% lines / 94.8% functions; quality
   runner reports SKIP (not silent pass) for absent optional tooling.
+
+## Phase 12 Task 4 — Final checkpoint + handoff (2026-10-04)
+
+- Track complete: 12 phases / 52 tasks, all `[x]`. Final gate run:
+  1524/1524 unit tests, both clippys + fmt clean, PTY 13/13, browser 7/7,
+  llvm-cov 94.6% lines / 94.8% functions, gnu 4,034,400 B + musl
+  4,158,072 B statically-linked binary — `check-terminal-workspace.sh`
+  exit 0.
+- `acceptance-evidence.md` maps every FR/AC to automated evidence and
+  records boundaries honestly (no live SSH/Jupyter/Kubeflow claim;
+  macOS/Windows checks are CI-wired, not locally run).

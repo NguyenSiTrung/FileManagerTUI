@@ -76,10 +76,13 @@
 
 ---
 
-## [~] Track: Terminal Workspace for Headless and Web Terminals
+## [x] Track: Terminal Workspace for Headless and Web Terminals
 
 *Link: [./conductor/tracks/terminal-workspace_20261001/](./conductor/tracks/terminal-workspace_20261001/)*
 
 Priority: high. Includes safe editing, multiple documents, adaptive panes,
 browser-terminal profiles, search/recovery, read-only Git, LSP, and diagnostics.
 Verification is automated only; parallel execution requires disjoint ownership.
+COMPLETED 2026-10-04 — all 12 phases / 52 tasks closed; acceptance evidence in
+`acceptance-evidence.md` (1524 tests, PTY 13/13, browser 7/7, cov 94.6%L,
+gnu 3.85 MiB + static-musl 3.97 MiB binaries).

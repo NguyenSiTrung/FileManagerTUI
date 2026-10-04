@@ -16,9 +16,10 @@
     "Read-Only Git State",
     "Embedded-Terminal Compatibility",
     "LSP Positions, Transport, Client, and Trust",
-    "Language Features and Diagnostics"
+    "Language Features and Diagnostics",
+    "Automated Terminal/Browser Acceptance and Handoff"
   ],
-  "status": "in_progress",
+  "status": "completed",
   "verification_policy": "automated_only",
   "section_count": 1,
   "last_handoff": "2026-10-04T15:30:03Z",
@@ -33,6 +34,6 @@
       "note": "Phases 1-8 closed; Phase 9 Task 1 approved with a six-item fix round pending (its worker was cancelled mid-flight and the tree was restored to the verified revision 4cd0559f)."
     }
   ],
-  "last_updated": "2026-10-04T21:20:00Z",
-  "current_task": "cen.12.4"
+  "last_updated": "2026-10-04T21:30:00Z",
+  "current_task": null
 }
