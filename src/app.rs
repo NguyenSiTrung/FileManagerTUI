@@ -14531,16 +14531,12 @@ mod tests {
         assert!(app.accept_git_refresh(git_refresh(
             second,
             repo_a.path(),
-            git_snapshot_with(("a.txt", crate::git::GitEntryKind::Ordinary, [b'.', b'M'])),
+            git_snapshot_with(("a.txt", crate::git::GitEntryKind::Ordinary, *b".M")),
         )));
         assert!(!app.accept_git_refresh(git_refresh(
             first,
             repo_a.path(),
-            git_snapshot_with((
-                "stale.txt",
-                crate::git::GitEntryKind::Ordinary,
-                [b'.', b'M']
-            )),
+            git_snapshot_with(("stale.txt", crate::git::GitEntryKind::Ordinary, *b".M")),
         )));
         assert!(app.git_snapshot().is_some());
 
@@ -14550,7 +14546,7 @@ mod tests {
         assert!(app.accept_git_refresh(git_refresh(
             third,
             repo_b.path(),
-            git_snapshot_with(("b.txt", crate::git::GitEntryKind::Ordinary, [b'.', b'M'])),
+            git_snapshot_with(("b.txt", crate::git::GitEntryKind::Ordinary, *b".M")),
         )));
         assert!(
             app.git_render().is_none(),
@@ -14562,7 +14558,7 @@ mod tests {
         assert!(app.accept_git_refresh(git_refresh(
             fourth,
             repo_a.path(),
-            git_snapshot_with(("a.txt", crate::git::GitEntryKind::Ordinary, [b'.', b'M'])),
+            git_snapshot_with(("a.txt", crate::git::GitEntryKind::Ordinary, *b".M")),
         )));
         assert!(app.git_render().is_some());
     }
@@ -14585,7 +14581,7 @@ mod tests {
         assert!(app.accept_git_refresh(git_refresh(
             first,
             repo_a.path(),
-            git_snapshot_with(("a.txt", crate::git::GitEntryKind::Ordinary, [b'.', b'M'])),
+            git_snapshot_with(("a.txt", crate::git::GitEntryKind::Ordinary, *b".M")),
         )));
         assert!(app.git_render().is_some());
 
@@ -14701,11 +14697,7 @@ mod tests {
         assert!(app.accept_git_refresh(git_refresh(
             generation,
             repo.path(),
-            git_snapshot_with((
-                "changed.txt",
-                crate::git::GitEntryKind::Ordinary,
-                [b'.', b'M']
-            )),
+            git_snapshot_with(("changed.txt", crate::git::GitEntryKind::Ordinary, *b".M")),
         )));
         let (_, snapshot) = app.git_render().expect("converged snapshot must render");
         assert!(
@@ -14732,7 +14724,7 @@ mod tests {
         app.accept_git_refresh(git_refresh(
             generation,
             repo.path(),
-            git_snapshot_with(("a.txt", crate::git::GitEntryKind::Ordinary, [b'.', b'M'])),
+            git_snapshot_with(("a.txt", crate::git::GitEntryKind::Ordinary, *b".M")),
         ));
         assert!(
             app.git_snapshot().is_none(),
@@ -14750,7 +14742,7 @@ mod tests {
         s3.accept_git_refresh(git_refresh(
             generation,
             repo.path(),
-            git_snapshot_with(("a.txt", crate::git::GitEntryKind::Ordinary, [b'.', b'M'])),
+            git_snapshot_with(("a.txt", crate::git::GitEntryKind::Ordinary, *b".M")),
         ));
         assert!(s3.git_snapshot().is_none());
         assert!(!s3.git_indicators_enabled());

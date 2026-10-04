@@ -1086,7 +1086,7 @@ mod tests {
                 path: "renamed.txt".to_string(),
                 original_path: Some("original.txt".to_string()),
                 kind: GitEntryKind::Renamed,
-                status: [b'R', b'.'],
+                status: *b"R.",
             }],
         };
         assert_eq!(symbolic.branch.label(), "main");
@@ -1109,14 +1109,14 @@ mod tests {
             path: "ignored.log".to_string(),
             original_path: None,
             kind: GitEntryKind::Ignored,
-            status: [b'!', b'!'],
+            status: *b"!!",
         };
         assert!(ignored.is_ignored() && !ignored.is_conflicted());
         let unmerged = GitEntry {
             path: "conflict.txt".to_string(),
             original_path: None,
             kind: GitEntryKind::Unmerged,
-            status: [b'U', b'U'],
+            status: *b"UU",
         };
         assert!(unmerged.is_conflicted() && unmerged.is_staged() && unmerged.is_unstaged());
 

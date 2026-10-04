@@ -100,6 +100,10 @@ pub struct TerminalEmulator {
     /// Saved cursor position (for ESC 7 / ESC 8).
     saved_cursor: Option<(usize, usize)>,
     /// Bytes the emulator owes the child (DSR/DA replies), oldest first.
+    ///
+    /// Known inter-task gap (accepted for Task 1, closed by Task 2): nothing
+    /// drains this queue into the PTY writer yet, so a child blocked on a
+    /// DSR/DA reply stalls and the queue grows until the drain is wired.
     replies: Vec<u8>,
     /// DEC private mode 25 (DECTCEM) cursor visibility.
     cursor_visible: bool,
@@ -172,8 +176,10 @@ impl TerminalEmulator {
 
     /// Take the reply bytes (DSR/DA responses) produced so far, oldest first.
     ///
-    /// The coordinator returns these to the child; the queue is drained so each
-    /// reply is delivered exactly once.
+    /// Staged observer: Task 2 wires this drain into the PTY write path so
+    /// each reply reaches the child exactly once; until then the queue can
+    /// grow while a blocked child waits (see `replies`). Fixture tests use it
+    /// today to assert the produced bytes.
     #[allow(dead_code)]
     pub fn take_replies(&mut self) -> Vec<u8> {
         std::mem::take(&mut self.replies)
@@ -185,18 +191,27 @@ impl TerminalEmulator {
     }
 
     /// The cursor shape requested through DECSCUSR.
+    ///
+    /// Staged observer for Task 2/3 terminal-state plumbing (cursor rendering
+    /// and hide/show state); Task 1 fixture tests assert it today.
     #[allow(dead_code)]
     pub fn cursor_shape(&self) -> CursorShape {
         self.cursor_shape
     }
 
     /// Whether the alternate screen buffer is currently displayed.
+    ///
+    /// Staged observer for Task 2/3 (full-screen application state and
+    /// hide/show lifecycle checks); Task 1 fixture tests assert it today.
     #[allow(dead_code)]
     pub fn alternate_screen(&self) -> bool {
         self.alternate
     }
 
     /// The active scrolling region as an inclusive `(top, bottom)` row pair.
+    ///
+    /// Staged observer for Task 2/3 (scroll-region acceptance checks and
+    /// bounded-scroll assertions); Task 1 fixture tests assert it today.
     #[allow(dead_code)]
     pub fn scroll_region(&self) -> (usize, usize) {
         (self.scroll_top, self.scroll_bottom)
@@ -656,12 +671,14 @@ impl<'a> vte::Perform for Performer<'a> {
             // Cursor Down (CUD)
             'B' => {
                 let n = params_vec.first().copied().unwrap_or(1).max(1) as usize;
-                self.emu.cursor_row = (self.emu.cursor_row + n).min(self.emu.rows - 1);
+                self.emu.cursor_row =
+                    (self.emu.cursor_row + n).min(self.emu.rows.saturating_sub(1));
             }
             // Cursor Forward (CUF)
             'C' => {
                 let n = params_vec.first().copied().unwrap_or(1).max(1) as usize;
-                self.emu.cursor_col = (self.emu.cursor_col + n).min(self.emu.cols - 1);
+                self.emu.cursor_col =
+                    (self.emu.cursor_col + n).min(self.emu.cols.saturating_sub(1));
             }
             // Cursor Back (CUB)
             'D' => {
@@ -672,11 +689,14 @@ impl<'a> vte::Perform for Performer<'a> {
             'H' | 'f' => {
                 let row = params_vec.first().copied().unwrap_or(1).max(1) as usize - 1;
                 let col = params_vec.get(1).copied().unwrap_or(1).max(1) as usize - 1;
-                self.emu.cursor_row = row.min(self.emu.rows - 1);
-                self.emu.cursor_col = col.min(self.emu.cols - 1);
+                self.emu.cursor_row = row.min(self.emu.rows.saturating_sub(1));
+                self.emu.cursor_col = col.min(self.emu.cols.saturating_sub(1));
             }
             // Erase in Display (ED)
             'J' => {
+                if self.emu.cursor_row >= self.emu.grid.len() {
+                    return;
+                }
                 let mode = params_vec.first().copied().unwrap_or(0);
                 match mode {
                     0 => {
@@ -719,6 +739,9 @@ impl<'a> vte::Perform for Performer<'a> {
             }
             // Erase in Line (EL)
             'K' => {
+                if self.emu.cursor_row >= self.emu.grid.len() {
+                    return;
+                }
                 let mode = params_vec.first().copied().unwrap_or(0);
                 let blank = self.blank_cell();
                 match mode {
@@ -749,7 +772,8 @@ impl<'a> vte::Perform for Performer<'a> {
             // Cursor Next Line (CNL)
             'E' => {
                 let n = params_vec.first().copied().unwrap_or(1).max(1) as usize;
-                self.emu.cursor_row = (self.emu.cursor_row + n).min(self.emu.rows - 1);
+                self.emu.cursor_row =
+                    (self.emu.cursor_row + n).min(self.emu.rows.saturating_sub(1));
                 self.emu.cursor_col = 0;
             }
             // Cursor Previous Line (CPL)
@@ -761,7 +785,7 @@ impl<'a> vte::Perform for Performer<'a> {
             // Cursor Horizontal Absolute (CHA)
             'G' => {
                 let col = params_vec.first().copied().unwrap_or(1).max(1) as usize - 1;
-                self.emu.cursor_col = col.min(self.emu.cols - 1);
+                self.emu.cursor_col = col.min(self.emu.cols.saturating_sub(1));
             }
             // Scroll Up (SU)
             'S' => {
@@ -901,8 +925,8 @@ impl<'a> vte::Perform for Performer<'a> {
             }
             'u' => {
                 if let Some((r, c)) = self.emu.saved_cursor {
-                    self.emu.cursor_row = r.min(self.emu.rows - 1);
-                    self.emu.cursor_col = c.min(self.emu.cols - 1);
+                    self.emu.cursor_row = r.min(self.emu.rows.saturating_sub(1));
+                    self.emu.cursor_col = c.min(self.emu.cols.saturating_sub(1));
                 }
             }
             // Erase Characters (ECH)
@@ -931,8 +955,8 @@ impl<'a> vte::Perform for Performer<'a> {
             // Restore cursor (DECRC)
             b'8' => {
                 if let Some((r, c)) = self.emu.saved_cursor {
-                    self.emu.cursor_row = r.min(self.emu.rows - 1);
-                    self.emu.cursor_col = c.min(self.emu.cols - 1);
+                    self.emu.cursor_row = r.min(self.emu.rows.saturating_sub(1));
+                    self.emu.cursor_col = c.min(self.emu.cols.saturating_sub(1));
                 }
             }
             // Reset (RIS)
@@ -1455,11 +1479,36 @@ mod tests {
         emu.process(b"\x1b[S\x1b[T\x1b[M\x1b[L\n\x1bD\x1bM");
         emu.process(b"\x1b[6n\x1b[c\x1b[?25l\x1b[4 q\x1b[?1049h\x1b[?1049l");
         emu.process(b"\x1bc");
+        // Cursor and erase sequences on a 0x0 grid must not panic or wrap the
+        // cursor out of bounds: CUP/HVP, CUD, CUF, CNL, CHA, ED 0-3, EL 0-2,
+        // CSI save/restore, and DECSC/DECRC.
+        emu.process(b"\x1b[2;3H\x1b[2;3f\x1b[2B\x1b[2C\x1b[3E\x1b[4G");
+        emu.process(b"\x1b[0J\x1b[1J\x1b[2J\x1b[3J\x1b[0K\x1b[1K\x1b[2K");
+        emu.process(b"\x1b[s\x1b[u\x1b7\x1b8");
+        assert_eq!(emu.cursor_position(), (0, 0));
         emu.resize(0, 0);
         assert_eq!((emu.visible_rows(), emu.visible_cols()), (0, 0));
         let mut narrow = TerminalEmulator::new(1, 0);
         narrow.process(b"x");
         assert_eq!(narrow.visible_cols(), 0);
+    }
+
+    #[test]
+    fn coverage_erase_display_mode_one_clears_through_cursor() {
+        let mut emu = TerminalEmulator::new(4, 6);
+        emu.process(b"AAAAAA\r\nBBBBBB\r\nCCCCCC\r\nDDDDDD");
+        // ED mode 1 clears every row above the cursor and the cursor row up to
+        // and including the cursor column; the tail and rows below survive.
+        emu.process(b"\x1b[3;4H\x1b[1J");
+        assert_eq!(emu.grid[0][0].ch, ' ');
+        assert_eq!(emu.grid[0][5].ch, ' ');
+        assert_eq!(emu.grid[1][0].ch, ' ');
+        assert_eq!(emu.grid[1][5].ch, ' ');
+        assert_eq!(emu.grid[2][0].ch, ' ');
+        assert_eq!(emu.grid[2][3].ch, ' ');
+        assert_eq!(emu.grid[2][4].ch, 'C');
+        assert_eq!(emu.grid[3][0].ch, 'D');
+        assert_eq!(emu.grid[3][5].ch, 'D');
     }
 
     #[test]

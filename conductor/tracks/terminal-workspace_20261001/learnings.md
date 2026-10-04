@@ -1053,3 +1053,35 @@ verification evidence, and reusable patterns.
   are uncovered in the instrumented subset: literal basis 78/82 = 95.12%,
   new-semantics basis 54/54 = 100%. Report both, strict basis first, and name
   the reindented lines - otherwise a 100% figure reads as inflation.
+
+## 2026-10-04 - Phase 9 Task 1 fix round: measured oracles and dead-code honesty
+
+- **Asserted-vs-measured reference rows.** The original compare report wrote
+  the alacritty row from API knowledge; rebuilding it as real code surfaced two
+  corrections a prose claim could never catch: alacritty's DA reply is
+  `\x1b[?6c` not our `\x1b[?1;2c` (both VT102-family, not a defect), and vt100
+  has no reply channel whatsoever — it consumes `?6n` silently. The harness
+  (`emulator-compare/`, `vt100-probe/`) is committed under `.superpowers/` this
+  time; `include!` cannot carry `//!` so `build.rs` strips module docs to `//`.
+- **Version pins create sibling crates, not conflicts to 'fix'.** vt100 0.16
+  requires `unicode-width ^0.2.1`; ratatui 0.29 pins `=0.2.0`. Rather than
+  loosen a pin, the vt100 probe lives in its own crate — report both sides.
+- **Coverage test parked at the boundary never iterates the loop.** The ED
+  mode-1 arm was reachable yet uncovered solely because the existing test
+  parked the cursor at row 0 (`0..0`). A dedicated fixture at row 2 plus a
+  neuter-to-red control (`0..cursor_row` → `0..0` → fail) earns the coverage
+  claim; checking the arm exists is not the same as iterating it.
+- **0x0 guards: enumerate the hazard set before testing.** The degenerate
+  geometry panic hid in `min(rows - 1)` across nine sites — the fix listed
+  every underflow/index site first (already-safe guards named) so the red test
+  hit real production panics (`emulator.rs:675`) rather than neutered code.
+- **pyte is not a terminal.** pyte 0.8.2 parses the same streams a real
+  terminal renders, but has no alt-buffer (1049 ignored) and no reply channel;
+  a PTY fixture can only verify byte-stream integrity + the observable halves
+  (TIOCSWINSZ → `stty size`, SIGWINCH delivery). Also: fixtures must make the
+  PTY *child* emit the stream — `cat` echoes input back as caret notation, so
+  writing escapes to cat's stdin proves nothing.
+- **`cargo clippy --fix` for unrelated lint debt is fine mid-task when the gate
+  requires it.** 20 pre-existing `byte_char_slices` warnings in test code
+  blocked the `--all-targets` gate; mechanical auto-fix + retest beats a
+  documented-red gate. Zero of them touched the changed file.

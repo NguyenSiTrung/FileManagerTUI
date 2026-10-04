@@ -777,24 +777,25 @@ exist. Add a module's declarations in the task that introduces it. Avoid broad
 
 ## Phase 9: Embedded-Terminal Compatibility
 
-- [ ] Task 1: Select and adapt a tested terminal-emulation implementation
+- [x] Task 1: Select and adapt a tested terminal-emulation implementation
 
   **Files:** modify `src/terminal/emulator.rs`, `src/terminal/mod.rs`,
   `src/components/terminal.rs`, `Cargo.toml`, `Cargo.lock`.
   **Requirements:** FR-11, AC-9.
   **Produces:** emulator adapter retaining selection/render-facing operations,
   plus terminal reply bytes returned to the PTY by the coordinator.
-  - [ ] Add ANSI fixtures for alternate screens, cursor modes, DSR responses,
+  - [x] Add ANSI fixtures for alternate screens, cursor modes, DSR responses,
     scroll regions, wide characters, combining marks, and resizing.
     ```rust
     emulator.process(b"\x1b[6n");
     assert!(!emulator.take_replies().is_empty());
     ```
-  - [ ] Compare the existing parser and a mature Rust candidate against these
+  - [x] Compare the existing parser and a mature Rust candidate against these
     fixtures, license/MSRV/size constraints; record selection evidence.
-  - [ ] Adapt the selected engine, do not claim nested full-screen compatibility
+    (measured: `.superpowers/sdd/plan/emulator-compare/REPORT.md`)
+  - [x] Adapt the selected engine, do not claim nested full-screen compatibility
     based only on colored shell output.
-  - [ ] Run `cargo test terminal::emulator` and terminal widget tests.
+  - [x] Run `cargo test terminal::emulator` and terminal widget tests.
 
 - [ ] Task 2: Preserve shell input and bound PTY process lifecycle
 

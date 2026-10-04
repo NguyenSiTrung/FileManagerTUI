@@ -501,11 +501,11 @@ mod tests {
         }
         std::fs::write(dir.path().join("sub/inner.txt"), b"x").unwrap();
         let snapshot = snapshot(vec![
-            entry("tracked.txt", GitEntryKind::Ordinary, [b'.', b'M']),
-            entry("staged.txt", GitEntryKind::Ordinary, [b'A', b'.']),
-            entry("untracked.txt", GitEntryKind::Untracked, [b'?', b'?']),
-            entry("conflict.txt", GitEntryKind::Unmerged, [b'U', b'U']),
-            entry("sub/inner.txt", GitEntryKind::Ordinary, [b'.', b'M']),
+            entry("tracked.txt", GitEntryKind::Ordinary, *b".M"),
+            entry("staged.txt", GitEntryKind::Ordinary, *b"A."),
+            entry("untracked.txt", GitEntryKind::Untracked, *b"??"),
+            entry("conflict.txt", GitEntryKind::Unmerged, *b"UU"),
+            entry("sub/inner.txt", GitEntryKind::Ordinary, *b".M"),
         ]);
 
         // Icons OFF and a theme whose marker colors are all Reset: the glyphs
@@ -548,8 +548,8 @@ mod tests {
         let git = TreeGit {
             root: std::path::Path::new("/repo"),
             snapshot: &snapshot(vec![
-                entry("pkg/modified.rs", GitEntryKind::Ordinary, [b'.', b'M']),
-                entry("pkg/conflict.rs", GitEntryKind::Unmerged, [b'U', b'U']),
+                entry("pkg/modified.rs", GitEntryKind::Ordinary, *b".M"),
+                entry("pkg/conflict.rs", GitEntryKind::Unmerged, *b"UU"),
             ]),
         };
         assert_eq!(
@@ -571,11 +571,7 @@ mod tests {
     fn untracked_directory_entry_and_non_repository_paths() {
         let git = TreeGit {
             root: std::path::Path::new("/repo"),
-            snapshot: &snapshot(vec![entry(
-                "newdir/",
-                GitEntryKind::Untracked,
-                [b'?', b'?'],
-            )]),
+            snapshot: &snapshot(vec![entry("newdir/", GitEntryKind::Untracked, *b"??")]),
         };
         assert_eq!(
             git_mark(
@@ -593,11 +589,7 @@ mod tests {
         // Ignored entries are not decorated.
         let ignored = TreeGit {
             root: std::path::Path::new("/repo"),
-            snapshot: &snapshot(vec![entry(
-                "ignored.log",
-                GitEntryKind::Ignored,
-                [b'!', b'!'],
-            )]),
+            snapshot: &snapshot(vec![entry("ignored.log", GitEntryKind::Ignored, *b"!!")]),
         };
         assert!(git_mark(
             ignored,

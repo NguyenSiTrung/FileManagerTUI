@@ -1,0 +1,8 @@
+[package]
+name = "vt100-probe"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+vt100 = "0.16"
