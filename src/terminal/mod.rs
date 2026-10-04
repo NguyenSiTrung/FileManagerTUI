@@ -86,10 +86,6 @@ pub struct TerminalState {
     pub emulator: emulator::TerminalEmulator,
     /// The PTY child process (None if not yet spawned or exited).
     pub pty: Option<pty::PtyProcess>,
-    /// Whether the terminal panel is visible.
-    pub visible: bool,
-    /// Terminal panel height as a percentage of screen height (default 30).
-    pub height_percent: u16,
     /// Scrollback scroll offset (0 = at bottom / live).
     pub scroll_offset: usize,
     /// Whether the shell process has exited.
@@ -103,8 +99,6 @@ impl Default for TerminalState {
         Self {
             emulator: emulator::TerminalEmulator::new(24, 80),
             pty: None,
-            visible: false,
-            height_percent: 30,
             scroll_offset: 0,
             exited: false,
             selection: TerminalSelection::default(),
@@ -115,8 +109,6 @@ impl Default for TerminalState {
 impl std::fmt::Debug for TerminalState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TerminalState")
-            .field("visible", &self.visible)
-            .field("height_percent", &self.height_percent)
             .field("scroll_offset", &self.scroll_offset)
             .field("exited", &self.exited)
             .field("pty_active", &self.pty.is_some())
@@ -126,6 +118,30 @@ impl std::fmt::Debug for TerminalState {
 }
 
 impl TerminalState {
+    /// Apply bounded history capacity without spawning or restarting a shell.
+    pub fn set_scrollback_limit(&mut self, limit: usize) {
+        if self.emulator.scrollback_limit() == limit.min(emulator::MAX_SCROLLBACK_LINES) {
+            self.scroll_offset = self.scroll_offset.min(self.emulator.scrollback_len());
+            return;
+        }
+        let removed = self.emulator.set_scrollback_limit(limit);
+        self.scroll_offset = self.scroll_offset.min(self.emulator.scrollback_len());
+        if removed > 0 {
+            if self.selection.anchor.is_some_and(|p| p.line < removed)
+                || self.selection.endpoint.is_some_and(|p| p.line < removed)
+            {
+                self.selection.clear();
+            } else {
+                for point in [&mut self.selection.anchor, &mut self.selection.endpoint]
+                    .into_iter()
+                    .flatten()
+                {
+                    point.line -= removed;
+                }
+            }
+        }
+    }
+
     /// Get rendered lines from the emulator for display,
     /// accounting for the current scroll offset.
     pub fn render_lines(&self, _theme: &ThemeColors) -> Vec<Line<'static>> {
@@ -156,6 +172,89 @@ impl TerminalState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn task3_history_limit_zero_shrink_grow_rebases_only_surviving_selection() {
+        let mut state = TerminalState {
+            emulator: emulator::TerminalEmulator::new(2, 8),
+            ..Default::default()
+        };
+        state
+            .emulator
+            .process(b"one\r\ntwo\r\nthree\r\nfour\r\nfive");
+        let history = state.emulator.scrollback_len();
+        assert!(history > 1);
+        let cursor = state.emulator.cursor_position();
+        let grid: Vec<_> = state
+            .emulator
+            .render_lines()
+            .iter()
+            .map(crate::text::line_text)
+            .collect();
+        state.selection.begin_drag(TerminalCoord {
+            line: history,
+            col: 0,
+        });
+        state.selection.set_endpoint(TerminalCoord {
+            line: history + 1,
+            col: 3,
+        });
+        let selected = state.extract_selected_text();
+        state.scroll_offset = history;
+        state.exited = true;
+        state.set_scrollback_limit(1);
+        assert_eq!(state.emulator.scrollback_limit(), 1);
+        assert_eq!(state.selection.anchor.unwrap().line, 1);
+        assert_eq!(state.extract_selected_text(), selected);
+        assert_eq!(state.scroll_offset, 1);
+        assert_eq!(state.emulator.cursor_position(), cursor);
+        assert_eq!(
+            state
+                .emulator
+                .render_lines()
+                .iter()
+                .map(crate::text::line_text)
+                .collect::<Vec<_>>(),
+            grid
+        );
+        assert!(state.exited && state.pty.is_none());
+        state.set_scrollback_limit(usize::MAX);
+        assert_eq!(
+            state.emulator.scrollback_limit(),
+            emulator::MAX_SCROLLBACK_LINES
+        );
+        assert_eq!(state.emulator.scrollback_len(), 1);
+        state
+            .selection
+            .set_anchor(TerminalCoord { line: 0, col: 0 });
+        state.set_scrollback_limit(0);
+        assert!(!state.selection.is_active());
+        state.emulator.process(&b"next\r\n".repeat(10));
+        assert_eq!(state.emulator.scrollback_len(), 0);
+        state.set_scrollback_limit(2);
+        state.emulator.process(&b"new\r\n".repeat(10));
+        assert_eq!(state.emulator.scrollback_len(), 2);
+        state.set_scrollback_limit(2);
+        assert_eq!(state.emulator.scrollback_len(), 2);
+    }
+
+    #[test]
+    fn task3_shrink_clears_selection_when_only_endpoint_is_removed() {
+        let mut state = TerminalState {
+            emulator: emulator::TerminalEmulator::new(2, 8),
+            ..Default::default()
+        };
+        state.emulator.process(&b"text\r\n".repeat(8));
+        state.selection.set_anchor(TerminalCoord {
+            line: state.emulator.total_lines() - 1,
+            col: 1,
+        });
+        state
+            .selection
+            .set_endpoint(TerminalCoord { line: 0, col: 0 });
+        state.set_scrollback_limit(1);
+        assert!(state.selection.anchor.is_none() && state.selection.endpoint.is_none());
+    }
 
     #[test]
     fn test_terminal_coord_default() {

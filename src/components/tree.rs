@@ -9,12 +9,122 @@ use ratatui::{
 use crate::fs::tree::{FlatItem, NodeType, TreeState};
 use crate::theme::ThemeColors;
 
+/// Read-only Git decorations for the tree: work-tree root plus the parsed
+/// snapshot issued for that root. The widget never runs Git; callers supply the
+/// generation-validated snapshot from the background refresh.
+#[derive(Clone, Copy)]
+pub struct TreeGit<'a> {
+    /// Repository work-tree root the snapshot paths are relative to.
+    pub root: &'a std::path::Path,
+    /// Parsed read-only status snapshot.
+    pub snapshot: &'a crate::git::GitSnapshot,
+}
+
+/// One color-independent Git marker glyph.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum GitMark {
+    Conflicted,
+    Modified,
+    Staged,
+    Untracked,
+}
+
+impl GitMark {
+    /// ASCII glyph, rendered regardless of theme or icon mode so a state can
+    /// never be hidden by a missing color.
+    fn glyph(self) -> &'static str {
+        match self {
+            Self::Conflicted => "U",
+            Self::Modified => "M",
+            Self::Staged => "S",
+            Self::Untracked => "?",
+        }
+    }
+
+    /// Aggregation severity: conflicted outranks modified, staged, untracked.
+    fn severity(self) -> u8 {
+        match self {
+            Self::Conflicted => 0,
+            Self::Modified => 1,
+            Self::Staged => 2,
+            Self::Untracked => 3,
+        }
+    }
+
+    fn color(self, theme: &ThemeColors) -> ratatui::style::Color {
+        match self {
+            Self::Conflicted => theme.git_conflicted_fg,
+            Self::Modified => theme.git_modified_fg,
+            Self::Staged => theme.git_staged_fg,
+            Self::Untracked => theme.git_untracked_fg,
+        }
+    }
+}
+
+/// Classify one Git entry into a marker, or `None` for ignored/clean entries.
+fn entry_mark(entry: &crate::git::GitEntry) -> Option<GitMark> {
+    if entry.is_ignored() {
+        return None;
+    }
+    if entry.is_conflicted() {
+        return Some(GitMark::Conflicted);
+    }
+    if entry.is_unstaged() {
+        return Some(GitMark::Modified);
+    }
+    if entry.is_staged() {
+        return Some(GitMark::Staged);
+    }
+    if entry.is_untracked() {
+        return Some(GitMark::Untracked);
+    }
+    None
+}
+
+/// Path of `item` relative to the repository root, `/`-separated to match Git.
+fn repo_relative(root: &std::path::Path, item: &std::path::Path) -> Option<String> {
+    let relative = item.strip_prefix(root).ok()?;
+    let mut text = String::new();
+    for component in relative.components() {
+        if !text.is_empty() {
+            text.push('/');
+        }
+        text.push_str(&component.as_os_str().to_string_lossy());
+    }
+    Some(text)
+}
+
+/// Pure Git marker classifier. Files match their exact entry; directories
+/// aggregate the highest-severity descendant state from the same snapshot.
+fn git_mark(git: TreeGit<'_>, path: &std::path::Path, node_type: &NodeType) -> Option<GitMark> {
+    let relative = repo_relative(git.root, path)?;
+    match node_type {
+        NodeType::Directory => {
+            let prefix = format!("{relative}/");
+            git.snapshot
+                .entries
+                .iter()
+                .filter(|entry| relative.is_empty() || entry.path.starts_with(&prefix))
+                .filter_map(entry_mark)
+                .min_by_key(|mark| mark.severity())
+        }
+        NodeType::File | NodeType::Symlink => git
+            .snapshot
+            .entries
+            .iter()
+            .find(|entry| entry.path == relative)
+            .and_then(entry_mark),
+        NodeType::LoadMore | NodeType::Loading => None,
+    }
+}
+
 /// Tree widget that renders the file tree with box-drawing characters.
 pub struct TreeWidget<'a> {
     tree_state: &'a TreeState,
     theme: &'a ThemeColors,
     use_icons: bool,
     s3_mode: bool,
+    git: Option<TreeGit<'a>>,
     block: Option<Block<'a>>,
 }
 
@@ -25,6 +135,7 @@ impl<'a> TreeWidget<'a> {
             theme,
             use_icons,
             s3_mode: false,
+            git: None,
             block: None,
         }
     }
@@ -32,6 +143,18 @@ impl<'a> TreeWidget<'a> {
     pub fn s3_mode(mut self, s3: bool) -> Self {
         self.s3_mode = s3;
         self
+    }
+
+    /// Attach generation-validated read-only Git decorations.
+    pub fn git(mut self, root: &'a std::path::Path, snapshot: &'a crate::git::GitSnapshot) -> Self {
+        self.git = Some(TreeGit { root, snapshot });
+        self
+    }
+
+    /// The marker for an item: exact entry for files, aggregated descendants
+    /// for directories (from the same snapshot, never a per-directory process).
+    fn item_mark(&self, item: &FlatItem) -> Option<GitMark> {
+        git_mark(self.git?, &item.path, &item.node_type)
     }
 
     pub fn block(mut self, block: Block<'a>) -> Self {
@@ -166,6 +289,9 @@ impl<'a> Widget for TreeWidget<'a> {
 
         let items = &self.tree_state.flat_items;
         let selected = self.tree_state.selected_index;
+        // Multi-selection is path-keyed, so highlight by identity rather than by
+        // the stale row indices captured before the last refresh/sort.
+        let selected_paths = self.tree_state.selected_paths();
         let visible_height = inner_area.height as usize;
         let total_items = items.len();
 
@@ -198,7 +324,8 @@ impl<'a> Widget for TreeWidget<'a> {
             let indicator = self.item_indicator(item);
 
             let is_selected = idx == selected;
-            let is_multi_selected = self.tree_state.multi_selected.contains(&idx);
+            let is_multi_selected =
+                !is_selected && selected_paths.iter().any(|path| path == &item.path);
 
             let style = if is_selected {
                 Style::default()
@@ -242,19 +369,30 @@ impl<'a> Widget for TreeWidget<'a> {
             let marker = if is_multi_selected { "● " } else { "" };
             let line_content = format!("{}{}{}{}", prefix, marker, indicator, item.name);
 
-            // Build multi-span line: name + optional count badge for collapsed dirs
+            // Build multi-span line: name + color-independent Git marker +
+            // optional count badge for collapsed dirs.
             let name_span = Span::styled(line_content, style);
+            let mut spans = vec![name_span];
+            if let Some(mark) = self.item_mark(item) {
+                spans.push(Span::styled(
+                    format!(" {}", mark.glyph()),
+                    Style::default()
+                        .fg(mark.color(self.theme))
+                        .add_modifier(Modifier::BOLD),
+                ));
+            }
             let line = if item.node_type == NodeType::Directory && !item.is_expanded && !is_selected
             {
                 if let Some(count) = item.child_count {
                     let badge = format!(" ({} items)", count);
                     let badge_style = Style::default().fg(self.theme.tree_hidden_fg);
-                    Line::from(vec![name_span, Span::styled(badge, badge_style)])
+                    spans.push(Span::styled(badge, badge_style));
+                    Line::from(spans)
                 } else {
-                    Line::from(name_span)
+                    Line::from(spans)
                 }
             } else {
-                Line::from(name_span)
+                Line::from(spans)
             };
 
             let line_area = Rect::new(inner_area.x, y, content_width, 1);
@@ -307,5 +445,167 @@ impl<'a> TreeWidget<'a> {
         } else {
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::git::{BranchState, GitEntry, GitEntryKind, GitSnapshot};
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    fn entry(path: &str, kind: GitEntryKind, status: [u8; 2]) -> GitEntry {
+        GitEntry {
+            path: path.to_string(),
+            original_path: None,
+            kind,
+            status,
+        }
+    }
+
+    fn snapshot(entries: Vec<GitEntry>) -> GitSnapshot {
+        GitSnapshot {
+            branch: BranchState::Symbolic {
+                name: "main".to_string(),
+                oid: "abc".to_string(),
+            },
+            entries,
+        }
+    }
+
+    fn render_text(root: &std::path::Path, snapshot: &GitSnapshot, theme: &ThemeColors) -> String {
+        let tree = TreeState::new(root).unwrap();
+        let mut terminal = Terminal::new(TestBackend::new(40, 10)).unwrap();
+        terminal
+            .draw(|frame| {
+                frame.render_widget(
+                    TreeWidget::new(&tree, theme, false).git(root, snapshot),
+                    frame.area(),
+                )
+            })
+            .unwrap();
+        terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect()
+    }
+
+    #[test]
+    fn file_markers_are_distinct_and_color_independent() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("sub")).unwrap();
+        for name in ["tracked.txt", "staged.txt", "untracked.txt", "conflict.txt"] {
+            std::fs::write(dir.path().join(name), b"x").unwrap();
+        }
+        std::fs::write(dir.path().join("sub/inner.txt"), b"x").unwrap();
+        let snapshot = snapshot(vec![
+            entry("tracked.txt", GitEntryKind::Ordinary, [b'.', b'M']),
+            entry("staged.txt", GitEntryKind::Ordinary, [b'A', b'.']),
+            entry("untracked.txt", GitEntryKind::Untracked, [b'?', b'?']),
+            entry("conflict.txt", GitEntryKind::Unmerged, [b'U', b'U']),
+            entry("sub/inner.txt", GitEntryKind::Ordinary, [b'.', b'M']),
+        ]);
+
+        // Icons OFF and a theme whose marker colors are all Reset: the glyphs
+        // must still be present (a missing color never hides a state).
+        let mut theme = crate::theme::dark_theme();
+        theme.git_modified_fg = ratatui::style::Color::Reset;
+        theme.git_staged_fg = ratatui::style::Color::Reset;
+        theme.git_untracked_fg = ratatui::style::Color::Reset;
+        theme.git_conflicted_fg = ratatui::style::Color::Reset;
+        let text = render_text(dir.path(), &snapshot, &theme);
+
+        for (name, glyph) in [
+            ("tracked.txt", "M"),
+            ("staged.txt", "S"),
+            ("untracked.txt", "?"),
+            ("conflict.txt", "U"),
+        ] {
+            let row = text
+                .lines()
+                .find(|line| line.contains(name))
+                .unwrap_or_else(|| panic!("missing row {name} in {text:?}"));
+            assert!(
+                row.contains(glyph),
+                "row {name:?} missing {glyph:?}: {row:?}"
+            );
+        }
+        // The directory aggregates its modified descendant from the same snapshot.
+        let dir_row = text
+            .lines()
+            .find(|line| line.contains("sub"))
+            .expect("sub directory row");
+        assert!(
+            dir_row.contains('M'),
+            "directory must aggregate: {dir_row:?}"
+        );
+    }
+
+    #[test]
+    fn directory_aggregation_prefers_more_severe_descendants() {
+        let git = TreeGit {
+            root: std::path::Path::new("/repo"),
+            snapshot: &snapshot(vec![
+                entry("pkg/modified.rs", GitEntryKind::Ordinary, [b'.', b'M']),
+                entry("pkg/conflict.rs", GitEntryKind::Unmerged, [b'U', b'U']),
+            ]),
+        };
+        assert_eq!(
+            git_mark(git, std::path::Path::new("/repo/pkg"), &NodeType::Directory)
+                .unwrap()
+                .glyph(),
+            "U"
+        );
+        // No per-directory process: a directory with no descendants has no mark.
+        assert!(git_mark(
+            git,
+            std::path::Path::new("/repo/empty"),
+            &NodeType::Directory
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn untracked_directory_entry_and_non_repository_paths() {
+        let git = TreeGit {
+            root: std::path::Path::new("/repo"),
+            snapshot: &snapshot(vec![entry(
+                "newdir/",
+                GitEntryKind::Untracked,
+                [b'?', b'?'],
+            )]),
+        };
+        assert_eq!(
+            git_mark(
+                git,
+                std::path::Path::new("/repo/newdir"),
+                &NodeType::Directory
+            )
+            .unwrap()
+            .glyph(),
+            "?"
+        );
+        // A path outside the repository root (e.g. an S3/virtual or unrelated
+        // root) never receives an indicator.
+        assert!(git_mark(git, std::path::Path::new("/elsewhere/x"), &NodeType::File).is_none());
+        // Ignored entries are not decorated.
+        let ignored = TreeGit {
+            root: std::path::Path::new("/repo"),
+            snapshot: &snapshot(vec![entry(
+                "ignored.log",
+                GitEntryKind::Ignored,
+                [b'!', b'!'],
+            )]),
+        };
+        assert!(git_mark(
+            ignored,
+            std::path::Path::new("/repo/ignored.log"),
+            &NodeType::File
+        )
+        .is_none());
     }
 }

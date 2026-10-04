@@ -1,5 +1,7 @@
 # Terminal Workspace Implementation Plan
 
+Last revised: 2026-10-01 (shared viewports, revisions, pane integration and bounded transport seams).
+
 > **For agentic workers:** Use the `executing-plans` skill for sequential tasks
 > and `subagent-driven-development` only for the explicitly parallel phases.
 > Read this plan together with its specification. Checkbox tasks are tracked in
@@ -90,27 +92,27 @@ exist. Add a module's declarations in the task that introduces it. Avoid broad
 ## Phase 1: Collision-Safe Operations and Safe Saves
 <!-- execution: parallel -->
 
-- [ ] Task 1: Establish a reproducible application-test baseline
+- [x] Task 1: Establish a reproducible application-test baseline
   <!-- files: Cargo.toml, Cargo.lock -->
 
   **Requirements:** Current Baseline, AC-12.
   **Produces:** recorded dependency/toolchain baseline; no inferred passing tests.
-  - [ ] Run `cargo test --locked`, `cargo clippy --locked -- -D warnings`, and
+  - [x] Run `cargo test --locked`, `cargo clippy --locked -- -D warnings`, and
     `cargo fmt --check` with dependencies available. Record failures and stop
     feature edits until a runnable baseline exists.
-  - [ ] Record tool versions and baseline release-binary size. Do not change
+  - [x] Record tool versions and baseline release-binary size. Do not change
     dependencies just to bypass a failing existing test.
-  - [ ] Establish coverage tooling as a development check; record baseline
+  - [x] Establish coverage tooling as a development check; record baseline
     covered/new-core scope rather than pretend existing coverage is known.
 
-- [ ] Task 2: Make creation and rename refuse destination collisions
+- [x] Task 2: Make creation and rename refuse destination collisions
   <!-- files: src/fs/operations.rs, Cargo.toml, Cargo.lock -->
   <!-- depends: task1 -->
 
   **Requirements:** FR-1, AC-2.
   **Consumes:** current operation return types.
   **Produces:** existing `create_file`/`rename` APIs with no silent overwrite.
-  - [ ] Add the regression before changing `File::create`:
+  - [x] Add the regression before changing `File::create`:
     ```rust
     #[test]
     fn create_existing_file_preserves_bytes() {
@@ -121,15 +123,15 @@ exist. Add a module's declarations in the task that introduces it. Avoid broad
         assert_eq!(std::fs::read_to_string(path).unwrap(), "keep: true\n");
     }
     ```
-  - [ ] Add rename-to-existing-file/directory, same-path, symlink, and racing
+  - [x] Add rename-to-existing-file/directory, same-path, symlink, and racing
     destination tests. Exercise the no-replace primitive rather than only a
     preflight existence check.
-  - [ ] Use exclusive creation; implement platform-safe no-replace rename or
+  - [x] Use exclusive creation; implement platform-safe no-replace rename or
     explicit refusal on unsupported platforms. Preserve operation undo semantics.
-  - [ ] Run `cargo test fs::operations`; expect all fixtures green with original
+  - [x] Run `cargo test fs::operations`; expect all fixtures green with original
     source/destination bytes unchanged on rejected operations.
 
-- [ ] Task 3: Introduce revision-aware safe editor saves
+- [x] Task 3: Introduce revision-aware safe editor saves
   <!-- files: src/fs/save.rs, src/fs/mod.rs, src/editor.rs -->
   <!-- depends: task1 -->
 
@@ -137,7 +139,7 @@ exist. Add a module's declarations in the task that introduces it. Avoid broad
   **Produces:** `FileRevision`, `SaveError`, and
   `save::save_document(path, bytes, expected_revision)`; EditorState tracks
   line endings, source revision, and saved undo revision.
-  - [ ] Add load/save round-trip and CRLF regression:
+  - [x] Add load/save round-trip and CRLF regression:
     ```rust
     #[test]
     fn save_preserves_crlf_and_trailing_newline() {
@@ -150,48 +152,48 @@ exist. Add a module's declarations in the task that introduces it. Avoid broad
         assert_eq!(std::fs::read(path).unwrap(), b"xa\r\nb\r\n");
     }
     ```
-  - [ ] Inject failures at write, flush, replacement, and revision validation;
+  - [x] Inject failures at write, flush, replacement, and revision validation;
     assert original bytes survive and the editor remains dirty.
-  - [ ] Test external edit/delete/replacement, symlink retargeting, permissions,
+  - [x] Test external edit/delete/replacement, symlink retargeting, permissions,
     hard-link policy, mixed endings, and undo-to-saved-revision.
-  - [ ] Implement same-directory exclusive temporary files and safe replacement,
+  - [x] Implement same-directory exclusive temporary files and safe replacement,
     preserve applicable permissions, and return explicit conflict/unsupported
     results. Cleanup only temporary files created by this save attempt.
-  - [ ] Run `cargo test fs::save` and `cargo test editor`; do not assume chmod
+  - [x] Run `cargo test fs::save` and `cargo test editor`; do not assume chmod
     tests fail under root, use injected I/O failure tests as the mandatory evidence.
 
-- [ ] Task 4: Integrate operation/save outcomes into non-destructive dialogs
+- [x] Task 4: Integrate operation/save outcomes into non-destructive dialogs
   <!-- files: src/app.rs, src/handler.rs, src/components/dialog.rs, src/error.rs -->
   <!-- depends: task2, task3 -->
 
   **Requirements:** FR-1, FR-2, AC-2, AC-3.
   **Consumes:** collision errors and safe-save conflicts.
   **Produces:** Reload/Save As/explicit Overwrite/Cancel actions retaining buffers.
-  - [ ] Add handler regressions for cancelled conflict and failed SaveConfirm;
+  - [x] Add handler regressions for cancelled conflict and failed SaveConfirm;
     use the existing `save_confirm_yes_stays_in_dialog_on_save_error` fixture pattern.
     ```rust
     // Required invariant in each conflict/cancel handler test.
     assert!(app.editor_state.as_ref().unwrap().modified);
     assert!(!app.should_quit);
     ```
-  - [ ] Add Save As destination validation without overwrite-by-default. Surface
+  - [x] Add Save As destination validation without overwrite-by-default. Surface
     operation/path/cause and preserve the caller's focus and dirty buffer.
-  - [ ] Restore watcher preferences instead of unconditionally enabling watching
+  - [x] Restore watcher preferences instead of unconditionally enabling watching
     after editor exit. Record the policy for document-aware changes in Phase 6.
-  - [ ] Run `cargo test handler` and `cargo test app`.
+  - [x] Run `cargo test handler` and `cargo test app`.
 
-- [ ] Task 5: Automated checkpoint for file safety
+- [x] Task 5: Automated checkpoint for file safety
   <!-- files: -->
   <!-- depends: task4 -->
 
   **Requirements:** AC-2, AC-3, AC-12.
-  - [ ] Run the full quality gates; verify collision, fault injection, line-ending,
+  - [x] Run the full quality gates; verify collision, fault injection, line-ending,
     permission, and external-revision tests passed on supported test platforms.
-  - [ ] Record unsupported platform guarantees explicitly; no manual gate.
+  - [x] Record unsupported platform guarantees explicitly; no manual gate.
 
 ## Phase 2: Text Coordinates, Paste, Clipboard, and Viewports
 
-- [ ] Task 1: Define byte, grapheme, tab, and display-column conversions
+- [x] Task 1: Define byte, grapheme, tab, and display-column conversions
 
   **Files:** create `src/text.rs`; modify `src/main.rs`, `src/editor.rs`,
   `src/handler.rs`, `src/components/editor.rs`, `Cargo.toml`, `Cargo.lock`.
@@ -199,7 +201,7 @@ exist. Add a module's declarations in the task that introduces it. Avoid broad
   **Produces:** `TextPosition { line, byte }`; conversion helpers
   `byte_to_display_col(text, byte, tab_width)` and
   `display_col_to_byte(text, col, tab_width)`; grapheme-boundary navigation.
-  - [ ] Add ASCII/combining/CJK/emoji/tab tests before converting editor positions:
+  - [x] Add ASCII/combining/CJK/emoji/tab tests before converting editor positions:
     ```rust
     #[test]
     fn tab_and_wide_text_map_back_to_byte_boundaries() {
@@ -209,20 +211,20 @@ exist. Add a module's declarations in the task that introduces it. Avoid broad
         assert_eq!(display_col_to_byte(text, 6, 4), 4);
     }
     ```
-  - [ ] Make every buffer mutation/selection/search conversion use byte-safe
+  - [x] Make every buffer mutation/selection/search conversion use byte-safe
     ranges; distinguish terminal cell positions from document positions.
-  - [ ] Update cursor, end-of-line, joining, indent, and mouse tests deliberately,
+  - [x] Update cursor, end-of-line, joining, indent, and mouse tests deliberately,
     including grapheme selections and empty/short lines.
-  - [ ] Run `cargo test text` and `cargo test editor`.
+  - [x] Run `cargo test text` and `cargo test editor`.
 
-- [ ] Task 2: Handle bracketed paste as one editor transaction
+- [x] Task 2: Handle bracketed paste as one editor transaction
 
   **Files:** modify `src/tui.rs`, `src/event.rs`, `src/main.rs`,
   `src/handler.rs`, `src/editor.rs`.
   **Requirements:** FR-3, AC-4, AC-9.
   **Produces:** typed paste event and `EditorState::insert_text(&str)` using
   one compound undo entry without normal-key dispatch or auto-indent.
-  - [ ] Add the exact-byte/undo regression:
+  - [x] Add the exact-byte/undo regression:
     ```rust
     #[test]
     fn multiline_paste_is_one_undoable_insert() {
@@ -233,20 +235,20 @@ exist. Add a module's declarations in the task that introduces it. Avoid broad
         assert_eq!(e.buffer.join("\n"), "");
     }
     ```
-  - [ ] Test selection replacement, CRLF input, Unicode, trailing/empty text,
+  - [x] Test selection replacement, CRLF input, Unicode, trailing/empty text,
     huge-paste bounds, and pasted `q`/escape-like text.
-  - [ ] Enable/disable bracketed paste in setup, restore, suspend/resume, panic,
+  - [x] Enable/disable bracketed paste in setup, restore, suspend/resume, panic,
     and error cleanup. Keep terminal-paste routing separate from editor paste.
-  - [ ] Run `cargo test paste`; assert genuine paste events are not dropped.
+  - [x] Run `cargo test paste`; assert genuine paste events are not dropped.
 
-- [ ] Task 3: Unify text-copy fallbacks and correct internal inline paste
+- [x] Task 3: Unify text-copy fallbacks and correct internal inline paste
 
   **Files:** modify `src/editor.rs`, `src/app.rs`, `src/main.rs`,
   `src/handler.rs`, `src/ui.rs`.
   **Requirements:** FR-3, FR-8, AC-4, AC-10.
   **Produces:** reusable async text-copy outcome and a line/selection-aware
   internal text clipboard; file-operation clipboard remains separate.
-  - [ ] Add a selection-copy/paste test that inserts in the middle of a line,
+  - [x] Add a selection-copy/paste test that inserts in the middle of a line,
     not below it; assert one undo restores the original.
     ```rust
     let mut e = EditorState::new("alphaomega", "text.txt".into());
@@ -256,50 +258,52 @@ exist. Add a module's declarations in the task that introduces it. Avoid broad
     e.undo();
     assert_eq!(e.buffer[0], "alphaomega");
     ```
-  - [ ] Test native success/failure, OSC 52 unavailable, bounded multiline
+  - [x] Test native success/failure, OSC 52 unavailable, bounded multiline
     browser overlay, disabled mouse capture, and focus restoration with fake
     clipboard collaborators. Never mutate the test runner's clipboard.
-  - [ ] Remove fixed `/tmp/.fm_clipboard` persistence; keep copied text in
+  - [x] Remove fixed `/tmp/.fm_clipboard` persistence; keep copied text in
     memory only. Do not promise browser clipboard-read access.
-  - [ ] Run `cargo test clipboard` and existing preview/terminal selection tests.
+  - [x] Run `cargo test clipboard` and existing preview/terminal selection tests.
 
-- [ ] Task 4: Add horizontal scroll and optional wrapped text layout
+- [x] Task 4: Add horizontal scroll and optional wrapped text layout
 
   **Files:** modify `src/editor.rs`, `src/components/editor.rs`,
-  `src/components/preview.rs`, `src/handler.rs`, `src/app.rs`.
+  `src/components/preview.rs`, `src/handler.rs`, `src/app.rs`, `src/text.rs`,
+  `src/ui.rs`.
   **Requirements:** FR-3, FR-5, AC-4, AC-5.
   **Consumes:** text conversions; **produces:** shared visual-line/offset mapping.
-  - [ ] Add long-line cursor tracking, wrapping, selection, find-match, gutter,
+  - [x] Add long-line cursor tracking, wrapping, selection, find-match, gutter,
     mouse mapping, and zero-width fixtures.
     ```rust
     // Long-line navigation must leave the cursor in the rendered code viewport.
     assert!(cursor_screen_col >= code_area.x);
     assert!(cursor_screen_col < code_area.x + code_area.width);
     ```
-  - [ ] Track horizontal offset independently of vertical offset; compute
+  - [x] Track horizontal offset independently of vertical offset; compute
     visual rows under wrap and clamp viewports when mode/size changes.
-  - [ ] Run `cargo test components::editor`, `cargo test components::preview`,
+  - [x] Run `cargo test components::editor`, `cargo test components::preview`,
     and mouse-coordinate tests; assert rendered cells match selected text.
 
-- [ ] Task 5: Automated checkpoint for editing input
+- [x] Task 5: Automated checkpoint for editing input
 
   **Requirements:** AC-4, AC-9, AC-12.
-  - [ ] Run full quality gates and paste/Unicode/wrap/clipboard fixtures.
-  - [ ] Confirm terminal state is restored by automated PTY teardown assertions.
+  - [x] Run full quality gates and paste/Unicode/wrap/clipboard fixtures.
+  - [x] Confirm terminal state is restored by automated PTY teardown assertions.
 
 ## Phase 3: Independent Documents and Focus
 
-- [ ] Task 1: Introduce a stable document store
+- [x] Task 1: Introduce a stable document store
 
   **Files:** create `src/workspace/mod.rs`, `src/workspace/documents.rs`;
-  modify `src/main.rs`.
+  modify `src/main.rs`, `src/editor.rs` (read-only content-revision accessor),
+  `src/fs/save.rs` (bounded revision-consistent loading prerequisite).
   **Requirements:** FR-4, AC-3.
   **Produces:** `DocumentId`, `DocumentStore`, `Document` owning EditorState
   with `text() -> String`, `is_pinned() -> bool`, and
   `has_external_change() -> bool`; `OpenDisposition::{Preview,Pinned}`,
   and `open(path, disposition) -> Result<DocumentId, DocumentError>`,
   `activate(id)`, `get(id)`, `get_mut(id)`, `active_id()`, `pin(id)`.
-  - [ ] Test deduplication and document-local state before App integration:
+  - [x] Test deduplication and document-local state before App integration:
     ```rust
     let first = docs.open(&a, OpenDisposition::Pinned).unwrap();
     let second = docs.open(&b, OpenDisposition::Pinned).unwrap();
@@ -309,32 +313,36 @@ exist. Add a module's declarations in the task that introduces it. Avoid broad
     assert!(docs.get(first).unwrap().editor.modified);
     assert_eq!(docs.open(&a, OpenDisposition::Pinned).unwrap(), first);
     ```
-  - [ ] Pin on first edit, keep clean temporary-preview replacement bounded,
+  - [x] Pin on first edit, keep clean temporary-preview replacement bounded,
     and refuse to evict dirty documents.
-  - [ ] Include path alias/symlink policy and binary/large/S3 read-only guards.
-  - [ ] Run `cargo test workspace::documents`.
+  - [x] Include path alias/symlink policy and binary/large/S3 read-only guards.
+  - [x] Run `cargo test workspace::documents`.
 
-- [ ] Task 2: Separate focus, active document, and modal overlays
+- [x] Task 2: Separate focus, active document, and modal overlays
 
   **Files:** create `src/workspace/focus.rs`; modify `src/workspace/mod.rs`,
+  `src/workspace/documents.rs` (integration helpers),
   `src/app.rs`, `src/handler.rs`, `src/ui.rs`, `src/event.rs`.
   **Requirements:** FR-4, FR-6, AC-1, AC-3.
   **Consumes:** DocumentStore; **produces:** workspace state with explicit
   panel focus/overlay and document-targeted input routing.
-  - [ ] Add a regression that edits A, focuses tree, selects B, focuses terminal,
+  **Execution refinement:** Sequentially verify focus primitives, migrate App's
+  editor ownership, then remove global Edit/focus adapters and complete modal
+  targeting. An ownership-only intermediate stage does not complete this task.
+  - [x] Add a regression that edits A, focuses tree, selects B, focuses terminal,
     then reactivates A without losing unsaved bytes.
     ```rust
     assert_eq!(app.workspace.documents.get(a_id).unwrap().editor.buffer[0],
                "unsaved");
     assert!(!app.should_quit);
     ```
-  - [ ] Route modal, find, editor, tree, and terminal input by context; do not
+  - [x] Route modal, find, editor, tree, and terminal input by context; do not
     create a second global Edit mode disguised as a document flag.
-  - [ ] Replace the single `editor_state` ownership incrementally and update
+  - [x] Replace the single `editor_state` ownership incrementally and update
     legacy tests to the new explicit behavior.
-  - [ ] Run `cargo test workspace`, `cargo test handler`, and `cargo test app`.
+  - [x] Run `cargo test workspace`, `cargo test handler`, and `cargo test app`.
 
-- [ ] Task 3: Add tabs, previews, direct opening, and open-document navigation
+- [x] Task 3: Add tabs, previews, direct opening, and open-document navigation
 
   **Files:** create `src/components/document_tabs.rs`; modify
   `src/components/mod.rs`, `src/ui.rs`, `src/handler.rs`, `src/app.rs`,
@@ -342,113 +350,120 @@ exist. Add a module's declarations in the task that introduces it. Avoid broad
   **Requirements:** FR-4, FR-7, AC-1, AC-5.
   **Produces:** tab widget consuming document summaries, direct tree/Quick Open
   open actions, pin/activate/reveal/open-document-list commands.
-  - [ ] Test Enter on directory versus text file, single/double click,
+  - [x] Test Enter on directory versus text file, single/double click,
     edit-to-pin, tab overflow, duplicate basenames, and secondary search actions.
     ```rust
     assert_eq!(docs.active_id(), Some(opened_id));
     assert!(docs.get(opened_id).unwrap().is_pinned());
     ```
-  - [ ] Keep temporary preview and pinned editor content visually distinct;
+  - [x] Keep temporary preview and pinned editor content visually distinct;
     selecting another tree row cannot rename the active editor title.
-  - [ ] Run `cargo test document_tabs`, `cargo test search`, and routing tests.
+  - [x] Run `cargo test document_tabs`, `cargo test search`, and routing tests.
 
-- [ ] Task 4: Make close, quit, rename, and delete document-safe
+- [x] Task 4: Make close, quit, rename, and delete document-safe
 
   **Files:** modify `src/workspace/documents.rs`, `src/app.rs`, `src/handler.rs`,
-  `src/components/dialog.rs`, `src/event.rs`.
+  `src/components/dialog.rs`, `src/event.rs`; coordinator-only prerequisite
+  `src/fs/save.rs` (read-only known-rename revision comparison).
   **Requirements:** FR-2, FR-4, AC-3.
   **Produces:** document-scoped close/save conflict workflows and disk-change states.
-  - [ ] Test multiple dirty documents with Save/Discard/Cancel, including a
+  - [x] Test multiple dirty documents with Save/Discard/Cancel, including a
     failed save in the middle of a quit operation.
     ```rust
     assert!(!app.should_quit);
     assert!(app.workspace.documents.get(cancelled_id).is_some());
     ```
-  - [ ] Update owned renames by document identity; surface deleted/changed
+  - [x] Update owned renames by document identity; surface deleted/changed
     paths and never save to an obsolete name without an explicit decision.
-  - [ ] Keep normal text `q` and Ctrl+C from becoming quit requests in editor/
+  - [x] Keep normal text `q` and Ctrl+C from becoming quit requests in editor/
     shell contexts; retain quit as an explicit command.
-  - [ ] Run `cargo test document_lifecycle` and full handler tests.
+  - [x] Run `cargo test document_lifecycle` and full handler tests.
 
-- [ ] Task 5: Automated checkpoint for document workspace
+- [x] Task 5: Automated checkpoint for document workspace
 
   **Requirements:** AC-1, AC-3, AC-11, AC-12.
-  - [ ] Run quality gates plus multi-document/focus/read-only preview regressions.
-  - [ ] Assert every edited document survives switching and cancelled operations.
+  - [x] Run quality gates plus multi-document/focus/read-only preview regressions.
+  - [x] Assert every edited document survives switching and cancelled operations.
 
 ## Phase 4: Commands, Keymaps, and Browser Profiles
 
-- [ ] Task 1: Introduce command registry and context-aware command menu
+- [x] Task 1: Introduce command registry and context-aware command menu
 
   **Files:** create `src/commands.rs`, `src/components/command_menu.rs`;
-  modify `src/main.rs`, `src/components/mod.rs`, `src/app.rs`, `src/handler.rs`.
+  modify `src/main.rs`, `src/components/mod.rs`, `src/app.rs`, `src/handler.rs`,
+  `src/ui.rs` (menu rendering), `src/workspace/focus.rs` (modal integration).
   **Requirements:** FR-6, AC-1, AC-10.
   **Produces:** stable `CommandId`, command descriptions/availability, and
   `dispatch_command(app, id)`; menu actions target document/focus rather than rows.
-  - [ ] Register save/save-as/close/quit, opening/search, focus, pane toggles,
+  - [x] Register save/save-as/close/quit, opening/search, focus, pane toggles,
     wrapping, and recovery controls with one metadata source.
-  - [ ] Test unavailable commands in read-only/binary/S3 contexts and menu use
+  - [x] Test unavailable commands in read-only/binary/S3 contexts and menu use
     while a dirty document remains open:
     ```rust
     assert!(commands.available("document.save", &context));
     assert!(!commands.available("document.save", &s3_context));
     ```
-  - [ ] Render bounded menus and restore prior focus when dismissed.
-  - [ ] Run `cargo test commands` and `cargo test command_menu`.
+  - [x] Render bounded menus and restore prior focus when dismissed.
+  - [x] Run `cargo test commands` and `cargo test command_menu`.
 
-- [ ] Task 2: Add configurable standard/web keymaps without shell conflicts
+- [x] Task 2: Add configurable standard/web keymaps without shell conflicts
 
   **Files:** create `src/keymap.rs`; modify `src/config.rs`, `src/main.rs`,
-  `src/handler.rs`, `src/app.rs`.
+  `src/handler.rs`, `src/app.rs`, `src/commands.rs` (menu-entry command ID and
+  keymap dispatch integration).
   **Requirements:** FR-6, AC-9, AC-10.
   **Produces:** `KeymapProfile::{Standard,Web}`, parsed key sequences, conflict
   validation, and context-scoped command resolution.
-  - [ ] Add tests for profile overrides, unknown commands, duplicate/conflicting
+  - [x] Add tests for profile overrides, unknown commands, duplicate/conflicting
     bindings, legacy modifier encodings, and raw shell/editor input.
     ```rust
     assert!(keymap.resolve(FocusContext::Terminal, esc).is_none());
     assert!(keymap.resolve(FocusContext::Terminal, tab).is_none());
     ```
-  - [ ] Assign/test an explicit workspace command prefix; leave ordinary terminal
+  - [x] Assign/test an explicit workspace command prefix; leave ordinary terminal
     keys forwarded. Provide menu/mouse routes when a browser consumes shortcuts.
-  - [ ] Expose explicit web profile in CLI/TOML; do not infer it from an SSH/container
+  - [x] Expose explicit web profile in CLI/TOML; do not infer it from an SSH/container
     environment. Add tests excluding Ctrl+P/T/S/R from required web workflows.
-  - [ ] Run `cargo test keymap` and input-dispatch tests.
+  - [x] Run `cargo test keymap` and input-dispatch tests.
 
-- [ ] Task 3: Generate help and reconcile live settings with actual behavior
+- [x] Task 3: Generate help and reconcile live settings with actual behavior
 
   **Files:** modify `src/components/help.rs`, `src/components/settings.rs`,
-  `src/config.rs`, `src/handler.rs`, `src/ui.rs`, `README.md`.
+  `src/config.rs`, `src/handler.rs`, `src/ui.rs`, `README.md`, `src/app.rs`
+  (live runtime effects), `src/commands.rs` (binding metadata/legacy aliases),
+  `src/terminal/mod.rs`, `src/terminal/emulator.rs` (scrollback limit),
+  `src/components/command_menu.rs` (active binding title); coordinator-only
+  prerequisite `src/fs/save.rs` (bounded shared safe publication).
   **Requirements:** FR-5, FR-6, AC-11.
   **Consumes:** registry/keymap metadata; **produces:** consistent help/settings.
-  - [ ] Test that help reflects active bindings and disabled features rather
+  - [x] Test that help reflects active bindings and disabled features rather
     than static contradictory shortcuts.
     ```rust
     assert_eq!(help_binding("document.save", &web_keymap),
                web_keymap.binding_label("document.save"));
     ```
-  - [ ] Wire preview disable, wrapping, view-mode cycling, watcher preferences,
+  - [x] Wire preview disable, wrapping, view-mode cycling, watcher preferences,
     and terminal scrollback settings to actual behavior; reconcile legacy aliases.
-  - [ ] Test config merge/CLI/live application and partial TOML upgrades.
-  - [ ] Run `cargo test config`, `cargo test help`, and `cargo test settings`.
+  - [x] Test config merge/CLI/live application and partial TOML upgrades.
+  - [x] Run `cargo test config`, `cargo test help`, and `cargo test settings`.
 
-- [ ] Task 4: Automated checkpoint for command accessibility
+- [x] Task 4: Automated checkpoint for command accessibility
 
   **Requirements:** AC-1, AC-9, AC-10, AC-12.
-  - [ ] Run full gates; verify every essential action has a tested web-profile
+  - [x] Run full gates; verify every essential action has a tested web-profile
     route and ordinary editor/shell input stays context-correct.
 
 ## Phase 5: Adaptive Layout and Workspace Presentation
 <!-- execution: parallel -->
 
-- [ ] Task 1: Implement pure adaptive layout and resize state
+- [x] Task 1: Implement pure adaptive layout and resize state
   <!-- files: src/workspace/layout.rs -->
 
   **Requirements:** FR-5, AC-5.
   **Produces:** `LayoutState`, `WorkspaceRects`, and
   `compute_layout(area: Rect, state: &LayoutState) -> WorkspaceRects`,
   `WorkspaceRects::all_inside(Rect) -> bool`, and pane-toggle/restore methods.
-  - [ ] Test visible/hidden/maximized panes and geometry with no terminal I/O:
+  - [x] Test visible/hidden/maximized panes and geometry with no terminal I/O:
     ```rust
     for (w, h) in [(120, 40), (80, 24), (60, 20), (1, 1)] {
         let area = Rect::new(0, 0, w, h);
@@ -456,91 +471,106 @@ exist. Add a module's declarations in the task that introduces it. Avoid broad
         assert!(rects.all_inside(area));
     }
     ```
-  - [ ] Use bounded column widths/minimums, compact fallback, and restore prior
+  - [x] Use bounded column widths/minimums, compact fallback, and restore prior
     sizes after maximize/unmaximize; drag/keyboard resizing updates only layout state.
-  - [ ] Run `cargo test workspace::layout`.
+  - [x] Run `cargo test workspace::layout`.
 
-- [ ] Task 2: Implement breadcrumbs and editor-aware workspace chrome
+- [x] Task 2: Implement breadcrumbs and editor-aware workspace chrome
   <!-- files: src/components/workspace_chrome.rs, src/components/document_tabs.rs, src/components/status_bar.rs -->
 
   **Requirements:** FR-4, FR-5, AC-5.
   **Consumes:** Phase 3 document summaries; **produces:** widgets with plain-icon
   fallback, dirty/read-only markers, overflow handling, and document status.
-  - [ ] Add TestBackend snapshots of duplicate basenames, long Unicode paths,
+  - [x] Add TestBackend snapshots of duplicate basenames, long Unicode paths,
     cursor/encoding/ending/language fields, inactive/active tabs, and narrow widths.
     ```rust
     assert!(screen_text.contains("config.yaml"));
     assert!(screen_text.contains("LF"));
     assert!(!screen_text.contains("e:edit")); // Not a view-mode hint in an editor.
     ```
-  - [ ] Keep backgrounds/contrast theme-aware and prioritize context over long
+  - [x] Keep backgrounds/contrast theme-aware and prioritize context over long
     shortcut hints when space is scarce.
-  - [ ] Run `cargo test workspace_chrome`, `cargo test document_tabs`, and
+  - [x] Run `cargo test workspace_chrome`, `cargo test document_tabs`, and
     `cargo test status_bar`.
 
-- [ ] Task 3: Integrate layout, pane controls, and hit testing
-  <!-- files: src/workspace/mod.rs, src/components/mod.rs, src/ui.rs, src/handler.rs, src/app.rs, src/config.rs, src/theme.rs, src/components/settings.rs -->
+- [x] Task 3: Integrate layout, pane controls, and hit testing
+  <!-- files: src/workspace/mod.rs, src/components/mod.rs, src/ui.rs, src/handler.rs, src/app.rs, src/config.rs, src/theme.rs, src/components/settings.rs, src/commands.rs, src/keymap.rs, src/terminal/mod.rs, src/components/terminal.rs, src/main.rs, src/components/document_tabs.rs, src/components/workspace_chrome.rs, src/components/status_bar.rs, src/components/command_menu.rs, src/components/help.rs -->
   <!-- depends: task1, task2 -->
 
   **Requirements:** FR-5, AC-5, AC-9.
   **Consumes:** WorkspaceRects/chrome; **produces:** layout-controlled render and
   mouse mapping, pane controls, and persistent layout settings.
-  - [ ] Add application TestBackend resize/maximize/hide/show/drag fixtures.
+  - [x] Add application TestBackend resize/maximize/hide/show/drag fixtures.
     ```rust
     let before = app.terminal_state.pty.as_ref().unwrap().is_alive();
     app.workspace.layout.toggle_terminal();
     assert_eq!(app.terminal_state.pty.as_ref().unwrap().is_alive(), before);
     ```
-  - [ ] Register new modules, update preview/editor usable areas, clamp dialogs,
+  - [x] Register new modules, update preview/editor usable areas, clamp dialogs,
     and resize PTY/emulator together after layout changes.
-  - [ ] Preserve no-preview/no-terminal behavior and keyboard-only accessibility.
-  - [ ] Run layout/widget/mouse tests and PTY resize tests.
+  - [x] Preserve no-preview/no-terminal behavior and keyboard-only accessibility.
+  - [x] Run layout/widget/mouse tests and PTY resize tests.
 
-- [ ] Task 4: Automated checkpoint for adaptive layout
+- [x] Task 4: Automated checkpoint for adaptive layout
   <!-- files: -->
   <!-- depends: task3 -->
 
   **Requirements:** AC-5, AC-9, AC-11, AC-12.
-  - [ ] Run all gates and the complete geometry matrix. Compare meaningful
+  - [x] Run all gates and the complete geometry matrix. Compare meaningful
     screen assertions rather than requiring pixel-identical fonts.
 
 ## Phase 6: Background Work, Search, and Mounted Storage
 
-- [ ] Task 1: Add bounded generation-aware background scheduling
+- [x] Task 1: Add bounded generation-aware background scheduling
 
   **Files:** create `src/background.rs`; modify `src/main.rs`, `src/event.rs`,
-  `src/app.rs`.
+  `src/app.rs`; necessary transport/test adapters in `src/handler.rs`,
+  `src/commands.rs`, `src/components/command_menu.rs`, `src/ui.rs`,
+  `src/fs/watcher.rs`, `src/terminal/pty.rs` (Ruling 16); focused
+  `src/background/app_jobs.rs`, `src/fs/tree.rs`, `src/preview_content.rs`
+  (existing shallow-summary seam only), `src/s3/backend.rs` (Ruling 17),
+  `src/fs/operations.rs` (Ruling 18), `src/workspace/focus.rs` (Ruling 19).
   **Requirements:** FR-7, AC-6.
   **Produces:** `RequestGeneration`, bounded job/result channels, request cancellation,
   stale-result rejection, and dirty redraw scheduling.
-  - [ ] Test delayed old results after a newer selection and output flooding:
+  - [x] Test delayed old results after a newer selection and output flooding:
     ```rust
     assert!(!scheduler.accepts(old_generation));
     assert!(scheduler.accepts(current_generation));
     assert!(queued_results <= configured_limit);
     ```
-  - [ ] Separate blocking workers from async orchestration; coalesce terminal
+  - [x] Separate blocking workers from async orchestration; coalesce terminal
     output/redraws without dropping ordered user input or necessary completion events.
-  - [ ] Run `cargo test background`; use injected barriers, not arbitrary sleeps.
+  - [x] Run `cargo test background`; use injected barriers, not arbitrary sleeps.
+  - [x] Migrate all seven App producers (snapshots, summaries, S3, child counts,
+    copy, paste) with a final scoped review PASS/APPROVE and an honestly narrowed
+    consumer snapshot boundary.
 
-- [ ] Task 2: Move preview loading/highlighting out of rendering
+- [x] Task 2: Move preview loading/highlighting out of rendering
 
   **Files:** create `src/highlighting.rs`; modify `src/main.rs`, `src/app.rs`,
-  `src/ui.rs`, `src/preview_content.rs`, `src/components/editor.rs`, `src/event.rs`.
+  `src/ui.rs`, `src/preview_content.rs`, `src/components/editor.rs`,
+  `src/background/app_jobs.rs` and `src/handler.rs` visibility/tests as needed;
+  `src/event.rs` was not required.
   **Requirements:** FR-7, AC-6, AC-11.
   **Consumes:** background scheduler; **produces:** versioned preview loads and
   line/checkpoint syntax caches with bounded invalidation.
-  - [ ] Test slow old preview, theme-change invalidation, editing before a cached
+  - [x] Test slow old preview, theme-change invalidation, editing before a cached
     viewport, newline-aware parser state, and huge notebooks/embedded outputs.
     ```rust
     assert_eq!(preview.current_path, Some(new_path));
     assert!(render_io_count == 0);
     ```
-  - [ ] Render prepared state only. Do not rebuild syntax state from line zero
+  - [x] Render prepared state only. Do not rebuild syntax state from line zero
     on every frame; preserve existing large-file streaming limits.
-  - [ ] Run `cargo test highlighting` and preview/editor rendering tests.
+  - [x] Run `cargo test highlighting` and preview/editor rendering tests.
+  - [x] Narrowed boundary (review-accepted): syntect parser state is not `Send`,
+    so editor syntax preparation is a bounded main-loop step (256 lines/step,
+    20 000-line and 4 MiB per-document caps, 32 MiB aggregate with eviction),
+    never in `render` or input handlers; requires a `Send` parser engine or a
+    worker-local registry to go fully off-thread.
 
-- [ ] Task 3: Add incremental filename and project content search
+- [x] Task 3: Add incremental filename and project content search
 
   **Files:** create `src/search.rs`, `src/components/content_search.rs`; modify
   `src/main.rs`, `src/components/mod.rs`, `src/app.rs`, `src/event.rs`,
@@ -548,142 +578,201 @@ exist. Add a module's declarations in the task that introduces it. Avoid broad
   **Requirements:** FR-7, AC-1, AC-6.
   **Produces:** `SearchQuery`, `SearchHit { path, line, byte, excerpt }`, bounded
   generation-tagged batches, configurable exclusion/size limits.
-  - [ ] Use a temporary project with matching text, binary/large files, excluded
+  - [x] Use a temporary project with matching text, binary/large files, excluded
     directories, unreadable entries, symlink loops, and Unicode names.
     ```rust
     assert_eq!(hits[0].path, root.join("config.yaml"));
     assert_eq!(hits[0].line, 1);
     assert!(!hits.iter().any(|h| h.path.starts_with(root.join(".venv"))));
     ```
-  - [ ] Implement literal content search and native filename indexing on workers;
+  - [x] Implement literal content search and native filename indexing on workers;
     show cap/incomplete status and retain optional secondary actions.
-  - [ ] Test query replacement/cancel, navigate-to-hit, unsaved active document
+  - [x] Test query replacement/cancel, navigate-to-hit, unsaved active document
     conflicts, and no installed external search command.
-  - [ ] Run `cargo test search` and result-navigation tests.
+  - [x] Run `cargo test search` and result-navigation tests.
+  - [x] Fix round 1 (review P2s): `SearchHit.column` in editor-buffer coordinates
+    so CRLF hits navigate to the exact column; content queue bounded jointly with
+    pending directories and every non-complete path marked incomplete; NUL scan
+    over the whole bounded read; genuine FIFO traversal.
+  - [ ] Follow-up `FileManagerTUI-5yf` (deferred by Ruling20): a single directory
+    listing larger than `max_pending` re-lists and aborts on every continuation,
+    returning zero results for a searchable tree. Fix with a resumable listing
+    before Phase 6 closes (folded into the Task 5 checkpoint sweep).
 
-- [ ] Task 4: Preserve path selections and add document-aware watcher polling
+- [x] Task 4: Preserve path selections and add document-aware watcher polling
 
   **Files:** modify `src/fs/tree.rs`, `src/fs/watcher.rs`, `src/app.rs`,
   `src/event.rs`, `src/config.rs`, `src/components/tree.rs`, `src/components/settings.rs`.
   **Requirements:** FR-4, FR-7, AC-3, AC-6.
   **Produces:** path-keyed tree/multi-selection, configurable event/polling watcher
   modes, external-document changes without global editor watch suppression.
-  - [ ] Test refresh/sort/pagination with multi-selected paths and external edits:
+  - [x] Test refresh/sort/pagination with multi-selected paths and external edits:
     ```rust
     assert!(tree.selected_paths().contains(&selected_path));
     assert!(documents.get(open_id).unwrap().has_external_change());
     ```
-  - [ ] Use an injected polling clock/backend for lost/coalesced events and
+  - [x] Use an injected polling clock/backend for lost/coalesced events and
     deleted roots. Preserve user watcher mode and debounce/flood limits.
-  - [ ] Run `cargo test fs::tree`, `cargo test fs::watcher`, and document-change tests.
+  - [x] Run `cargo test fs::tree`, `cargo test fs::watcher`, and document-change tests.
+  - [x] Review-accepted deviation: the in-app `Ctrl+R` toggle and
+    `watcher.auto_refresh` now gate **tree auto-refresh only** while change
+    detection stays live for open documents (required so a focused editor still
+    sees external writes); full disable remains `--no-watcher` /
+    `watcher.enabled = false`. Help, settings and README state this explicitly.
+  - [x] Fix rounds 1-2 (review P1/P2): self-write suppression is evidence-based,
+    consuming the marker only on an exact match of length, mtime and an FNV-1a
+    digest of the first 64 KiB of the published bytes, recomputed from memory at
+    save time; mismatch reports the change as external. The tail beyond the
+    window is deliberately not claimed verified.
 
-- [ ] Task 5: Automated checkpoint for responsiveness and search
+- [x] Task 5: Automated checkpoint for responsiveness and search
 
   **Requirements:** AC-6, AC-11, AC-12.
-  - [ ] Run all gates and injected slow-I/O/output-flood tests. Prove rendering
+  - [x] Run all gates and injected slow-I/O/output-flood tests. Prove rendering
     does not invoke loaders and old request generations cannot overwrite state.
+  - [x] `FileManagerTUI-5yf` fixed and verified: `SearchCursor.pending` holds
+    `DirListing { offset }` entries that resume from a saved position, and a
+    paused listing consumes its next entry before the bound is re-checked, so
+    reaching `max_pending` is a resumable pause rather than a cap. Review round 1
+    rejected the first attempt for a livelock on non-empty subdirectories at the
+    bound; the fixed loop guarantees progress and the confirmation review
+    re-derived the red and probed all-excluded, symlink, unreadable, deep and
+    no-deadline shapes with no stall and no lost hits.
+  - [x] Accepted soft bound (confirmation P2, corrected): the retained set
+    overshoots `max_pending` to roughly `2 * max_pending + children_per_dir`
+    once nested directories are discovered after `visited` saturates. It is
+    bounded by shape rather than tree size, `search_cursor_bytes` charges the
+    real length, and the cursor stays far inside `job_bytes`; the doc comment,
+    the report and the brittle `drive_content_to_completion` assertion were
+    corrected to the documented slack instead of a hard bound the code does not
+    promise.
+  - [x] Phase 6 closure audit recorded in the report with explicit gaps
+    (Phases 7-12, `.6.6` open, `run_index` single-listing cap accepted as an
+    honest separate limitation).
+
+- [x] Task 6: Bound legacy save validation and overwrite revision reads
+
+  **Beads:** FileManagerTUI-cen.6.6 (discovered during Phase 3 Task 1).
+  **Files:** modify `src/fs/save.rs`, `src/editor.rs`, `src/app.rs`.
+  **Requirements:** FR-2, FR-7, bounded-I/O non-functional requirement.
+  - [x] Bound both save-publication validation reads by the known source revision
+    size, implemented early as Phase 4 Task 3's config-writer prerequisite.
+    Explicit validation budgets use the same guarded publication implementation.
+  - [x] Use known loaded revision sizes or configured byte limits to bound
+    remaining explicit overwrite revision capture and verify all legacy callers.
+    Map externally grown targets to conflicts; never clip or truncate them.
+  - [x] Add deterministic reader-budget/growth regressions proving originals
+    and dirty buffers survive refusal. Preserve symlink/path identity checks.
+  - [x] Rerun full Rust gates, relevant slow-I/O/conflict fixtures, and new-core
+    coverage after this discovered fix; Phase 6 cannot close until it passes.
+  - [x] Review-accepted scope correction: every save/overwrite target-revision
+    capture and document load is bounded, but two genuinely unbounded whole-file
+    reads remain in the preview path (`src/preview_content.rs:1174` notebook
+    loader reachable from `src/highlighting.rs:230-233`, and `:155` with a TOCTOU
+    window). They are pre-existing Phase 3 reads, unchanged here, and filed as
+    `FileManagerTUI-8u3` to be fixed under the bounded-I/O mandate.
 
 ## Phase 7: Sessions and Private Recovery
 
-- [ ] Task 1: Add versioned workspace session serialization
+- [x] Task 1: Add versioned workspace session serialization
 
   **Files:** create `src/session.rs`; modify `src/main.rs`, `src/config.rs`,
   `src/workspace/documents.rs`, `src/workspace/layout.rs`.
   **Requirements:** FR-8, AC-3.
   **Produces:** `SessionRecord`, workspace-keyed load/save, schema/version checks;
   stores paths/cursors/layout/recent files, not running processes or executable trust.
-  - [ ] Test a save/reload round trip plus corrupt, future-version, missing-file,
+  - [x] Test a save/reload round trip plus corrupt, future-version, missing-file,
     moved-root, and unwritable-state cases:
     ```rust
     assert_eq!(restored.active_document_path, saved.active_document_path);
     assert_eq!(restored.layout, saved.layout);
     assert!(!serialized_session.contains("trusted_server_commands"));
     ```
-  - [ ] Use an injected private state directory and atomic state writes; treat
+  - [x] Use an injected private state directory and atomic state writes; treat
     unavailable state as a non-fatal, visible persistence failure.
-  - [ ] Run `cargo test session`.
+  - [x] Run `cargo test session`.
 
-- [ ] Task 2: Add bounded private recovery snapshots
+- [x] Task 2: Add bounded private recovery snapshots
 
   **Files:** create `src/recovery.rs`; modify `src/main.rs`, `src/config.rs`.
   **Requirements:** FR-8, AC-3.
   **Produces:** document/revision-keyed snapshots, restore/discard records,
   retention limits and explicit disable/clear controls.
-  - [ ] Test unsaved text, disk changed since snapshot, corruption, retention,
+  - [x] Test unsaved text, disk changed since snapshot, corruption, retention,
     symlinked/untrusted storage, and Unix owner-only permissions.
     ```rust
     assert_eq!(snapshot.text, "unsaved:\n  value: 1\n");
     assert_eq!(std::fs::read(&original).unwrap(), original_bytes);
     ```
-  - [ ] Never overwrite the original on restore; recover into a dirty document
+  - [x] Never overwrite the original on restore; recover into a dirty document
     and require ordinary conflict-safe save. Reject unsafe storage locations.
-  - [ ] Run `cargo test recovery`; only delete owned expired recovery records.
+  - [x] Run `cargo test recovery`; only delete owned expired recovery records.
 
-- [ ] Task 3: Integrate startup restoration and recovery commands
+- [x] Task 3: Integrate startup restoration and recovery commands
 
   **Files:** modify `src/app.rs`, `src/handler.rs`, `src/commands.rs`,
   `src/components/dialog.rs`, `src/components/settings.rs`, `src/main.rs`.
   **Requirements:** FR-8, AC-3.
   **Consumes:** session/recovery APIs; **produces:** non-blocking startup and
   restore/discard/clear interactions preserving explicit CLI workspace choice.
-  - [ ] Test restart after unsaved edit, user refusal, disabled persistence,
+  - [x] Test restart after unsaved edit, user refusal, disabled persistence,
     missing roots, and explicit CLI-root override.
     ```rust
     assert!(restored_document.editor.modified);
     assert!(!serialized_session.contains("trusted_server_commands"));
     ```
-  - [ ] Throttle snapshots outside rendering; snapshot versions cannot overwrite
+  - [x] Throttle snapshots outside rendering; snapshot versions cannot overwrite
     newer recovered text. Bound shutdown work and expose persistence errors.
-  - [ ] Run `cargo test session`, `cargo test recovery`, and startup-routing tests.
+  - [x] Run `cargo test session`, `cargo test recovery`, and startup-routing tests.
 
-- [ ] Task 4: Automated checkpoint for session recovery
+- [x] Task 4: Automated checkpoint for session recovery
 
   **Requirements:** AC-3, AC-12.
-  - [ ] Run all gates and crash/restart fixtures with isolated state directories;
+  - [x] Run all gates and crash/restart fixtures with isolated state directories;
     verify no global clipboard or executable-trust persistence remains.
 
 ## Phase 8: Read-Only Git State
 
-- [ ] Task 1: Add bounded machine-readable Git backend
+- [x] Task 1: Add bounded machine-readable Git backend
 
   **Files:** create `src/git.rs`; modify `src/main.rs`, `src/event.rs`.
   **Requirements:** FR-9, AC-7.
   **Produces:** `GitSnapshot`, branch/entry states, generation-tagged refresh using
   argument-vector `git status --porcelain=v2 -z --branch` and bounded timeouts.
-  - [ ] Create temporary repositories in tests; cover staged, unstaged, untracked,
+  - [x] Create temporary repositories in tests; cover staged, unstaged, untracked,
     conflict, unborn/detached, rename, Unicode, spaces, and newline paths.
     ```rust
     let snapshot = parse_porcelain_v2(bytes).unwrap();
     assert!(snapshot.entries.iter().any(|e| e.path == unusual_name));
     assert!(snapshot.entries.iter().any(|e| e.is_conflicted()));
     ```
-  - [ ] Test missing executable/non-repository, cancellation, huge output, and
+  - [x] Test missing executable/non-repository, cancellation, huge output, and
     stale results. Run Git with optional locks disabled where appropriate; no
     write commands occur in application code.
-  - [ ] Run `cargo test git`; setup commands that create test commits act only
+  - [x] Run `cargo test git`; setup commands that create test commits act only
     in disposable fixtures and use the environment's existing identity.
 
-- [ ] Task 2: Render branch/file/directory Git indicators
+- [x] Task 2: Render branch/file/directory Git indicators
 
   **Files:** modify `src/app.rs`, `src/ui.rs`, `src/components/tree.rs`,
   `src/components/status_bar.rs`, `src/theme.rs`, `src/config.rs`,
   `src/components/settings.rs`.
   **Requirements:** FR-9, AC-5, AC-7.
   **Consumes:** GitSnapshot; **produces:** optional decorations and async refresh.
-  - [ ] Test aggregated directory status, color-independent markers, narrow
+  - [x] Test aggregated directory status, color-independent markers, narrow
     status bars, theme/no-icons behavior, read-only roots, and S3 exclusion.
     ```rust
     assert!(tree_screen.contains("M"));
     assert!(status_screen.contains("main"));
     ```
-  - [ ] Refresh through background jobs rather than render-time subprocesses;
+  - [x] Refresh through background jobs rather than render-time subprocesses;
     events from a prior workspace cannot recolor the current tree.
-  - [ ] Run `cargo test git` plus tree/status snapshot tests.
+  - [x] Run `cargo test git` plus tree/status snapshot tests.
 
-- [ ] Task 3: Automated checkpoint for read-only Git integration
+- [x] Task 3: Automated checkpoint for read-only Git integration
 
   **Requirements:** AC-7, AC-11, AC-12.
-  - [ ] Run all gates. Inspect application Git command invocations and assert
+  - [x] Run all gates. Inspect application Git command invocations and assert
     the backend's whitelist contains only read-only queries.
 
 ## Phase 9: Embedded-Terminal Compatibility

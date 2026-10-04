@@ -1,4 +1,7 @@
+pub mod command_menu;
+pub mod content_search;
 pub mod dialog;
+pub mod document_tabs;
 pub mod editor;
 pub mod help;
 pub mod preview;
@@ -8,3 +11,4 @@ pub mod settings;
 pub mod status_bar;
 pub mod terminal;
 pub mod tree;
+pub mod workspace_chrome;

@@ -97,20 +97,15 @@ impl<'a> Widget for SearchWidget<'a> {
         let input_line = Line::from(input_spans);
         buf.set_line(inner.x, inner.y, &input_line, inner.width);
 
-        // Row 1: Separator + result count
+        // Row 1: Separator + result count. The marker comes from
+        // `SearchState::status_text`, so every non-complete outcome (indexing,
+        // cap, unreadable entries, refused or failed index) stays explicit.
+        // States assembled directly by tests fall back to computing it here.
         if inner.height > 1 {
-            let count_str = if self.state.query.is_empty() {
-                "Type to search...".to_string()
+            let count_str = if self.state.status.is_empty() {
+                self.state.status_text()
             } else {
-                format!(
-                    "{} result{}",
-                    self.state.results.len(),
-                    if self.state.results.len() == 1 {
-                        ""
-                    } else {
-                        "s"
-                    }
-                )
+                self.state.status.clone()
             };
             let sep_line = Line::from(Span::styled(
                 format!("─── {} ", count_str),
@@ -261,23 +256,25 @@ mod tests {
 
     #[test]
     fn test_search_with_results_renders() {
-        let mut state = SearchState::default();
-        state.query = "test".to_string();
-        state.cursor_position = 4;
-        state.results = vec![
-            SearchResult {
-                path: PathBuf::from("/tmp/test.txt"),
-                display: "test.txt".to_string(),
-                score: 100,
-                match_indices: vec![0, 1, 2, 3],
-            },
-            SearchResult {
-                path: PathBuf::from("/tmp/foo/test.rs"),
-                display: "foo/test.rs".to_string(),
-                score: 90,
-                match_indices: vec![4, 5, 6, 7],
-            },
-        ];
+        let state = SearchState {
+            query: "test".to_string(),
+            cursor_position: 4,
+            results: vec![
+                SearchResult {
+                    path: PathBuf::from("/tmp/test.txt"),
+                    display: "test.txt".to_string(),
+                    score: 100,
+                    match_indices: vec![0, 1, 2, 3],
+                },
+                SearchResult {
+                    path: PathBuf::from("/tmp/foo/test.rs"),
+                    display: "foo/test.rs".to_string(),
+                    score: 90,
+                    match_indices: vec![4, 5, 6, 7],
+                },
+            ],
+            ..Default::default()
+        };
 
         let tc = test_theme();
         let widget = SearchWidget::new(&state, &tc);
@@ -293,24 +290,26 @@ mod tests {
 
     #[test]
     fn test_search_selection_indicator() {
-        let mut state = SearchState::default();
-        state.query = "t".to_string();
-        state.cursor_position = 1;
-        state.selected_index = 1;
-        state.results = vec![
-            SearchResult {
-                path: PathBuf::from("/a.txt"),
-                display: "a.txt".to_string(),
-                score: 50,
-                match_indices: vec![2],
-            },
-            SearchResult {
-                path: PathBuf::from("/b.txt"),
-                display: "b.txt".to_string(),
-                score: 40,
-                match_indices: vec![2],
-            },
-        ];
+        let state = SearchState {
+            query: "t".to_string(),
+            cursor_position: 1,
+            selected_index: 1,
+            results: vec![
+                SearchResult {
+                    path: PathBuf::from("/a.txt"),
+                    display: "a.txt".to_string(),
+                    score: 50,
+                    match_indices: vec![2],
+                },
+                SearchResult {
+                    path: PathBuf::from("/b.txt"),
+                    display: "b.txt".to_string(),
+                    score: 40,
+                    match_indices: vec![2],
+                },
+            ],
+            ..Default::default()
+        };
 
         let tc = test_theme();
         let widget = SearchWidget::new(&state, &tc);
@@ -330,5 +329,51 @@ mod tests {
         let area = Rect::new(0, 0, 10, 3);
         let mut buf = Buffer::empty(area);
         widget.render(area, &mut buf);
+    }
+
+    #[test]
+    fn test_index_progress_and_incomplete_status_render() {
+        let tc = test_theme();
+        let mut state = SearchState {
+            indexing: true,
+            ..Default::default()
+        };
+        let area = Rect::new(0, 0, 80, 24);
+        let mut buf = Buffer::empty(area);
+        SearchWidget::new(&state, &tc).render(area, &mut buf);
+        assert!(buffer_to_string(&buf, area).contains("Indexing filenames"));
+
+        state.query = "t".to_string();
+        state.cursor_position = 1;
+        state.results = vec![SearchResult {
+            path: PathBuf::from("/tmp/test.txt"),
+            display: "test.txt".to_string(),
+            score: 1,
+            match_indices: vec![0],
+        }];
+        let mut buf = Buffer::empty(area);
+        SearchWidget::new(&state, &tc).render(area, &mut buf);
+        assert!(buffer_to_string(&buf, area).contains("indexing"));
+
+        state.indexing = false;
+        state.index_capped = true;
+        let mut buf = Buffer::empty(area);
+        SearchWidget::new(&state, &tc).render(area, &mut buf);
+        assert!(buffer_to_string(&buf, area).contains("index incomplete"));
+    }
+
+    #[test]
+    fn test_precomputed_app_status_is_rendered_verbatim() {
+        let tc = test_theme();
+        let state = SearchState {
+            query: "t".to_string(),
+            cursor_position: 1,
+            status: "7 results (index incomplete)".to_string(),
+            ..Default::default()
+        };
+        let area = Rect::new(0, 0, 80, 24);
+        let mut buf = Buffer::empty(area);
+        SearchWidget::new(&state, &tc).render(area, &mut buf);
+        assert!(buffer_to_string(&buf, area).contains("7 results (index incomplete)"));
     }
 }

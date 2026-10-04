@@ -9,7 +9,7 @@ A fast, keyboard-driven terminal file manager built with Rust and [Ratatui](http
 
 - **Dual-pane layout** — file tree + live preview with syntax highlighting
 - **Vim-style navigation** — `j`/`k`/`g`/`G` and arrow keys
-- **Fuzzy finder** — `Ctrl+P` for project-wide file search with action menu
+- **Quick Open** — filename finder with direct document opening and secondary file actions
 - **Inline filter** — `/` to filter the current directory tree
 - **File operations** — create, rename, delete, copy, cut, paste with undo
 - **Multi-select** — `Space` to select, batch operations on selection
@@ -18,11 +18,12 @@ A fast, keyboard-driven terminal file manager built with Rust and [Ratatui](http
 - **Sort options** — sort by name, size, or modified time; toggle dirs-first
 - **Configurable themes** — built-in dark (Catppuccin Mocha) / light (Catppuccin Latte) + custom colors
 - **TOML configuration** — multi-source config with CLI overrides
-- **File watcher** — auto-refresh on filesystem changes with debounce
+- **File watcher** — optional, disabled by default; opt-in auto-refresh with debounce, native event or polling backend for mounted storage
 - **Jupyter notebook preview** — renders `.ipynb` cells with syntax highlighting
 - **Large file handling** — head/tail preview mode for files over configurable threshold
 - **Embedded terminal** — integrated PTY shell panel with VT100 emulation, dynamic resize, and scrollback
-- **Inline text editor** — press `e` in preview to edit files with syntax highlighting, undo/redo, find & replace, auto-indent, text selection (Shift+Arrow, Ctrl+A, mouse drag), and mouse cursor positioning
+- **Retained text documents** — UTF-8 editing, independent tabs/history/find/scroll/wrap, syntax highlighting, safe saves, undo/redo and selections
+- **Command menu and keymaps** — configurable Standard/Web profiles, registry-generated help and live settings
 - **AWS S3 browse mode** — read-only browsing of S3 buckets directly from the TUI using the AWS CLI; navigate prefixes, preview metadata, and copy S3 URIs to clipboard
 
 ## Installation
@@ -118,6 +119,12 @@ fm --no-icons --no-mouse --no-watcher
 # Disable embedded terminal
 fm --no-terminal
 
+# Browser-terminal workspace routes (explicit opt-in)
+fm --keymap-profile web
+
+# Disable automatic preview, not explicit text document opening
+fm --no-preview
+
 # Light theme
 fm --theme light
 
@@ -128,7 +135,57 @@ fm s3://my-bucket
 fm s3://my-bucket/experiments/run-1/ --aws-profile mfa
 ```
 
-## Keybindings
+## Documents and workspace commands
+
+Enter on a file and Quick Open open supported local text directly. Clean automatic
+preview documents may be replaced; editing or pinning retains a document. Tabs,
+next/previous/list navigation preserve each document's cursor, find query, undo,
+dirty content and view state. Binary/invalid-UTF-8/oversized/read-only files and
+notebooks keep supported read-only preview behavior; S3 remains read-only.
+
+Saving targets the retained/captured document, never an unrelated selected
+preview. Close and quit offer save/discard/cancel for dirty documents; cancelled
+or failed saves retain their buffers. External disk revisions stop unsafe saves;
+Save As creates a new destination with explicit overwrite/conflict checks.
+
+F8 or the status-bar **Commands** mouse button opens a searchable command menu.
+The rendered button and menu title reflect current bindings; the button remains
+clickable when keyboard entry is unbound. Menu dismissal uses its own configured
+Menu-context bindings plus native Esc. Help (`?` in tree/preview) lists the
+originating context's active bindings, unbound commands and disabled reasons.
+Unavailable adaptive-layout/recovery commands are placeholders, not features;
+Git integration, LSP, recovery and adaptive layout are not implemented.
+
+Both profiles provide **Alt+G, then a suffix** in ordinary tree/preview/editor/shell
+contexts:
+
+| Suffix | Command |
+|---|---|
+| `m` | Commands menu |
+| `s` / `a` / `q` | Save / Save As / Close retained document |
+| `o` | Quick Open |
+| `d` / `n` / `b` | List / next / previous document |
+| `1` / `2` / `3` / `4` | Explorer / retained editor / shell / selected preview focus |
+| `t` / `w` | Toggle terminal / wrap the actual text view |
+
+Standard also retains contextual Ctrl+S/Ctrl+P/Ctrl+T and directional focus
+shortcuts. Web omits those registered Ctrl routes, avoiding exclusive dependence
+on browser-reserved Ctrl+P/T/S/R. Profiles are explicit, not auto-detected. Browser,
+OS, locale and extension delivery still varies: controlled PTY tests are **not**
+real-browser or Kubeflow certification. Native editor controls remain native.
+
+A pending prefix times out after 1200 ms by default (100–10000 ms configurable).
+Esc, mismatch, timeout or context change cancels and consumes the suffix, without
+replaying it as shell/editor/tree input. Paste, mouse-down, document activation,
+focus and live replacement reset sequences. External cancellation/replacement of
+a pending prefix quarantines one subsequent key, deliberately dropping a delayed
+suffix rather than risking a destructive action. Literal textual prefixes,
+conflicting/unknown bindings and nonportable encodings are rejected.
+
+## Native panel controls (default Standard profile)
+
+These controls are panel-local; explicit workspace overrides take precedence.
+Workspace commands and their authoritative configured shortcuts are in Help.
 
 ### Navigation (Tree Panel)
 
@@ -138,7 +195,8 @@ fm s3://my-bucket/experiments/run-1/ --aws-profile mfa
 | `k` / `↑` | Move up |
 | `g` / `Home` | Jump to first item |
 | `G` / `End` | Jump to last item |
-| `Enter` / `l` / `→` | Expand directory |
+| `Enter` | Expand directory / open text document |
+| `l` / `→` | Expand directory |
 | `Backspace` / `h` / `←` | Collapse directory / go to parent |
 | `Tab` | Cycle panel focus (forward) |
 | `Ctrl+←/→` | Focus left/right panel |
@@ -173,7 +231,7 @@ fm s3://my-bucket/experiments/run-1/ --aws-profile mfa
 
 ### Search Action Menu
 
-After selecting a file in the fuzzy finder, an action menu appears:
+Quick Open normally opens directly. Its secondary action menu offers:
 
 | Key | Action |
 |-----|--------|
@@ -200,10 +258,10 @@ After selecting a file in the fuzzy finder, an action menu appears:
 | `G` / `End` | Jump to bottom |
 | `Ctrl+D` | Half page down |
 | `Ctrl+U` | Half page up |
-| `Ctrl+W` | Toggle line wrap |
+| `Alt+G w` / Commands → Wrap | Toggle the actual text view’s wrap |
 | `Ctrl+Shift+C` / `Ctrl+C` (when selected) | Copy selected preview text |
-| `Ctrl+Insert` | Copy selected preview text |
-| `Ctrl+T` | Cycle view mode (head/tail/full for large files) |
+| Right click | Copy selected preview text |
+| Commands → Cycle selected preview mode | Full → head/tail → head → tail; full respects byte budget |
 | `+` / `-` | Adjust head/tail lines |
 | `e` | Enter edit mode |
 
@@ -220,8 +278,8 @@ After selecting a file in the fuzzy finder, an action menu appears:
 | `Tab` / `Shift+Tab` | Indent / dedent |
 | `Ctrl+Z` | Undo |
 | `Ctrl+Y` | Redo |
-| `Ctrl+C` | Copy line |
-| `Ctrl+X` | Cut line |
+| `Ctrl+C` | Copy selection, or current line |
+| `Ctrl+X` | Cut selection, or current line |
 | `Ctrl+V` | Paste |
 | `Ctrl+F` | Find |
 | `Ctrl+H` | Find & Replace |
@@ -237,23 +295,26 @@ After selecting a file in the fuzzy finder, an action menu appears:
 | Key | Action |
 |-----|--------|
 | `Ctrl+T` | Toggle terminal panel |
-| `Ctrl+Shift+↑` | Decrease terminal height |
-| `Ctrl+Shift+↓` | Increase terminal height |
-| `Esc` | Unfocus terminal (return to tree) |
+| `Ctrl+Shift+↑` | Grow terminal height (Standard profile) |
+| `Ctrl+Shift+↓` | Shrink terminal height (Standard profile) |
+| `Esc` / `q` / `Tab` / `Ctrl+C` | Forward to shell (including Ctrl+C with selected text) |
 | `Shift+↑/↓` | Scroll terminal history |
 | `Shift+PgUp/PgDn` | Fast scroll terminal history |
 
-> When the terminal is focused, all other keys are forwarded to the shell.
+> Only configured workspace routes and native terminal scroll/distinct copy
+> actions are intercepted. Shell Ctrl+A/E/U/K/W retain their normal semantics;
+> Ctrl+W is not wrap. Unreserved Alt chords forward their ESC prefix. Copy uses
+> distinctly delivered Ctrl+Shift+C/Super+C or right-click, not ordinary Ctrl+C.
 
 ### General
 
 | Key | Action |
 |-----|--------|
 | `?` | Toggle help overlay |
-| `q` | Quit |
-| `Ctrl+C` | Quit |
+| `q` | Quit in tree/preview |
+| `Ctrl+C` | Quit in tree/preview (selected preview text copies instead) |
 | `F5` | Manual refresh |
-| `Ctrl+R` | Toggle file watcher |
+| `Ctrl+R` | Toggle tree auto-refresh (open-document change detection stays active) |
 
 ### Mouse
 
@@ -270,11 +331,86 @@ After selecting a file in the fuzzy finder, an action menu appears:
 
 Configuration is loaded from multiple sources with the following priority (highest wins):
 
-1. **CLI flags** (e.g., `--no-mouse`, `--theme light`)
-2. **Environment variable** `$FM_TUI_CONFIG` (path to config file)
-3. **Local config** `.fm-tui.toml` in current directory
-4. **Global config** `~/.config/fm-tui/config.toml`
-5. **Built-in defaults**
+1. **CLI flags** (e.g., `--no-mouse`, `--theme light`, `--keymap-profile web`)
+2. **Explicit `--config` / `-c` file**
+3. **Environment variable** `$FM_TUI_CONFIG` (path to config file)
+4. **Local config** `.fm-tui.toml` in current directory
+5. **Global config** `~/.config/fm-tui/config.toml`
+6. **Built-in defaults**
+
+### Configurable bindings
+
+```toml
+[keymap]
+profile = "web"
+timeout_ms = 1200
+
+[[keymap.bindings]]
+command = "document.save"
+context = "editor"
+keys = ["F9", "Alt+G s"]
+
+# Remove all terminal-toggle routes in shell context.
+[[keymap.bindings]]
+command = "pane.terminal.toggle"
+context = "terminal"
+keys = []
+
+# Menu dismissal is independent of editor entry.
+[[keymap.bindings]]
+command = "workspace.commands"
+context = "menu"
+keys = ["F9"]
+```
+
+Sources merge by `(command, context)`; each incoming pair replaces that pair's
+complete profile/lower-priority routes. Omitted pairs remain; `keys = []` unbinds.
+A CLI profile override preserves TOML binding overrides. Include original keys to
+retain them when adding a key. Startup config errors fail before TUI setup.
+
+Help's Settings tab registers an explicit profile selector and merges partial
+settings with the current effective config. Compilation and file validation
+precede atomic persistence and live application. Failure reports no save/apply,
+keeps previous live bindings/state and retains unsaved settings edits.
+Settings saves capture exact source bytes and their revision together before
+merging, then reuse the shared bounded safe-save policy. Source/generated config
+are limited to 1 MiB; validation reads are capped at the captured revision size
+plus one growth-detection byte. Existing private modes and ownership are preserved
+or the save refuses; symlinked destinations/ancestors, hardlinks, read-only files
+and unpreservable ownership/extended permissions are refused without dropping the
+original file or live state. New Unix configs use a restrictive 0600 default.
+Changed/deleted/replaced destinations and creation collisions fail safely.
+Final revision validation followed by publication remains advisory under trusted
+parents, not filesystem compare-and-swap; a last validation/publication race is
+not claimed closed.
+
+Preview disable (`--no-preview` or `[preview] enabled = false`) suppresses automatic
+legacy preview reads/admission, but explicit editable opens and retained editors
+remain available. Wrap changes the originating text view only; other retained
+documents keep their local wrap/horizontal offsets. `full` respects the configured
+byte budget; `head_tail` is an alias for `head_and_tail`. View cycling is a menu
+command, not Ctrl+T. Editor byte/line limits apply to new admission without
+silently evicting existing buffers.
+
+Watcher preferences survive editor/focus transitions. The in-app `Ctrl+R` toggle
+and `watcher.auto_refresh` control **tree auto-refresh only**: while they are off,
+already-open documents still detect external writes (no global suppression). To
+stop change detection entirely, launch with `--no-watcher` or set
+`watcher.enabled = false`; configuration-disable cannot be temporarily resumed by
+Ctrl+R, and enabling a watcher that was not started at launch requires restart.
+Backend debounce, mouse capture and default shell
+startup options require restart; changing the default shell does not restart an
+existing process. Theme changes retain the existing live highlighting policy.
+Terminal scrollback applies at startup and live, clamped to **0–100000 lines**
+(default 1000). Shrink removes only oldest history, clamps scroll position and
+clears/rebases affected selections; grid, cursor and process remain intact.
+Changing history capacity never spawns a shell or enables a disabled terminal.
+
+Editor paste is literal text (not simulated keys), with a 1 MiB bound. Text
+clipboard fallbacks use internal text, optional platform tools, OSC52 and a
+selectable copy overlay. OSC52 transport is unconfirmed: it does not prove the
+host/browser clipboard changed. File copy/cut/paste remains separate from text
+clipboard. No real-clipboard browser certification is claimed.
 
 ### Example `config.toml`
 
@@ -289,7 +425,7 @@ enabled = true
 max_full_preview_bytes = 1048576  # 1 MB
 head_lines = 100
 tail_lines = 50
-default_view_mode = "full"  # "full", "head_tail", "head_only", "tail_only"
+default_view_mode = "full"  # bounded full, head_and_tail (alias head_tail), head_only, tail_only
 tab_width = 4
 line_wrap = false
 syntax_theme = "base16-ocean.dark"
@@ -300,8 +436,15 @@ dirs_first = true
 use_icons = true       # Set to false for ASCII-only mode
 
 [watcher]
-enabled = true
+enabled = true           # false disables change detection entirely (no backend)
+auto_refresh = false     # tree auto-refresh only; open-document detection stays on
 debounce_ms = 300
+mode = "event"           # "event" (native notifications) or "polling" (mounted storage)
+poll_interval_ms = 2000  # polling only; clamped to 250..=60000
+
+[terminal]
+enabled = true
+scrollback_lines = 1000  # clamped to 0..100000, live without shell restart
 
 [theme]
 scheme = "dark"        # "dark" or "light"

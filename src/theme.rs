@@ -67,6 +67,14 @@ pub struct ThemeColors {
     pub s3_dir_fg: Color,
     pub s3_file_fg: Color,
     pub s3_border_fg: Color,
+
+    // Read-only Git decorations. The marker glyphs are always rendered; these
+    // colors only tint them, so a missing/contrasting color never hides a state.
+    pub git_modified_fg: Color,
+    pub git_staged_fg: Color,
+    pub git_untracked_fg: Color,
+    pub git_conflicted_fg: Color,
+    pub git_branch_fg: Color,
 }
 
 // ── Built-in palettes ────────────────────────────────────────────────────────
@@ -127,6 +135,13 @@ pub fn dark_theme() -> ThemeColors {
         s3_dir_fg: Color::Rgb(137, 220, 235),    // #89dceb (sky)
         s3_file_fg: Color::Rgb(250, 179, 135),   // #fab387 (peach)
         s3_border_fg: Color::Rgb(137, 220, 235), // #89dceb (sky)
+
+        // Read-only Git decorations
+        git_modified_fg: Color::Rgb(249, 226, 175), // #f9e2af (yellow)
+        git_staged_fg: Color::Rgb(166, 227, 161),   // #a6e3a1 (green)
+        git_untracked_fg: Color::Rgb(243, 139, 168), // #f38ba8 (red)
+        git_conflicted_fg: Color::Rgb(243, 139, 168), // #f38ba8 (red)
+        git_branch_fg: Color::Rgb(137, 180, 250),   // #89b4fa (blue)
     }
 }
 
@@ -186,6 +201,13 @@ pub fn light_theme() -> ThemeColors {
         s3_dir_fg: Color::Rgb(4, 165, 229),    // #04a5e5 (sky)
         s3_file_fg: Color::Rgb(254, 100, 11),  // #fe640b (orange/peach)
         s3_border_fg: Color::Rgb(4, 165, 229), // #04a5e5 (sky)
+
+        // Read-only Git decorations
+        git_modified_fg: Color::Rgb(223, 142, 29), // #df8e1d (yellow)
+        git_staged_fg: Color::Rgb(64, 160, 43),    // #40a02b (green)
+        git_untracked_fg: Color::Rgb(210, 15, 57), // #d20f39 (red)
+        git_conflicted_fg: Color::Rgb(210, 15, 57), // #d20f39 (red)
+        git_branch_fg: Color::Rgb(30, 102, 245),   // #1e66f5 (blue)
     }
 }
 
@@ -292,6 +314,21 @@ fn apply_custom_colors(theme: &mut ThemeColors, custom: &ThemeColorsConfig) {
     }
     if let Some(ref c) = custom.s3_border_fg {
         theme.s3_border_fg = parse_or(Some(c), theme.s3_border_fg);
+    }
+    if let Some(ref c) = custom.git_modified_fg {
+        theme.git_modified_fg = parse_or(Some(c), theme.git_modified_fg);
+    }
+    if let Some(ref c) = custom.git_staged_fg {
+        theme.git_staged_fg = parse_or(Some(c), theme.git_staged_fg);
+    }
+    if let Some(ref c) = custom.git_untracked_fg {
+        theme.git_untracked_fg = parse_or(Some(c), theme.git_untracked_fg);
+    }
+    if let Some(ref c) = custom.git_conflicted_fg {
+        theme.git_conflicted_fg = parse_or(Some(c), theme.git_conflicted_fg);
+    }
+    if let Some(ref c) = custom.git_branch_fg {
+        theme.git_branch_fg = parse_or(Some(c), theme.git_branch_fg);
     }
 }
 
@@ -442,5 +479,33 @@ mod tests {
         assert_ne!(dark.s3_dir_fg, light.s3_dir_fg);
         assert_ne!(dark.s3_file_fg, light.s3_file_fg);
         assert_ne!(dark.s3_border_fg, light.s3_border_fg);
+    }
+
+    #[test]
+    fn test_git_marker_colors_and_custom_overrides() {
+        let dark = dark_theme();
+        let light = light_theme();
+        assert_ne!(dark.git_modified_fg, light.git_modified_fg);
+        assert_ne!(dark.git_staged_fg, light.git_staged_fg);
+        assert_ne!(dark.git_untracked_fg, light.git_untracked_fg);
+        assert_ne!(dark.git_branch_fg, light.git_branch_fg);
+
+        let config = ThemeConfig {
+            scheme: Some("custom".to_string()),
+            custom: Some(ThemeColorsConfig {
+                git_modified_fg: Some("#010203".to_string()),
+                git_staged_fg: Some("#040506".to_string()),
+                git_untracked_fg: Some("#070809".to_string()),
+                git_conflicted_fg: Some("#0a0b0c".to_string()),
+                git_branch_fg: Some("#0d0e0f".to_string()),
+                ..Default::default()
+            }),
+        };
+        let theme = resolve_theme(&config);
+        assert_eq!(theme.git_modified_fg, Color::Rgb(1, 2, 3));
+        assert_eq!(theme.git_staged_fg, Color::Rgb(4, 5, 6));
+        assert_eq!(theme.git_untracked_fg, Color::Rgb(7, 8, 9));
+        assert_eq!(theme.git_conflicted_fg, Color::Rgb(10, 11, 12));
+        assert_eq!(theme.git_branch_fg, Color::Rgb(13, 14, 15));
     }
 }

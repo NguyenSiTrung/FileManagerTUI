@@ -9,8 +9,9 @@ use ratatui::{
 use crate::config::{
     AppConfig, DEFAULT_DEBOUNCE_MS, DEFAULT_HEAD_LINES, DEFAULT_MAX_EDITOR_BYTES,
     DEFAULT_MAX_EDITOR_LINES, DEFAULT_MAX_ENTRIES_PER_PAGE, DEFAULT_MAX_FULL_PREVIEW_BYTES,
-    DEFAULT_PREVIEW_TIMEOUT_MS, DEFAULT_S3_HEAD_LINES, DEFAULT_SCROLL_LINES,
-    DEFAULT_SEARCH_MAX_ENTRIES, DEFAULT_SNAPSHOT_MAX_ENTRIES, DEFAULT_TAIL_LINES,
+    DEFAULT_POLL_INTERVAL_MS, DEFAULT_PREVIEW_TIMEOUT_MS, DEFAULT_S3_HEAD_LINES,
+    DEFAULT_SCROLL_LINES, DEFAULT_SEARCH_MAX_ENTRIES, DEFAULT_SNAPSHOT_MAX_ENTRIES,
+    DEFAULT_TAIL_LINES,
 };
 use crate::theme::ThemeColors;
 
@@ -86,8 +87,99 @@ pub struct SettingsState {
 }
 
 impl SettingsState {
+    /// Typed partial TOML patch; never silently truncate an integer or skip a section.
+    pub fn modified_table(&self) -> Result<toml::Table, String> {
+        let mut table = toml::Table::new();
+        for entry in &self.entries {
+            let Some(value) = &entry.modified_value else {
+                continue;
+            };
+            let value = match value {
+                SettingValueKind::Bool(v) => toml::Value::Boolean(*v),
+                SettingValueKind::UInt(v) => toml::Value::Integer(
+                    i64::try_from(*v).map_err(|_| "Setting exceeds TOML integer range")?,
+                ),
+                SettingValueKind::Str(v) | SettingValueKind::Enum(v, _) => {
+                    toml::Value::String(v.clone())
+                }
+            };
+            let section = table
+                .entry(entry.section.to_string())
+                .or_insert_with(|| toml::Value::Table(toml::Table::new()));
+            section
+                .as_table_mut()
+                .ok_or("Invalid setting section")?
+                .insert(entry.key.to_string(), value);
+        }
+        Ok(table)
+    }
+
+    /// Merge a partial upgrade, validating its complete effective keymap before mutation.
+    pub fn merged_config(&self, current: &AppConfig) -> Result<AppConfig, String> {
+        let patch: AppConfig = toml::Value::Table(self.modified_table()?)
+            .try_into()
+            .map_err(|e| format!("Invalid settings: {e}"))?;
+        let mut merged = current.clone().merge(&patch);
+        if let Some(n) = merged.terminal.scrollback_lines.as_mut() {
+            *n = (*n).min(crate::terminal::emulator::MAX_SCROLLBACK_LINES);
+        }
+        if merged
+            .preview
+            .syntax_theme
+            .as_ref()
+            .is_some_and(|name| name.trim().is_empty())
+        {
+            merged.preview.syntax_theme = None;
+        }
+        crate::keymap::Keymap::compile(&merged.keymap)?;
+        let layout = merged.layout.state();
+        merged.layout.explorer_width = Some(layout.explorer_width());
+        merged.layout.terminal_height = Some(layout.terminal_height());
+        Ok(merged)
+    }
+
+    /// Display originating document-local/runtime preferences, not stale global defaults.
+    pub fn from_app(app: &crate::app::App) -> Self {
+        let mut state = Self::from_config(&app.config);
+        let fallback = crate::commands::CommandContext::capture(app);
+        let origin = app.help_state.origin.as_ref().unwrap_or(&fallback);
+        let wrap = origin
+            .text_view_document(app)
+            .and_then(|id| app.workspace.documents.get(id))
+            .map_or(app.preview_state.line_wrap, |document| {
+                document.editor.line_wrap
+            });
+        for entry in &mut state.entries {
+            match (entry.section, entry.key) {
+                ("preview", "line_wrap") => entry.current_value = SettingValueKind::Bool(wrap),
+                ("watcher", "auto_refresh") => {
+                    entry.current_value = SettingValueKind::Bool(app.watcher_active)
+                }
+                ("layout", "explorer_width") => {
+                    entry.current_value =
+                        SettingValueKind::UInt(app.workspace.layout.explorer_width().into())
+                }
+                ("layout", "terminal_height") => {
+                    entry.current_value =
+                        SettingValueKind::UInt(app.workspace.layout.terminal_height().into())
+                }
+                ("layout", "explorer_visible") => {
+                    entry.current_value =
+                        SettingValueKind::Bool(app.workspace.layout.explorer_visible())
+                }
+                ("layout", "terminal_visible") => {
+                    entry.current_value =
+                        SettingValueKind::Bool(app.workspace.layout.terminal_visible())
+                }
+                _ => {}
+            }
+        }
+        state
+    }
+
     /// Build the settings state from the current app configuration.
     pub fn from_config(config: &AppConfig) -> Self {
+        let layout = config.layout.state();
         let entries = vec![
             // ── General ──────────────────────────────────────────────────
             SettingEntry {
@@ -109,7 +201,7 @@ impl SettingsState {
             SettingEntry {
                 section: "general",
                 key: "mouse",
-                description: "Enable mouse support",
+                description: "Mouse support preference (capture requires restart)",
                 current_value: SettingValueKind::Bool(config.mouse_enabled()),
                 default_value: SettingValueKind::Bool(true),
                 modified_value: None,
@@ -192,20 +284,18 @@ impl SettingsState {
                 key: "default_view_mode",
                 description: "Default view for large files",
                 current_value: SettingValueKind::Enum(
-                    config
-                        .preview
-                        .default_view_mode
-                        .clone()
-                        .unwrap_or_else(|| "head_and_tail".to_string()),
+                    config.preview_view_mode().to_string(),
                     vec![
+                        "full".to_string(),
                         "head_and_tail".to_string(),
                         "head_only".to_string(),
                         "tail_only".to_string(),
                     ],
                 ),
                 default_value: SettingValueKind::Enum(
-                    "head_and_tail".to_string(),
+                    "full".to_string(),
                     vec![
+                        "full".to_string(),
                         "head_and_tail".to_string(),
                         "head_only".to_string(),
                         "tail_only".to_string(),
@@ -224,7 +314,7 @@ impl SettingsState {
             SettingEntry {
                 section: "preview",
                 key: "line_wrap",
-                description: "Enable line wrapping in preview",
+                description: "Wrap originating text view; other documents retain their state",
                 current_value: SettingValueKind::Bool(config.preview.line_wrap.unwrap_or(false)),
                 default_value: SettingValueKind::Bool(false),
                 modified_value: None,
@@ -313,15 +403,16 @@ impl SettingsState {
             SettingEntry {
                 section: "watcher",
                 key: "enabled",
-                description: "Enable filesystem watcher",
+                description:
+                    "Enable change detection entirely (spawns backend on restart; full disable)",
                 current_value: SettingValueKind::Bool(config.watcher_enabled()),
-                default_value: SettingValueKind::Bool(true),
+                default_value: SettingValueKind::Bool(false),
                 modified_value: None,
             },
             SettingEntry {
                 section: "watcher",
                 key: "debounce_ms",
-                description: "Debounce interval in milliseconds",
+                description: "Debounce interval in milliseconds (restart required)",
                 current_value: SettingValueKind::UInt(config.debounce_ms()),
                 default_value: SettingValueKind::UInt(DEFAULT_DEBOUNCE_MS),
                 modified_value: None,
@@ -329,8 +420,80 @@ impl SettingsState {
             SettingEntry {
                 section: "watcher",
                 key: "auto_refresh",
-                description: "Auto-apply filesystem changes (vs manual F5)",
+                description: "Tree auto-refresh on changes; detection stays on for open documents",
                 current_value: SettingValueKind::Bool(config.watcher_auto_refresh()),
+                default_value: SettingValueKind::Bool(false),
+                modified_value: None,
+            },
+            SettingEntry {
+                section: "watcher",
+                key: "mode",
+                description: "Backend: event notifications or polling (restart required)",
+                current_value: SettingValueKind::Enum(
+                    config.watcher_mode().as_str().to_string(),
+                    vec!["event".to_string(), "polling".to_string()],
+                ),
+                default_value: SettingValueKind::Enum(
+                    "event".to_string(),
+                    vec!["event".to_string(), "polling".to_string()],
+                ),
+                modified_value: None,
+            },
+            SettingEntry {
+                section: "watcher",
+                key: "poll_interval_ms",
+                description: "Polling interval ms (250–60000; restart required)",
+                current_value: SettingValueKind::UInt(config.poll_interval_ms()),
+                default_value: SettingValueKind::UInt(DEFAULT_POLL_INTERVAL_MS),
+                modified_value: None,
+            },
+            // ── Recovery ─────────────────────────────────────────────────
+            SettingEntry {
+                section: "recovery",
+                key: "enabled",
+                description: "Persist bounded private recovery snapshots for dirty documents",
+                current_value: SettingValueKind::Bool(config.recovery_enabled()),
+                default_value: SettingValueKind::Bool(true),
+                modified_value: None,
+            },
+            // ── Git ──────────────────────────────────────────────────────
+            SettingEntry {
+                section: "git",
+                key: "enabled",
+                description: "Show optional read-only Git branch/status indicators",
+                current_value: SettingValueKind::Bool(config.git_enabled()),
+                default_value: SettingValueKind::Bool(true),
+                modified_value: None,
+            },
+            SettingEntry {
+                section: "layout",
+                key: "explorer_width",
+                description: "Saved explorer columns (16–80)",
+                current_value: SettingValueKind::UInt(layout.explorer_width().into()),
+                default_value: SettingValueKind::UInt(24),
+                modified_value: None,
+            },
+            SettingEntry {
+                section: "layout",
+                key: "explorer_visible",
+                description: "Show explorer when viewport permits",
+                current_value: SettingValueKind::Bool(layout.explorer_visible()),
+                default_value: SettingValueKind::Bool(true),
+                modified_value: None,
+            },
+            SettingEntry {
+                section: "layout",
+                key: "terminal_height",
+                description: "Saved terminal rows including header (4–60)",
+                current_value: SettingValueKind::UInt(layout.terminal_height().into()),
+                default_value: SettingValueKind::UInt(7),
+                modified_value: None,
+            },
+            SettingEntry {
+                section: "layout",
+                key: "terminal_visible",
+                description: "Show unstarted terminal; explicit action starts shell",
+                current_value: SettingValueKind::Bool(layout.terminal_visible()),
                 default_value: SettingValueKind::Bool(false),
                 modified_value: None,
             },
@@ -346,7 +509,7 @@ impl SettingsState {
             SettingEntry {
                 section: "terminal",
                 key: "default_shell",
-                description: "Shell for embedded terminal",
+                description: "Shell for next terminal start (no live restart)",
                 current_value: SettingValueKind::Str(config.terminal_shell()),
                 default_value: SettingValueKind::Str("/bin/sh".to_string()),
                 modified_value: None,
@@ -354,7 +517,7 @@ impl SettingsState {
             SettingEntry {
                 section: "terminal",
                 key: "scrollback_lines",
-                description: "Terminal scrollback buffer lines",
+                description: "Terminal history capacity (0–100000; oldest rows removed)",
                 current_value: SettingValueKind::UInt(config.terminal_scrollback() as u64),
                 default_value: SettingValueKind::UInt(1000),
                 modified_value: None,
@@ -379,6 +542,24 @@ impl SettingsState {
                         "light".to_string(),
                         "custom".to_string(),
                     ],
+                ),
+                modified_value: None,
+            },
+            SettingEntry {
+                section: "keymap",
+                key: "profile",
+                description: "Explicit workspace profile; retains TOML overrides",
+                current_value: SettingValueKind::Enum(
+                    match config.keymap.profile.unwrap_or_default() {
+                        crate::keymap::KeymapProfile::Standard => "standard",
+                        crate::keymap::KeymapProfile::Web => "web",
+                    }
+                    .into(),
+                    vec!["standard".into(), "web".into()],
+                ),
+                default_value: SettingValueKind::Enum(
+                    "standard".into(),
+                    vec!["standard".into(), "web".into()],
                 ),
                 modified_value: None,
             },
@@ -605,7 +786,11 @@ fn section_display_name(section: &str) -> &str {
         "preview" => "Preview",
         "tree" => "Tree",
         "watcher" => "Watcher",
+        "recovery" => "Recovery",
         "terminal" => "Terminal",
+        "git" => "Git",
+        "layout" => "Layout",
+        "keymap" => "Keymap",
         "theme" => "Theme",
         _ => section,
     }
@@ -786,6 +971,161 @@ mod tests {
     use crate::config::AppConfig;
 
     #[test]
+    fn adaptive_settings_register_validated_layout_preferences() {
+        let config: AppConfig = toml::from_str(
+            "[layout]\nexplorer_width = 999\nexplorer_visible = false\nterminal_height = 0\nterminal_visible = true",
+        ).unwrap();
+        let settings = SettingsState::from_config(&config);
+        for (key, value) in [
+            ("explorer_width", "80"),
+            ("explorer_visible", "false"),
+            ("terminal_height", "4"),
+            ("terminal_visible", "true"),
+        ] {
+            assert_eq!(
+                settings
+                    .entries
+                    .iter()
+                    .find(|e| e.section == "layout" && e.key == key)
+                    .map(SettingEntry::effective_display)
+                    .as_deref(),
+                Some(value)
+            );
+        }
+    }
+
+    #[test]
+    fn task3_watcher_reset_uses_actual_disabled_builtin_default() {
+        let config = AppConfig::default();
+        let state = SettingsState::from_config(&config);
+        let entry = state
+            .entries
+            .iter()
+            .find(|entry| entry.section == "watcher" && entry.key == "enabled")
+            .unwrap();
+        assert_eq!(
+            entry.default_value,
+            SettingValueKind::Bool(config.watcher_enabled())
+        );
+    }
+
+    #[test]
+    fn task3_settings_show_origin_document_local_wrap_and_runtime_watcher() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.txt");
+        std::fs::write(&path, "text").unwrap();
+        let mut config = AppConfig::default();
+        config.preview.line_wrap = Some(true);
+        config.watcher.enabled = Some(true);
+        config.watcher.auto_refresh = Some(true);
+        let mut app = crate::app::App::new(dir.path(), config).unwrap();
+        app.open_document_path(&path, true);
+        app.workspace
+            .documents
+            .active_mut()
+            .unwrap()
+            .editor
+            .toggle_wrap();
+        app.watcher_active = false;
+        app.set_overlay(crate::app::AppMode::Help);
+        let settings = SettingsState::from_app(&app);
+        for key in ["line_wrap", "auto_refresh"] {
+            assert_eq!(
+                settings
+                    .entries
+                    .iter()
+                    .find(|entry| entry.key == key)
+                    .unwrap()
+                    .current_value,
+                SettingValueKind::Bool(false)
+            );
+        }
+    }
+
+    #[test]
+    fn git_setting_toggles_merges_and_persists_like_other_options() {
+        let config = AppConfig::default();
+        let mut state = SettingsState::from_config(&config);
+        let index = state
+            .entries
+            .iter()
+            .position(|entry| entry.section == "git" && entry.key == "enabled")
+            .expect("git.enabled must be a settings entry");
+        assert_eq!(
+            state.entries[index].current_value,
+            SettingValueKind::Bool(true)
+        );
+
+        // Space toggles it off; the modified table persists the typed value.
+        state.selected_index = index;
+        assert!(state.toggle_bool());
+        let table = state.modified_table().unwrap();
+        assert_eq!(
+            table["git"]["enabled"].as_bool(),
+            Some(false),
+            "disabled state must round-trip through the settings table"
+        );
+        // Merge participates: disabling wins the merged config.
+        let merged = state.merged_config(&config).unwrap();
+        assert!(!merged.git_enabled());
+    }
+
+    #[test]
+    fn task3_partial_profile_upgrade_retains_bindings_and_clamps_history() {
+        use crate::keymap::{BindingOverride, FocusContext, KeymapProfile};
+        let mut config = AppConfig::default();
+        config.keymap.bindings = Some(vec![BindingOverride {
+            command: "document.save".into(),
+            context: FocusContext::Editor,
+            keys: vec!["F9".into()],
+        }]);
+        config.preview.enabled = Some(false);
+        let mut settings = SettingsState::from_config(&config);
+        settings
+            .entries
+            .iter_mut()
+            .find(|e| e.section == "keymap")
+            .unwrap()
+            .modified_value = Some(SettingValueKind::Enum("web".into(), vec![]));
+        settings
+            .entries
+            .iter_mut()
+            .find(|e| e.key == "scrollback_lines")
+            .unwrap()
+            .modified_value = Some(SettingValueKind::UInt(100_001));
+        let merged = settings.merged_config(&config).unwrap();
+        assert_eq!(merged.keymap.profile, Some(KeymapProfile::Web));
+        assert_eq!(
+            crate::keymap::Keymap::compile(&merged.keymap)
+                .unwrap()
+                .binding_labels(crate::commands::CommandId::Save, FocusContext::Editor),
+            vec!["F9"]
+        );
+        assert!(!merged.preview_enabled());
+        assert_eq!(merged.terminal.scrollback_lines, Some(100_000));
+        settings
+            .entries
+            .iter_mut()
+            .find(|e| e.key == "scrollback_lines")
+            .unwrap()
+            .modified_value = Some(SettingValueKind::UInt(u64::MAX));
+        assert!(settings.merged_config(&config).is_err());
+    }
+
+    #[test]
+    fn task3_settings_registers_keymap_profile_explicitly() {
+        let mut config = AppConfig::default();
+        config.keymap.profile = Some(crate::keymap::KeymapProfile::Web);
+        let settings = SettingsState::from_config(&config);
+        let profile = settings
+            .entries
+            .iter()
+            .find(|e| e.section == "keymap" && e.key == "profile")
+            .expect("registered keymap profile");
+        assert_eq!(profile.current_value.display(), "web");
+    }
+
+    #[test]
     fn from_config_produces_entries() {
         let config = AppConfig::default();
         let state = SettingsState::from_config(&config);
@@ -959,5 +1299,38 @@ mod tests {
         assert_eq!(state.selected_index, state.entries.len() - 1);
         state.select_first();
         assert_eq!(state.selected_index, 0);
+    }
+
+    #[test]
+    fn watcher_mode_and_poll_interval_round_trip_through_settings() {
+        let config = AppConfig::default();
+        let mut state = SettingsState::from_config(&config);
+        for entry in &mut state.entries {
+            match (entry.section, entry.key) {
+                ("watcher", "mode") => {
+                    entry.modified_value =
+                        Some(SettingValueKind::Enum("polling".to_string(), vec![]))
+                }
+                ("watcher", "poll_interval_ms") => {
+                    entry.modified_value = Some(SettingValueKind::UInt(1_500))
+                }
+                _ => {}
+            }
+        }
+        let merged = state.merged_config(&config).unwrap();
+        assert_eq!(merged.watcher_mode(), crate::config::WatcherMode::Polling);
+        assert_eq!(merged.poll_interval_ms(), 1_500);
+
+        // A re-render from the merged config preserves the chosen mode (no reset).
+        let state = SettingsState::from_config(&merged);
+        let mode = state
+            .entries
+            .iter()
+            .find(|e| e.section == "watcher" && e.key == "mode")
+            .unwrap();
+        assert_eq!(
+            mode.current_value,
+            SettingValueKind::Enum("polling".into(), vec!["event".into(), "polling".into()])
+        );
     }
 }

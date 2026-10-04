@@ -347,6 +347,7 @@ dependencies = [
  "crossterm",
  "dirs",
  "fuzzy-matcher",
+ "libc",
  "notify",
  "notify-debouncer-mini",
  "portable-pty",
@@ -358,6 +359,8 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "toml",
+ "unicode-segmentation",
+ "unicode-width 0.2.0",
  "vte",
 ]
 

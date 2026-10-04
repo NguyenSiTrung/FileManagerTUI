@@ -93,8 +93,109 @@ pub struct DirSnapshot {
     pub capped: bool,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct SnapshotOptions {
+    pub(crate) sort_by: SortBy,
+    pub(crate) dirs_first: bool,
+    pub(crate) page_size: usize,
+    pub(crate) child_depth: usize,
+}
+
+pub(crate) struct PreparedSnapshot {
+    pub(crate) snapshot: DirSnapshot,
+    pub(crate) children: Vec<TreeNode>,
+    pub(crate) consumed: usize,
+    pub(crate) options: SnapshotOptions,
+}
+impl PreparedSnapshot {
+    pub(crate) fn retained_bytes(&self) -> usize {
+        self.snapshot
+            .retained_bytes()
+            .saturating_add(
+                self.children
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<TreeNode>()),
+            )
+            .saturating_add(
+                self.children
+                    .iter()
+                    .map(|node| node.path.capacity().saturating_add(node.name.capacity()))
+                    .fold(0usize, usize::saturating_add),
+            )
+    }
+}
+
 #[allow(dead_code)]
 impl DirSnapshot {
+    pub(crate) fn retained_bytes(&self) -> usize {
+        self.entries
+            .capacity()
+            .saturating_mul(std::mem::size_of::<SnapshotEntry>())
+            .saturating_add(
+                self.entries
+                    .iter()
+                    .map(|entry| entry.name.capacity())
+                    .fold(0usize, usize::saturating_add),
+            )
+    }
+
+    /// Worker-only first-page hydration. Snapshot and page share one byte budget.
+    /// Each entry offset is consumed even when metadata fails, as in the legacy
+    /// first-page policy. Later synchronous navigation/paging is unchanged.
+    pub(crate) fn prepare(
+        mut self,
+        path: &Path,
+        options: SnapshotOptions,
+        bytes: usize,
+        stopped: impl Fn() -> bool,
+    ) -> PreparedSnapshot {
+        self.sort(&options.sort_by, options.dirs_first);
+        let available = bytes.saturating_sub(self.retained_bytes());
+        // Fixed capacity, including a conservative charge for lossy names and
+        // joined paths before TreeNode::new constructs their nested allocations.
+        let capacity = options
+            .page_size
+            .min(self.len())
+            .min(available / std::mem::size_of::<TreeNode>().max(1));
+        let mut children = Vec::with_capacity(capacity);
+        let mut retained = self
+            .retained_bytes()
+            .saturating_add(children.capacity() * std::mem::size_of::<TreeNode>());
+        let mut consumed = 0;
+        for entry in self.entries.iter().take(options.page_size) {
+            let nested = path
+                .as_os_str()
+                .len()
+                .saturating_add(2)
+                .saturating_add(entry.name.len().saturating_mul(4));
+            if stopped() || children.len() == capacity || nested > bytes.saturating_sub(retained) {
+                self.capped = true;
+                break;
+            }
+            consumed += 1;
+            let child_path = path.join(&entry.name);
+            if stopped() {
+                self.capped = true;
+                break;
+            }
+            if let Ok(node) = TreeNode::new(&child_path, options.child_depth) {
+                let actual = node.name.capacity().saturating_add(node.path.capacity());
+                if actual > bytes.saturating_sub(retained) {
+                    self.capped = true;
+                    break;
+                }
+                retained += actual;
+                children.push(node);
+            }
+        }
+        TreeState::sort_nodes(&mut children, &options.sort_by, options.dirs_first);
+        PreparedSnapshot {
+            snapshot: self,
+            children,
+            consumed,
+            options,
+        }
+    }
     /// Collect a directory snapshot in a single `read_dir()` pass.
     ///
     /// Returns a snapshot with lightweight entries (name + is_dir flag).
@@ -146,6 +247,57 @@ impl DirSnapshot {
             skipped_count,
             capped,
         })
+    }
+
+    /// Scheduler worker seam: fixed entry capacity, nested name-byte budget and
+    /// cooperative cancellation/deadline between native directory syscalls.
+    /// A capped snapshot is explicitly incomplete, never an exact child count.
+    pub(crate) fn collect_budgeted(
+        path: &Path,
+        max_entries: usize,
+        bytes: usize,
+        stopped: impl Fn() -> bool,
+    ) -> Result<Self> {
+        let capacity = max_entries.min(bytes / (2 * std::mem::size_of::<SnapshotEntry>()));
+        let mut snapshot = Self {
+            entries: Vec::with_capacity(capacity),
+            skipped_count: 0,
+            capped: false,
+        };
+        let mut retained = snapshot.entries.capacity() * std::mem::size_of::<SnapshotEntry>();
+        if stopped() {
+            snapshot.capped = true;
+            return Ok(snapshot);
+        }
+        let entries = fs::read_dir(path)?;
+        for entry in entries {
+            if stopped() || snapshot.entries.len() == capacity {
+                snapshot.capped = true;
+                break;
+            }
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(_) => {
+                    snapshot.skipped_count += 1;
+                    continue;
+                }
+            };
+            let name = entry.file_name();
+            if name.capacity() > 4096 || name.capacity() > bytes.saturating_sub(retained) {
+                snapshot.capped = true;
+                break;
+            }
+            let is_dir = match entry.file_type() {
+                Ok(kind) => kind.is_dir(),
+                Err(_) => {
+                    snapshot.skipped_count += 1;
+                    continue;
+                }
+            };
+            retained += name.capacity();
+            snapshot.entries.push(SnapshotEntry { name, is_dir });
+        }
+        Ok(snapshot)
     }
 
     /// Sort the snapshot entries.
@@ -590,10 +742,13 @@ impl SortBy {
 pub struct TreeState {
     pub root: TreeNode,
     pub flat_items: Vec<FlatItem>,
+    /// Cursor row. Kept as an index for rendering/hit-testing, but the row's
+    /// *path* is the durable selection identity across rebuilds.
     pub selected_index: usize,
     pub scroll_offset: usize,
     pub show_hidden: bool,
-    /// Indices of multi-selected items.
+    /// Row indices of multi-selected items. Derived from multi-selected paths
+    /// on every `flatten()` so selection survives index movement.
     pub multi_selected: HashSet<usize>,
     /// Current inline filter query string.
     pub filter_query: String,
@@ -671,12 +826,23 @@ impl TreeState {
     /// Rebuild the flat items list from the tree, respecting `show_hidden`.
     ///
     /// The root node is always included regardless of hidden status.
-    /// Multi-selection is cleared since indices change.
+    /// Single and multi-selection are keyed by **path**: their current rows are
+    /// captured before the rebuild and re-resolved afterwards, so refresh,
+    /// sort, pagination and watcher re-scans keep the selected path(s) selected
+    /// even when row indices move. A path that no longer exists is dropped.
     /// Item count is capped at 100K to prevent OOM on pathological trees.
     pub fn flatten(&mut self) {
         let prev_len = self.flat_items.len();
+        let selected_anchor = self
+            .flat_items
+            .get(self.selected_index)
+            .map(|item| item.path.clone());
+        let multi_anchors: Vec<PathBuf> = self
+            .multi_selected
+            .iter()
+            .filter_map(|&idx| self.flat_items.get(idx).map(|item| item.path.clone()))
+            .collect();
         self.flat_items.clear();
-        self.multi_selected.clear();
         // Pre-allocate based on previous size for performance
         self.flat_items.reserve(prev_len.min(10_000));
         Self::flatten_node(
@@ -686,10 +852,47 @@ impl TreeState {
             true,
             true,
         );
-        // Clamp selected index
-        if !self.flat_items.is_empty() && self.selected_index >= self.flat_items.len() {
-            self.selected_index = self.flat_items.len() - 1;
+        self.restore_selection_by_path(&selected_anchor, &multi_anchors);
+    }
+
+    /// Re-resolve pre-captured selection paths against the freshly built rows.
+    ///
+    /// The primary row prefers the captured path; if it vanished, the cursor is
+    /// clamped to the previous numeric position (honest drop, never a random
+    /// path). Multi-selection keeps only paths still present in the flat list.
+    fn restore_selection_by_path(&mut self, anchor: &Option<PathBuf>, multi: &[PathBuf]) {
+        if self.flat_items.is_empty() {
+            self.selected_index = 0;
+            self.multi_selected.clear();
+            return;
         }
+        self.selected_index = anchor
+            .as_ref()
+            .and_then(|path| self.find_index_by_path(path))
+            .unwrap_or_else(|| self.selected_index.min(self.flat_items.len() - 1));
+        self.multi_selected = multi
+            .iter()
+            .filter_map(|path| self.find_index_by_path(path))
+            .collect();
+    }
+
+    /// Stable path-keyed view of the current single + multi selection.
+    ///
+    /// The primary selected path is first; multi-selected paths follow, with
+    /// duplicates removed. Vanished paths never appear.
+    pub fn selected_paths(&self) -> Vec<PathBuf> {
+        let mut paths: Vec<PathBuf> = Vec::new();
+        if let Some(item) = self.flat_items.get(self.selected_index) {
+            paths.push(item.path.clone());
+        }
+        for &idx in &self.multi_selected {
+            if let Some(item) = self.flat_items.get(idx) {
+                if !paths.contains(&item.path) {
+                    paths.push(item.path.clone());
+                }
+            }
+        }
+        paths
     }
 
     fn flatten_node(
@@ -910,21 +1113,25 @@ impl TreeState {
     /// Sort a node's children (non-recursive, just immediate children).
     fn sort_children_of(node: &mut TreeNode, sort_by: &SortBy, dirs_first: bool) {
         if let Some(children) = &mut node.children {
-            children.sort_by(|a, b| {
-                let mut cmp = std::cmp::Ordering::Equal;
-
-                if dirs_first {
-                    cmp = matches!(b.node_type, NodeType::Directory)
-                        .cmp(&matches!(a.node_type, NodeType::Directory));
-                }
-
-                cmp.then_with(|| match sort_by {
-                    SortBy::Name => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
-                    SortBy::Size => b.meta.size.cmp(&a.meta.size),
-                    SortBy::Modified => b.meta.modified.cmp(&a.meta.modified),
-                })
-            });
+            Self::sort_nodes(children, sort_by, dirs_first);
         }
+    }
+
+    fn sort_nodes(children: &mut [TreeNode], sort_by: &SortBy, dirs_first: bool) {
+        children.sort_by(|a, b| {
+            let mut cmp = std::cmp::Ordering::Equal;
+
+            if dirs_first {
+                cmp = matches!(b.node_type, NodeType::Directory)
+                    .cmp(&matches!(a.node_type, NodeType::Directory));
+            }
+
+            cmp.then_with(|| match sort_by {
+                SortBy::Name => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+                SortBy::Size => b.meta.size.cmp(&a.meta.size),
+                SortBy::Modified => b.meta.modified.cmp(&a.meta.modified),
+            })
+        });
     }
 
     /// Recursively sort all loaded children in the tree.
@@ -1007,8 +1214,13 @@ impl TreeState {
         }
 
         self.is_filtering = true;
+        // Preserve the primary selection by path; multi-selection is cleared
+        // because the filtered view intentionally hides most rows.
+        let selected_anchor = self
+            .flat_items
+            .get(self.selected_index)
+            .map(|item| item.path.clone());
         self.flat_items.clear();
-        self.multi_selected.clear();
 
         let query_lower = self.filter_query.to_lowercase();
         Self::flatten_node_filtered(
@@ -1020,10 +1232,7 @@ impl TreeState {
             &query_lower,
         );
 
-        // Clamp selected index
-        if !self.flat_items.is_empty() && self.selected_index >= self.flat_items.len() {
-            self.selected_index = self.flat_items.len() - 1;
-        }
+        self.restore_selection_by_path(&selected_anchor, &[]);
     }
 
     /// Recursively flatten, but only include nodes whose name matches the filter
@@ -1380,13 +1589,110 @@ mod tests {
     }
 
     #[test]
-    fn flatten_clears_multi_select() {
+    fn flatten_preserves_multi_select_by_path() {
         let dir = setup_test_dir();
         let mut state = TreeState::new(dir.path()).unwrap();
         state.selected_index = 1;
         state.toggle_multi_select();
+        let marked = state.selected_paths();
+        assert_eq!(marked.len(), 1);
         state.flatten();
-        assert!(state.multi_selected.is_empty());
+        // Selection identity is the path, not the old row index.
+        assert_eq!(state.selected_paths(), marked);
+        assert!(state.multi_selected.contains(&1));
+    }
+
+    #[test]
+    fn selection_survives_sort_by_path() {
+        let dir = setup_test_dir();
+        let mut state = TreeState::new(dir.path()).unwrap();
+        let alpha = dir.path().join("alpha");
+        let file_a = dir.path().join("file_a.txt");
+        state.selected_index = state.find_index_by_path(&file_a).unwrap();
+        state.toggle_multi_select();
+        state.selected_index = state.find_index_by_path(&alpha).unwrap();
+        state.toggle_multi_select();
+
+        state.cycle_sort(); // sort mode changes row ordering
+        assert!(state.selected_paths().contains(&alpha));
+        assert!(state.selected_paths().contains(&file_a));
+
+        state.toggle_dirs_first();
+        assert!(state.selected_paths().contains(&alpha));
+        assert!(state.selected_paths().contains(&file_a));
+    }
+
+    #[test]
+    fn selection_survives_single_row_insertion_refresh() {
+        let dir = setup_test_dir();
+        let mut state = TreeState::new(dir.path()).unwrap();
+        let file_a = dir.path().join("file_a.txt");
+        let file_b = dir.path().join("file_b.rs");
+        state.selected_index = state.find_index_by_path(&file_a).unwrap();
+        state.toggle_multi_select();
+        state.selected_index = state.find_index_by_path(&file_b).unwrap();
+
+        // A re-scan inserts a new alphabetically-earlier sibling, shifting rows.
+        fs::write(dir.path().join("aaa_new.txt"), b"x").unwrap();
+        state.reload_dir(dir.path());
+
+        // The selected rows must follow their paths, not the stale indices.
+        assert_eq!(
+            state.flat_items[state.selected_index].path, file_b,
+            "single selection followed the wrong path after a refresh"
+        );
+        assert!(state.selected_paths().contains(&file_a));
+    }
+
+    #[test]
+    fn selection_drops_vanished_path_honestly() {
+        let dir = setup_test_dir();
+        let mut state = TreeState::new(dir.path()).unwrap();
+        let file_a = dir.path().join("file_a.txt");
+        state.selected_index = state.find_index_by_path(&file_a).unwrap();
+        state.toggle_multi_select();
+
+        fs::remove_file(&file_a).unwrap();
+        state.reload_dir(dir.path());
+
+        assert!(!state.selected_paths().contains(&file_a));
+        assert!(state.selected_index < state.flat_items.len());
+    }
+
+    #[test]
+    fn selection_survives_pagination_load_more() {
+        let dir = TempDir::new().unwrap();
+        for n in 0..12 {
+            fs::write(dir.path().join(format!("f{n:02}.txt")), b"x").unwrap();
+        }
+        let mut state = TreeState::with_page_size(dir.path(), 5).unwrap();
+        let early = dir.path().join("f00.txt");
+        state.selected_index = state.find_index_by_path(&early).unwrap();
+        state.toggle_multi_select();
+        // Load a later page; the anchor row must not move.
+        let root = dir.path().to_path_buf();
+        state.load_next_page(&root);
+
+        assert!(
+            state.selected_paths().contains(&early),
+            "multi-selection lost across pagination"
+        );
+        assert_eq!(state.flat_items[state.selected_index].path, early);
+    }
+
+    #[test]
+    fn selected_paths_includes_primary_and_multi_without_duplicates() {
+        let dir = setup_test_dir();
+        let mut state = TreeState::new(dir.path()).unwrap();
+        state.selected_index = 1;
+        state.toggle_multi_select(); // multi: alpha
+        state.selected_index = 2;
+        state.toggle_multi_select(); // multi: alpha + beta
+        let primary = state.flat_items[2].path.clone(); // beta is the cursor row
+        let paths = state.selected_paths();
+        assert_eq!(paths[0], primary);
+        assert!(paths.contains(&dir.path().join("alpha")));
+        assert_eq!(paths.iter().filter(|p| **p == primary).count(), 1);
     }
 
     #[test]

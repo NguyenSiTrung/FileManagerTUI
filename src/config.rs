@@ -37,6 +37,23 @@ pub struct GeneralConfig {
     pub max_editor_bytes: Option<u64>,
     /// Maximum line count that the editor will open (default: 100000).
     pub max_editor_lines: Option<u64>,
+    /// Directory names excluded from content search and filename indexing.
+    /// Empty or absent uses built-in defaults (`.git`, `target`, `.venv`, ...).
+    pub search_exclude_dirs: Option<Vec<String>>,
+    /// Maximum bytes read from a single file during content search.
+    pub search_max_file_bytes: Option<u64>,
+    /// Maximum number of files scanned for one content search.
+    pub search_max_files: Option<u32>,
+    /// Maximum number of hits retained for one content search.
+    pub search_max_hits: Option<u32>,
+    /// Maximum cumulative bytes scanned for one content search.
+    pub search_max_bytes_scanned: Option<u64>,
+    /// Maximum files scanned per resumable content-search batch.
+    pub search_batch_files: Option<u32>,
+    /// Maximum hits emitted per resumable content-search batch.
+    pub search_batch_hits: Option<u32>,
+    /// Maximum excerpt bytes retained per content-search hit.
+    pub search_max_excerpt_bytes: Option<u32>,
 }
 
 /// Preview panel settings.
@@ -79,6 +96,36 @@ pub struct TreeConfig {
     pub scroll_lines: Option<u16>,
 }
 
+/// Which watcher backend monitors the workspace.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum WatcherMode {
+    /// Native OS notifications (inotify/FSEvents/ReadDirectoryChangesW).
+    #[default]
+    Event,
+    /// Periodic bounded re-scan; repairs lost/coalesced events on mounted
+    /// storage that does not deliver reliable notifications.
+    Polling,
+}
+
+impl WatcherMode {
+    /// Parse the canonical `[watcher].mode` spelling; unknown values fall back
+    /// to the event backend rather than silently disabling watching.
+    pub fn from_str(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "polling" | "poll" => WatcherMode::Polling,
+            _ => WatcherMode::Event,
+        }
+    }
+
+    /// Canonical setting/config spelling.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            WatcherMode::Event => "event",
+            WatcherMode::Polling => "polling",
+        }
+    }
+}
+
 /// Filesystem watcher settings.
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default)]
@@ -92,6 +139,12 @@ pub struct WatcherConfig {
     /// manual refresh (F5 / Ctrl+R toggle). Set to true to restore the old
     /// interval-driven auto-refresh behaviour.
     pub auto_refresh: Option<bool>,
+    /// Backend selection: `"event"` (default) or `"polling"`. Applies at
+    /// backend start; changing it requires a restart.
+    pub mode: Option<String>,
+    /// Polling interval in milliseconds (default 2000, clamped to 250..=60000).
+    /// Only consulted by the polling backend.
+    pub poll_interval_ms: Option<u64>,
 }
 
 /// Embedded terminal settings.
@@ -104,6 +157,87 @@ pub struct TerminalConfig {
     pub default_shell: Option<String>,
     /// Number of scrollback lines (default: 1000).
     pub scrollback_lines: Option<usize>,
+}
+
+/// Private workspace-session persistence settings.
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
+pub struct SessionConfig {
+    /// Persist and restore workspace sessions (default true).
+    pub enabled: Option<bool>,
+    /// Override the private session state directory. Empty/absent means the
+    /// platform state directory (`fm-tui/sessions` under it).
+    pub state_dir: Option<String>,
+}
+
+/// Bounded private recovery-snapshot persistence settings.
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
+pub struct RecoveryConfig {
+    /// Persist bounded recovery snapshots for dirty documents (default true).
+    pub enabled: Option<bool>,
+    /// Override the private recovery state directory. Empty/absent means the
+    /// platform state directory (`fm-tui/recovery` under it).
+    pub state_dir: Option<String>,
+    /// Maximum number of retained snapshots per workspace (clamped 1..=1024).
+    pub max_records: Option<usize>,
+    /// Maximum snapshot age in seconds (clamped to at least one hour).
+    pub max_age_secs: Option<u64>,
+    /// Minimum interval between throttled snapshot writes in milliseconds.
+    pub min_interval_ms: Option<u64>,
+}
+
+/// Optional read-only Git indicator settings.
+///
+/// The backend (`src/git.rs`) is strictly read-only; this only controls whether
+/// the optional `git` executable is queried for branch and file decorations.
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
+pub struct GitConfig {
+    /// Show optional read-only Git indicators (default true). Disabling removes
+    /// every decoration and stops further `git` queries.
+    pub enabled: Option<bool>,
+}
+
+/// Private per-user session state directory used when no override is set.
+/// Never the shared fixed paths used for transient clipboard data.
+pub fn default_session_state_dir() -> Option<PathBuf> {
+    dirs::state_dir()
+        .or_else(dirs::data_dir)
+        .map(|base| base.join("fm-tui").join("sessions"))
+}
+
+/// Private per-user recovery state directory used when no override is set.
+/// Distinct from the session directory so clearing one never touches the other.
+pub fn default_recovery_state_dir() -> Option<PathBuf> {
+    dirs::state_dir()
+        .or_else(dirs::data_dir)
+        .map(|base| base.join("fm-tui").join("recovery"))
+}
+
+/// Saved absolute pane preferences; temporary maximize/compact geometry is not persisted.
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
+pub struct LayoutConfig {
+    pub explorer_width: Option<u16>,
+    pub explorer_visible: Option<bool>,
+    pub terminal_height: Option<u16>,
+    pub terminal_visible: Option<bool>,
+}
+
+impl LayoutConfig {
+    pub fn state(&self) -> crate::workspace::layout::LayoutState {
+        let mut state = crate::workspace::layout::LayoutState::default();
+        state.set_explorer_width(self.explorer_width.unwrap_or(24));
+        state.set_terminal_height(self.terminal_height.unwrap_or(7));
+        if !self.explorer_visible.unwrap_or(true) {
+            state.toggle_explorer();
+        }
+        if !self.terminal_visible.unwrap_or(false) {
+            state.toggle_terminal();
+        }
+        state
+    }
 }
 
 /// Color settings for a single theme palette.
@@ -130,6 +264,11 @@ pub struct ThemeColorsConfig {
     pub s3_dir_fg: Option<String>,
     pub s3_file_fg: Option<String>,
     pub s3_border_fg: Option<String>,
+    pub git_modified_fg: Option<String>,
+    pub git_staged_fg: Option<String>,
+    pub git_untracked_fg: Option<String>,
+    pub git_conflicted_fg: Option<String>,
+    pub git_branch_fg: Option<String>,
 }
 
 /// Theme configuration section.
@@ -156,7 +295,12 @@ pub struct AppConfig {
     pub tree: TreeConfig,
     pub watcher: WatcherConfig,
     pub terminal: TerminalConfig,
+    pub layout: LayoutConfig,
+    pub session: SessionConfig,
+    pub recovery: RecoveryConfig,
+    pub git: GitConfig,
     pub theme: ThemeConfig,
+    pub keymap: crate::keymap::KeymapConfig,
 }
 
 // ── Default constants ────────────────────────────────────────────────────────
@@ -169,6 +313,12 @@ pub const DEFAULT_HEAD_LINES: usize = 50;
 pub const DEFAULT_TAIL_LINES: usize = 20;
 /// Default debounce interval in milliseconds.
 pub const DEFAULT_DEBOUNCE_MS: u64 = 300;
+/// Default filesystem watcher poll interval in milliseconds.
+pub const DEFAULT_POLL_INTERVAL_MS: u64 = 2_000;
+/// Minimum accepted watcher poll interval in milliseconds.
+pub const MIN_POLL_INTERVAL_MS: u64 = 250;
+/// Maximum accepted watcher poll interval in milliseconds.
+pub const MAX_POLL_INTERVAL_MS: u64 = 60_000;
 /// Default max entries per page for directory pagination.
 pub const DEFAULT_MAX_ENTRIES_PER_PAGE: u32 = 1_000;
 /// Minimum allowed value for max_entries_per_page.
@@ -185,6 +335,14 @@ pub const MIN_SNAPSHOT_MAX_ENTRIES: u32 = 10_000;
 pub const MAX_SNAPSHOT_MAX_ENTRIES: u32 = 5_000_000;
 /// Default max file size for editor (10 MiB).
 pub const DEFAULT_MAX_EDITOR_BYTES: u64 = 10 * 1024 * 1024;
+/// Hard ceiling for the editor byte budget (256 MiB).
+///
+/// `max_editor_bytes` is unclamped user config; without this ceiling a very
+/// large setting produces an effectively unbounded capture/load budget. The
+/// ceiling also fits `usize` on every supported platform, so the `usize`
+/// conversion below is lossless rather than falling back to `usize::MAX`.
+pub const MAX_EDITOR_BYTES: u64 = 256 * 1024 * 1024;
+const _: () = assert!((MAX_EDITOR_BYTES as u128) <= (usize::MAX as u128));
 /// Default max line count for editor.
 pub const DEFAULT_MAX_EDITOR_LINES: usize = 100_000;
 /// Default preview timeout in milliseconds.
@@ -193,6 +351,23 @@ pub const DEFAULT_PREVIEW_TIMEOUT_MS: u64 = 2000;
 pub const DEFAULT_SCROLL_LINES: u16 = 3;
 /// Default number of lines to stream for S3 head preview.
 pub const DEFAULT_S3_HEAD_LINES: usize = 100;
+/// Default number of recovery snapshots retained per workspace.
+pub const DEFAULT_RECOVERY_MAX_RECORDS: usize = 32;
+/// Minimum accepted recovery snapshot retention count.
+pub const MIN_RECOVERY_MAX_RECORDS: usize = 1;
+/// Maximum accepted recovery snapshot retention count.
+pub const MAX_RECOVERY_MAX_RECORDS: usize = 1024;
+/// Default maximum recovery snapshot age (7 days).
+pub const DEFAULT_RECOVERY_MAX_AGE_SECS: u64 = 7 * 24 * 60 * 60;
+/// Minimum accepted recovery snapshot age (1 hour).
+pub const MIN_RECOVERY_MAX_AGE_SECS: u64 = 60 * 60;
+/// Maximum accepted recovery snapshot age (100 years). The upper clamp is not
+/// cosmetic: the age cutoff is computed with signed seconds and a value at or
+/// above `i64::MAX` would wrap negative and delete fresh snapshots as if they
+/// were ancient. It is also far below `i64::MAX` for every arithmetic step.
+pub const MAX_RECOVERY_MAX_AGE_SECS: u64 = 100 * 365 * 24 * 60 * 60;
+/// Default minimum interval between throttled snapshot writes.
+pub const DEFAULT_RECOVERY_MIN_INTERVAL_MS: u64 = 2_000;
 
 // ── Config file locator ──────────────────────────────────────────────────────
 
@@ -222,6 +397,7 @@ fn candidate_paths() -> Vec<PathBuf> {
 
 /// Try to read and parse a TOML config file. Returns `None` if the file
 /// doesn't exist or can't be parsed (with a warning printed to stderr).
+#[cfg(test)]
 fn load_file(path: &Path) -> Option<AppConfig> {
     let content = match std::fs::read_to_string(path) {
         Ok(c) => c,
@@ -246,9 +422,50 @@ fn load_file(path: &Path) -> Option<AppConfig> {
 /// For each `Option` field, if `over` has `Some`, use it; otherwise keep `base`.
 #[allow(dead_code)]
 impl AppConfig {
+    pub fn load_checked(
+        cli_config_path: Option<&Path>,
+        cli_overrides: Option<&AppConfig>,
+    ) -> Result<Self, String> {
+        use std::io::Read;
+        let mut config = Self::default();
+        let mut paths: Vec<_> = candidate_paths()
+            .into_iter()
+            .rev()
+            .map(|p| (p, false))
+            .collect();
+        if let Some(path) = cli_config_path {
+            paths.push((path.to_owned(), true));
+        }
+        for (path, explicit) in paths {
+            let file = match std::fs::File::open(&path) {
+                Ok(file) => file,
+                Err(error) if !explicit && error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(error) => {
+                    return Err(format!("Cannot read config {}: {error}", path.display()))
+                }
+            };
+            let mut content = String::new();
+            file.take(1024 * 1024 + 1)
+                .read_to_string(&mut content)
+                .map_err(|error| format!("Cannot read config {}: {error}", path.display()))?;
+            if content.len() > 1024 * 1024 {
+                return Err(format!("Config {} exceeds 1 MiB", path.display()));
+            }
+            let parsed: Self = toml::from_str(&content)
+                .map_err(|error| format!("Invalid config {}: {error}", path.display()))?;
+            config = config.merge(&parsed);
+        }
+        if let Some(overrides) = cli_overrides {
+            config = config.merge(overrides);
+        }
+        crate::keymap::Keymap::compile(&config.keymap)
+            .map_err(|error| format!("Invalid keymap configuration: {error}"))?;
+        Ok(config)
+    }
     /// Merge `other` on top of `self` — `other`'s `Some` values win.
     pub fn merge(self, other: &AppConfig) -> AppConfig {
         AppConfig {
+            keymap: self.keymap.merge(&other.keymap),
             general: GeneralConfig {
                 default_path: other
                     .general
@@ -278,6 +495,39 @@ impl AppConfig {
                     .general
                     .max_editor_lines
                     .or(self.general.max_editor_lines),
+                search_exclude_dirs: other
+                    .general
+                    .search_exclude_dirs
+                    .clone()
+                    .or_else(|| self.general.search_exclude_dirs.clone()),
+                search_max_file_bytes: other
+                    .general
+                    .search_max_file_bytes
+                    .or(self.general.search_max_file_bytes),
+                search_max_files: other
+                    .general
+                    .search_max_files
+                    .or(self.general.search_max_files),
+                search_max_hits: other
+                    .general
+                    .search_max_hits
+                    .or(self.general.search_max_hits),
+                search_max_bytes_scanned: other
+                    .general
+                    .search_max_bytes_scanned
+                    .or(self.general.search_max_bytes_scanned),
+                search_batch_files: other
+                    .general
+                    .search_batch_files
+                    .or(self.general.search_batch_files),
+                search_batch_hits: other
+                    .general
+                    .search_batch_hits
+                    .or(self.general.search_batch_hits),
+                search_max_excerpt_bytes: other
+                    .general
+                    .search_max_excerpt_bytes
+                    .or(self.general.search_max_excerpt_bytes),
             },
             preview: PreviewConfig {
                 max_full_preview_bytes: other
@@ -315,6 +565,15 @@ impl AppConfig {
                 enabled: other.watcher.enabled.or(self.watcher.enabled),
                 debounce_ms: other.watcher.debounce_ms.or(self.watcher.debounce_ms),
                 auto_refresh: other.watcher.auto_refresh.or(self.watcher.auto_refresh),
+                mode: other
+                    .watcher
+                    .mode
+                    .clone()
+                    .or_else(|| self.watcher.mode.clone()),
+                poll_interval_ms: other
+                    .watcher
+                    .poll_interval_ms
+                    .or(self.watcher.poll_interval_ms),
             },
             terminal: TerminalConfig {
                 enabled: other.terminal.enabled.or(self.terminal.enabled),
@@ -327,6 +586,43 @@ impl AppConfig {
                     .terminal
                     .scrollback_lines
                     .or(self.terminal.scrollback_lines),
+            },
+            layout: LayoutConfig {
+                explorer_width: other.layout.explorer_width.or(self.layout.explorer_width),
+                explorer_visible: other
+                    .layout
+                    .explorer_visible
+                    .or(self.layout.explorer_visible),
+                terminal_height: other.layout.terminal_height.or(self.layout.terminal_height),
+                terminal_visible: other
+                    .layout
+                    .terminal_visible
+                    .or(self.layout.terminal_visible),
+            },
+            session: SessionConfig {
+                enabled: other.session.enabled.or(self.session.enabled),
+                state_dir: other
+                    .session
+                    .state_dir
+                    .clone()
+                    .or_else(|| self.session.state_dir.clone()),
+            },
+            recovery: RecoveryConfig {
+                enabled: other.recovery.enabled.or(self.recovery.enabled),
+                state_dir: other
+                    .recovery
+                    .state_dir
+                    .clone()
+                    .or_else(|| self.recovery.state_dir.clone()),
+                max_records: other.recovery.max_records.or(self.recovery.max_records),
+                max_age_secs: other.recovery.max_age_secs.or(self.recovery.max_age_secs),
+                min_interval_ms: other
+                    .recovery
+                    .min_interval_ms
+                    .or(self.recovery.min_interval_ms),
+            },
+            git: GitConfig {
+                enabled: other.git.enabled.or(self.git.enabled),
             },
             theme: ThemeConfig {
                 scheme: other.theme.scheme.clone().or(self.theme.scheme),
@@ -343,32 +639,9 @@ impl AppConfig {
     ///
     /// `cli_config_path` is an explicit config file path from `--config`.
     /// `cli_overrides` are partial overrides derived from CLI flags.
+    #[cfg(test)]
     pub fn load(cli_config_path: Option<&Path>, cli_overrides: Option<&AppConfig>) -> AppConfig {
-        // Start with built-in defaults (all None — the struct Default).
-        let mut config = AppConfig::default();
-
-        // Load from candidate files (lowest priority first so higher overwrites).
-        let paths = candidate_paths();
-        // Walk in reverse so that highest-priority (env var) overwrites lower.
-        for path in paths.iter().rev() {
-            if let Some(file_cfg) = load_file(path) {
-                config = config.merge(&file_cfg);
-            }
-        }
-
-        // Explicit --config file has higher priority than candidates.
-        if let Some(cli_path) = cli_config_path {
-            if let Some(file_cfg) = load_file(cli_path) {
-                config = config.merge(&file_cfg);
-            }
-        }
-
-        // CLI flag overrides are highest priority.
-        if let Some(overrides) = cli_overrides {
-            config = config.merge(overrides);
-        }
-
-        config
+        Self::load_checked(cli_config_path, cli_overrides).expect("invalid test configuration")
     }
 
     // ── Convenience getters with built-in defaults ──────────────────────────
@@ -412,16 +685,20 @@ impl AppConfig {
 
     /// Syntax highlighting theme name.
     ///
-    /// If user-configured in `[preview].syntax_theme`, that value always wins.
+    /// If nonblank in `[preview].syntax_theme`, that value always wins.
     /// Otherwise, the default depends on the active theme scheme.
     pub fn syntax_theme_name(&self, theme_scheme: &str) -> &str {
-        self.preview.syntax_theme.as_deref().unwrap_or_else(|| {
-            if theme_scheme.eq_ignore_ascii_case("light") {
-                "InspiredGitHub"
-            } else {
-                "base16-ocean.dark"
-            }
-        })
+        self.preview
+            .syntax_theme
+            .as_deref()
+            .filter(|name| !name.trim().is_empty())
+            .unwrap_or_else(|| {
+                if theme_scheme.eq_ignore_ascii_case("light") {
+                    "InspiredGitHub"
+                } else {
+                    "base16-ocean.dark"
+                }
+            })
     }
 
     /// Number of lines for S3 head preview.
@@ -434,6 +711,17 @@ impl AppConfig {
         self.preview
             .preview_timeout_ms
             .unwrap_or(DEFAULT_PREVIEW_TIMEOUT_MS)
+    }
+
+    /// Canonical preview policy. Legacy `head_tail` and `head_and_tail` are aliases.
+    /// Full remains bounded by max_full_preview_bytes, falling back to head/tail.
+    pub fn preview_view_mode(&self) -> &str {
+        match self.preview.default_view_mode.as_deref().unwrap_or("full") {
+            "head_tail" | "head_and_tail" => "head_and_tail",
+            "head_only" => "head_only",
+            "tail_only" => "tail_only",
+            _ => "full",
+        }
     }
 
     /// Whether the watcher is enabled.
@@ -450,6 +738,25 @@ impl AppConfig {
     /// Watcher debounce interval in milliseconds.
     pub fn debounce_ms(&self) -> u64 {
         self.watcher.debounce_ms.unwrap_or(DEFAULT_DEBOUNCE_MS)
+    }
+
+    /// Selected watcher backend (event or polling). Unknown spellings fall
+    /// back to the event backend.
+    pub fn watcher_mode(&self) -> WatcherMode {
+        self.watcher
+            .mode
+            .as_deref()
+            .map(WatcherMode::from_str)
+            .unwrap_or_default()
+    }
+
+    /// Polling backend interval in milliseconds, clamped to a sane range so a
+    /// misconfigured value cannot create a busy loop or an unusably slow poll.
+    pub fn poll_interval_ms(&self) -> u64 {
+        self.watcher
+            .poll_interval_ms
+            .unwrap_or(DEFAULT_POLL_INTERVAL_MS)
+            .clamp(MIN_POLL_INTERVAL_MS, MAX_POLL_INTERVAL_MS)
     }
 
     /// Sort mode: "name", "size", or "modified".
@@ -495,7 +802,76 @@ impl AppConfig {
 
     /// Scrollback lines for the embedded terminal.
     pub fn terminal_scrollback(&self) -> usize {
-        self.terminal.scrollback_lines.unwrap_or(1000)
+        self.terminal
+            .scrollback_lines
+            .unwrap_or(1000)
+            .min(crate::terminal::emulator::MAX_SCROLLBACK_LINES)
+    }
+
+    /// Whether workspace sessions are persisted and restored (default true).
+    pub fn session_enabled(&self) -> bool {
+        self.session.enabled.unwrap_or(true)
+    }
+
+    /// Resolved private session state directory, or `None` when the platform
+    /// provides no state/data directory and no explicit override is configured.
+    /// A `None` here means persistence is off; `main` reports it as a visible
+    /// status line ("Session persistence unavailable"), so it degrades visibly.
+    pub fn session_state_dir(&self) -> Option<PathBuf> {
+        match self.session.state_dir.as_deref() {
+            Some(dir) if !dir.trim().is_empty() => Some(PathBuf::from(dir)),
+            _ => default_session_state_dir(),
+        }
+    }
+
+    /// Whether bounded recovery snapshots are persisted (default true).
+    pub fn recovery_enabled(&self) -> bool {
+        self.recovery.enabled.unwrap_or(true)
+    }
+
+    /// Whether optional read-only Git indicators are enabled (default true).
+    ///
+    /// Disabling removes every decoration and stops further `git` queries;
+    /// missing/unavailable Git still degrades to no indicators rather than an error.
+    pub fn git_enabled(&self) -> bool {
+        self.git.enabled.unwrap_or(true)
+    }
+
+    /// Resolved private recovery state directory, or `None` when the platform
+    /// provides no state/data directory and no explicit override is configured.
+    /// A `None` here degrades visibly (main reports it), never silently.
+    pub fn recovery_state_dir(&self) -> Option<PathBuf> {
+        match self.recovery.state_dir.as_deref() {
+            Some(dir) if !dir.trim().is_empty() => Some(PathBuf::from(dir)),
+            _ => default_recovery_state_dir(),
+        }
+    }
+
+    /// Maximum retained recovery snapshots per workspace, clamped so a
+    /// misconfiguration cannot disable retention or exhaust the disk.
+    pub fn recovery_max_records(&self) -> usize {
+        self.recovery
+            .max_records
+            .unwrap_or(DEFAULT_RECOVERY_MAX_RECORDS)
+            .clamp(MIN_RECOVERY_MAX_RECORDS, MAX_RECOVERY_MAX_RECORDS)
+    }
+
+    /// Maximum recovery snapshot age, clamped to a sane range in seconds. Both
+    /// bounds matter: the lower one keeps retention meaningful and the upper one
+    /// (100 years) keeps the signed age cutoff from wrapping negative, which
+    /// would prune every fresh snapshot as if it were ancient.
+    pub fn recovery_max_age_secs(&self) -> u64 {
+        self.recovery
+            .max_age_secs
+            .unwrap_or(DEFAULT_RECOVERY_MAX_AGE_SECS)
+            .clamp(MIN_RECOVERY_MAX_AGE_SECS, MAX_RECOVERY_MAX_AGE_SECS)
+    }
+
+    /// Minimum interval between throttled recovery snapshot writes.
+    pub fn recovery_min_interval_ms(&self) -> u64 {
+        self.recovery
+            .min_interval_ms
+            .unwrap_or(DEFAULT_RECOVERY_MIN_INTERVAL_MS)
     }
 
     /// Max entries to load per page when expanding large directories.
@@ -515,11 +891,76 @@ impl AppConfig {
             .unwrap_or(DEFAULT_SEARCH_MAX_ENTRIES) as usize
     }
 
-    /// Max file size in bytes the editor will open.
+    /// Directory names excluded from search/indexing. Absent or empty uses the
+    /// built-in defaults so exclusions can never be accidentally disabled.
+    pub fn search_exclude_dirs(&self) -> Vec<String> {
+        match &self.general.search_exclude_dirs {
+            Some(names) if !names.is_empty() => names.clone(),
+            _ => crate::search::default_excludes(),
+        }
+    }
+
+    /// Resolved, always-valid content-search bounds.
+    pub fn search_limits(&self) -> crate::search::SearchLimits {
+        let defaults = crate::search::SearchLimits::default();
+        crate::search::SearchLimits {
+            max_file_bytes: self
+                .general
+                .search_max_file_bytes
+                .unwrap_or(defaults.max_file_bytes)
+                .max(1),
+            max_files: (self
+                .general
+                .search_max_files
+                .unwrap_or(defaults.max_files as u32)
+                .max(1)) as usize,
+            max_hits: (self
+                .general
+                .search_max_hits
+                .unwrap_or(defaults.max_hits as u32)
+                .max(1)) as usize,
+            max_bytes_scanned: self
+                .general
+                .search_max_bytes_scanned
+                .unwrap_or(defaults.max_bytes_scanned)
+                .max(1),
+            batch_files: (self
+                .general
+                .search_batch_files
+                .unwrap_or(defaults.batch_files as u32)
+                .max(1)) as usize,
+            batch_hits: (self
+                .general
+                .search_batch_hits
+                .unwrap_or(defaults.batch_hits as u32)
+                .max(1)) as usize,
+            max_excerpt_bytes: (self
+                .general
+                .search_max_excerpt_bytes
+                .unwrap_or(defaults.max_excerpt_bytes as u32)
+                .max(1)) as usize,
+            max_depth: defaults.max_depth,
+            max_pending: defaults.max_pending,
+        }
+    }
+
+    /// Max file size in bytes the editor will open, clamped to
+    /// `MAX_EDITOR_BYTES` so no configured value yields an effectively
+    /// unbounded budget.
     pub fn max_editor_bytes(&self) -> u64 {
         self.general
             .max_editor_bytes
             .unwrap_or(DEFAULT_MAX_EDITOR_BYTES)
+            .min(MAX_EDITOR_BYTES)
+    }
+
+    /// Editor byte budget as a `usize`.
+    ///
+    /// `max_editor_bytes()` is clamped to `MAX_EDITOR_BYTES`, which fits
+    /// `usize` on every supported platform, so this conversion is lossless and
+    /// can never degenerate to the `usize::MAX` sentinel.
+    pub fn max_editor_bytes_usize(&self) -> usize {
+        self.max_editor_bytes() as usize
     }
 
     /// Max line count the editor will open.
@@ -548,12 +989,131 @@ mod tests {
     use std::io::Write;
 
     #[test]
+    fn task3_blank_syntax_theme_uses_current_theme_default() {
+        let mut config = AppConfig::default();
+        config.preview.syntax_theme = Some(" ".into());
+        assert_eq!(config.syntax_theme_name("light"), "InspiredGitHub");
+        assert_eq!(config.syntax_theme_name("dark"), "base16-ocean.dark");
+    }
+
+    #[test]
+    fn task3_preview_aliases_and_bounded_terminal_history() {
+        let mut config = AppConfig::default();
+        assert_eq!(config.preview_view_mode(), "full");
+        for (input, expected) in [
+            ("full", "full"),
+            ("head_tail", "head_and_tail"),
+            ("head_and_tail", "head_and_tail"),
+            ("head_only", "head_only"),
+            ("tail_only", "tail_only"),
+            ("legacy_unknown", "full"),
+        ] {
+            config.preview.default_view_mode = Some(input.into());
+            assert_eq!(config.preview_view_mode(), expected);
+        }
+        config.terminal.scrollback_lines = Some(usize::MAX);
+        assert_eq!(config.terminal_scrollback(), 100_000);
+        config.terminal.scrollback_lines = Some(0);
+        assert_eq!(config.terminal_scrollback(), 0);
+    }
+
+    #[test]
+    fn extreme_max_editor_bytes_is_clamped_below_usize_max() {
+        let mut config = AppConfig::default();
+        // An extreme configured value must not become an unbounded budget.
+        config.general.max_editor_bytes = Some(u64::MAX);
+        assert_eq!(config.max_editor_bytes(), MAX_EDITOR_BYTES);
+        let bounded = config.max_editor_bytes_usize();
+        assert!(bounded <= MAX_EDITOR_BYTES as usize);
+        assert_ne!(bounded, usize::MAX);
+        assert_eq!(bounded, MAX_EDITOR_BYTES as usize);
+
+        // An ordinary value passes through unchanged.
+        config.general.max_editor_bytes = Some(4096);
+        assert_eq!(config.max_editor_bytes(), 4096);
+        assert_eq!(config.max_editor_bytes_usize(), 4096);
+
+        // The default is unaffected by the clamp.
+        config.general.max_editor_bytes = None;
+        assert_eq!(config.max_editor_bytes(), DEFAULT_MAX_EDITOR_BYTES);
+    }
+
+    #[test]
+    fn keymap_config_profile_merge_and_context_override() {
+        let base: AppConfig = toml::from_str(
+            r#"
+[keymap]
+profile = "web"
+timeout_ms = 900
+[[keymap.bindings]]
+command = "document.save"
+context = "editor"
+keys = ["F9"]
+[[keymap.bindings]]
+command = "document.close"
+context = "editor"
+keys = []
+"#,
+        )
+        .unwrap();
+        let over: AppConfig = toml::from_str(
+            r#"
+[keymap]
+profile = "standard"
+[[keymap.bindings]]
+command = "document.save"
+context = "editor"
+keys = ["F10"]
+"#,
+        )
+        .unwrap();
+        let merged = base.merge(&over);
+        assert_eq!(
+            merged.keymap.profile,
+            Some(crate::keymap::KeymapProfile::Standard)
+        );
+        assert_eq!(merged.keymap.timeout_ms, Some(900));
+        let bindings = merged.keymap.bindings.unwrap();
+        assert_eq!(bindings.len(), 2);
+        assert_eq!(
+            bindings
+                .iter()
+                .find(|b| b.command == "document.save")
+                .unwrap()
+                .keys,
+            ["F10"]
+        );
+        assert!(bindings
+            .iter()
+            .find(|b| b.command == "document.close")
+            .unwrap()
+            .keys
+            .is_empty());
+        assert!(toml::from_str::<AppConfig>("[keymap]\nprofile = 'unknown'").is_err());
+    }
+
+    #[test]
+    fn keymap_checked_config_errors_do_not_fall_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        for content in [
+            "[keymap]\nprofile = 'unknown'",
+            "[keymap]\nprofile = 'web'\n[[keymap.bindings]]\ncommand = 'unknown'\ncontext = 'editor'\nkeys = ['F9']",
+            "not { valid toml",
+        ] {
+            std::fs::write(&path, content).unwrap();
+            assert!(AppConfig::load_checked(Some(&path), None).is_err());
+        }
+        assert!(AppConfig::load_checked(Some(&dir.path().join("missing")), None).is_err());
+    }
+
+    #[test]
     fn test_default_values() {
         let cfg = AppConfig::default();
-        assert_eq!(cfg.show_hidden(), false);
-        assert_eq!(cfg.confirm_delete(), true);
-        assert_eq!(cfg.mouse_enabled(), true);
-        assert_eq!(cfg.preview_enabled(), true);
+        assert!(!cfg.show_hidden());
+        assert!(cfg.confirm_delete());
+        assert!(cfg.mouse_enabled());
+        assert!(cfg.preview_enabled());
         assert_eq!(cfg.max_full_preview_bytes(), 1_048_576);
         assert_eq!(cfg.head_lines(), 50);
         assert_eq!(cfg.tail_lines(), 20);
@@ -561,12 +1121,12 @@ mod tests {
             cfg.syntax_theme_name(cfg.theme_scheme()),
             "base16-ocean.dark"
         );
-        assert_eq!(cfg.watcher_enabled(), false);
-        assert_eq!(cfg.watcher_auto_refresh(), false);
+        assert!(!cfg.watcher_enabled());
+        assert!(!cfg.watcher_auto_refresh());
         assert_eq!(cfg.debounce_ms(), 300);
         assert_eq!(cfg.sort_by(), "name");
-        assert_eq!(cfg.dirs_first(), true);
-        assert_eq!(cfg.use_icons(), true);
+        assert!(cfg.dirs_first());
+        assert!(cfg.use_icons());
         assert_eq!(cfg.theme_scheme(), "dark");
         assert_eq!(cfg.max_entries_per_page(), 1000);
         assert_eq!(cfg.search_max_entries(), 10000);
@@ -601,10 +1161,10 @@ auto_refresh = true
 scheme = "light"
 "#;
         let cfg: AppConfig = toml::from_str(toml).expect("parse failed");
-        assert_eq!(cfg.show_hidden(), true);
-        assert_eq!(cfg.confirm_delete(), false);
-        assert_eq!(cfg.mouse_enabled(), false);
-        assert_eq!(cfg.preview_enabled(), false);
+        assert!(cfg.show_hidden());
+        assert!(!cfg.confirm_delete());
+        assert!(!cfg.mouse_enabled());
+        assert!(!cfg.preview_enabled());
         assert_eq!(cfg.max_full_preview_bytes(), 2_000_000);
         assert_eq!(cfg.head_lines(), 100);
         assert_eq!(cfg.tail_lines(), 40);
@@ -612,12 +1172,12 @@ scheme = "light"
             cfg.syntax_theme_name(cfg.theme_scheme()),
             "Solarized (dark)"
         );
-        assert_eq!(cfg.watcher_enabled(), false);
+        assert!(!cfg.watcher_enabled());
         assert_eq!(cfg.debounce_ms(), 500);
-        assert_eq!(cfg.watcher_auto_refresh(), true);
+        assert!(cfg.watcher_auto_refresh());
         assert_eq!(cfg.sort_by(), "size");
-        assert_eq!(cfg.dirs_first(), false);
-        assert_eq!(cfg.use_icons(), false);
+        assert!(!cfg.dirs_first());
+        assert!(!cfg.use_icons());
         assert_eq!(cfg.theme_scheme(), "light");
     }
 
@@ -628,9 +1188,9 @@ scheme = "light"
 show_hidden = true
 "#;
         let cfg: AppConfig = toml::from_str(toml).expect("parse failed");
-        assert_eq!(cfg.show_hidden(), true);
+        assert!(cfg.show_hidden());
         // Everything else should be defaults
-        assert_eq!(cfg.confirm_delete(), true);
+        assert!(cfg.confirm_delete());
         assert_eq!(cfg.max_full_preview_bytes(), 1_048_576);
         assert_eq!(cfg.sort_by(), "name");
     }
@@ -638,8 +1198,8 @@ show_hidden = true
     #[test]
     fn test_toml_parsing_empty() {
         let cfg: AppConfig = toml::from_str("").expect("parse failed");
-        assert_eq!(cfg.show_hidden(), false);
-        assert_eq!(cfg.confirm_delete(), true);
+        assert!(!cfg.show_hidden());
+        assert!(cfg.confirm_delete());
     }
 
     #[test]
@@ -726,8 +1286,8 @@ show_hidden = true
         };
 
         let merged = base.merge(&over);
-        assert_eq!(merged.show_hidden(), true); // overridden
-        assert_eq!(merged.confirm_delete(), true); // from base
+        assert!(merged.show_hidden()); // overridden
+        assert!(merged.confirm_delete()); // from base
         assert_eq!(merged.head_lines(), 100); // overridden
         assert_eq!(merged.tail_lines(), 20); // from base
     }
@@ -739,14 +1299,78 @@ show_hidden = true
                 enabled: Some(false),
                 debounce_ms: Some(500),
                 auto_refresh: None,
+                ..Default::default()
             },
             ..Default::default()
         };
         let over = AppConfig::default(); // all None
 
         let merged = base.merge(&over);
-        assert_eq!(merged.watcher_enabled(), false); // base preserved
+        assert!(!merged.watcher_enabled()); // base preserved
         assert_eq!(merged.debounce_ms(), 500); // base preserved
+    }
+
+    #[test]
+    fn test_watcher_mode_round_trip_and_unknown_fallback() {
+        let toml = r#"
+[watcher]
+enabled = true
+mode = "polling"
+poll_interval_ms = 1500
+"#;
+        let cfg: AppConfig = toml::from_str(toml).expect("parse failed");
+        assert_eq!(cfg.watcher_mode(), WatcherMode::Polling);
+        assert_eq!(cfg.watcher_mode().as_str(), "polling");
+        assert_eq!(cfg.poll_interval_ms(), 1500);
+
+        // Default (unset) is the event backend with the documented interval.
+        let default = AppConfig::default();
+        assert_eq!(default.watcher_mode(), WatcherMode::Event);
+        assert_eq!(default.watcher_mode().as_str(), "event");
+        assert_eq!(default.poll_interval_ms(), DEFAULT_POLL_INTERVAL_MS);
+
+        // Unknown spellings must not silently disable watching.
+        let unknown: AppConfig = toml::from_str("[watcher]\nmode = \"nonsense\"\n").unwrap();
+        assert_eq!(unknown.watcher_mode(), WatcherMode::Event);
+    }
+
+    #[test]
+    fn test_watcher_poll_interval_is_clamped() {
+        let low: AppConfig = toml::from_str("[watcher]\npoll_interval_ms = 1\n").unwrap();
+        assert_eq!(low.poll_interval_ms(), MIN_POLL_INTERVAL_MS);
+        let zero: AppConfig = toml::from_str("[watcher]\npoll_interval_ms = 0\n").unwrap();
+        assert_eq!(zero.poll_interval_ms(), MIN_POLL_INTERVAL_MS);
+        let high: AppConfig = toml::from_str("[watcher]\npoll_interval_ms = 999_999\n").unwrap();
+        assert_eq!(high.poll_interval_ms(), MAX_POLL_INTERVAL_MS);
+    }
+
+    #[test]
+    fn test_watcher_mode_merge_precedence_keeps_base_when_override_unset() {
+        let base = AppConfig {
+            watcher: WatcherConfig {
+                mode: Some("polling".to_string()),
+                poll_interval_ms: Some(4000),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        // An unset override must not clear the base mode/interval.
+        let merged = base.clone().merge(&AppConfig::default());
+        assert_eq!(merged.watcher_mode(), WatcherMode::Polling);
+        assert_eq!(merged.poll_interval_ms(), 4000);
+
+        // An explicit override wins.
+        let over = AppConfig {
+            watcher: WatcherConfig {
+                mode: Some("event".to_string()),
+                poll_interval_ms: Some(1000),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let merged = base.merge(&over);
+        assert_eq!(merged.watcher_mode(), WatcherMode::Event);
+        assert_eq!(merged.poll_interval_ms(), 1000);
     }
 
     #[test]
@@ -770,7 +1394,7 @@ sort_by = "modified"
         .expect("write");
 
         let cfg = load_file(&cfg_path).expect("load");
-        assert_eq!(cfg.show_hidden(), true);
+        assert!(cfg.show_hidden());
         assert_eq!(cfg.head_lines(), 75);
         assert_eq!(cfg.sort_by(), "modified");
         // Unset fields fall through to defaults
@@ -820,7 +1444,7 @@ head_lines = 75
         // CLI override wins
         assert_eq!(cfg.head_lines(), 200);
         // File value preserved (not overridden by CLI)
-        assert_eq!(cfg.show_hidden(), true);
+        assert!(cfg.show_hidden());
     }
 
     #[test]
@@ -828,8 +1452,8 @@ head_lines = 75
         // When no files found (env vars not set, no CWD config, no global config),
         // we should get all defaults.
         let cfg = AppConfig::load(None, None);
-        assert_eq!(cfg.show_hidden(), false);
-        assert_eq!(cfg.confirm_delete(), true);
+        assert!(!cfg.show_hidden());
+        assert!(cfg.confirm_delete());
         assert_eq!(cfg.head_lines(), 50);
         assert_eq!(cfg.tail_lines(), 20);
     }
@@ -971,5 +1595,174 @@ s3_head_lines = 50
 
         let cfg = AppConfig::load(Some(&cfg_path), Some(&cli_overrides));
         assert_eq!(cfg.s3_head_lines(), 75); // CLI override wins
+    }
+
+    #[test]
+    fn task3_search_keys_default_clamp_and_merge() {
+        let cfg = AppConfig::default();
+        assert!(cfg.search_exclude_dirs().iter().any(|name| name == ".venv"));
+        let limits = cfg.search_limits();
+        assert!(limits.validate().is_ok());
+        assert_eq!(limits.max_file_bytes, crate::search::DEFAULT_MAX_FILE_BYTES);
+        assert_eq!(limits.batch_files, crate::search::DEFAULT_BATCH_FILES);
+
+        let toml = r#"
+[general]
+search_exclude_dirs = [".git", "vendor"]
+search_max_file_bytes = 1024
+search_max_files = 25
+search_max_hits = 7
+search_batch_files = 2
+search_batch_hits = 3
+search_max_excerpt_bytes = 40
+"#;
+        let cfg: AppConfig = toml::from_str(toml).expect("parse search keys");
+        assert_eq!(cfg.search_exclude_dirs(), vec![".git", "vendor"]);
+        let limits = cfg.search_limits();
+        assert_eq!(limits.max_file_bytes, 1024);
+        assert_eq!(limits.max_files, 25);
+        assert_eq!(limits.max_hits, 7);
+        assert_eq!(limits.batch_files, 2);
+        assert_eq!(limits.batch_hits, 3);
+        assert_eq!(limits.max_excerpt_bytes, 40);
+
+        // Zero values are clamped to a valid minimum rather than disabling search.
+        let zero: AppConfig =
+            toml::from_str("[general]\nsearch_max_hits = 0\nsearch_batch_files = 0\n")
+                .expect("parse zero keys");
+        let limits = zero.search_limits();
+        assert_eq!(limits.max_hits, 1);
+        assert_eq!(limits.batch_files, 1);
+        assert!(limits.validate().is_ok());
+
+        // Empty exclusion list falls back to the safe built-in defaults.
+        let empty: AppConfig =
+            toml::from_str("[general]\nsearch_exclude_dirs = []\n").expect("parse empty excludes");
+        assert!(empty
+            .search_exclude_dirs()
+            .iter()
+            .any(|name| name == "target"));
+    }
+
+    #[test]
+    fn test_session_toggle_and_state_directory_merge_and_defaults() {
+        // Defaults: sessions enabled, platform state directory used.
+        let defaults = AppConfig::default();
+        assert!(defaults.session_enabled());
+        assert_eq!(defaults.session_state_dir(), default_session_state_dir());
+
+        // Explicit directory wins over the platform default.
+        let file: AppConfig =
+            toml::from_str("[session]\nenabled = false\nstate_dir = \"/tmp/fm-state\"\n")
+                .expect("parse session");
+        assert!(!file.session_enabled());
+        assert_eq!(
+            file.session_state_dir(),
+            Some(std::path::PathBuf::from("/tmp/fm-state"))
+        );
+
+        // A blank override falls back to the platform default.
+        let blank: AppConfig =
+            toml::from_str("[session]\nstate_dir = \"  \"\n").expect("parse blank");
+        assert_eq!(blank.session_state_dir(), default_session_state_dir());
+
+        // Merge: the higher-priority source's Some values win field by field.
+        let cli = AppConfig {
+            session: SessionConfig {
+                enabled: Some(true),
+                state_dir: None,
+            },
+            ..Default::default()
+        };
+        let merged = file.merge(&cli);
+        assert!(merged.session_enabled());
+        assert_eq!(
+            merged.session_state_dir(),
+            Some(std::path::PathBuf::from("/tmp/fm-state"))
+        );
+    }
+
+    #[test]
+    fn test_recovery_toggle_state_directory_and_retention_merge_and_defaults() {
+        let defaults = AppConfig::default();
+        assert!(defaults.recovery_enabled());
+        assert_eq!(defaults.recovery_state_dir(), default_recovery_state_dir());
+        assert_eq!(
+            defaults.recovery_max_records(),
+            DEFAULT_RECOVERY_MAX_RECORDS
+        );
+        assert_eq!(
+            defaults.recovery_max_age_secs(),
+            DEFAULT_RECOVERY_MAX_AGE_SECS
+        );
+        assert_eq!(
+            defaults.recovery_min_interval_ms(),
+            DEFAULT_RECOVERY_MIN_INTERVAL_MS
+        );
+
+        let file: AppConfig = toml::from_str(
+            "[recovery]\nenabled = false\nstate_dir = \"/tmp/fm-recovery\"\nmax_records = 4\nmax_age_secs = 7200\nmin_interval_ms = 50\n",
+        )
+        .expect("parse recovery");
+        assert!(!file.recovery_enabled());
+        assert_eq!(
+            file.recovery_state_dir(),
+            Some(std::path::PathBuf::from("/tmp/fm-recovery"))
+        );
+        assert_eq!(file.recovery_max_records(), 4);
+        assert_eq!(file.recovery_max_age_secs(), 7200);
+        assert_eq!(file.recovery_min_interval_ms(), 50);
+
+        // Clamps keep a misconfiguration bounded rather than disabling retention.
+        let clamped: AppConfig =
+            toml::from_str("[recovery]\nmax_records = 0\nmax_age_secs = 1\n").expect("clamped");
+        assert_eq!(clamped.recovery_max_records(), MIN_RECOVERY_MAX_RECORDS);
+        assert_eq!(clamped.recovery_max_age_secs(), MIN_RECOVERY_MAX_AGE_SECS);
+
+        // A blank override falls back to the platform default.
+        let blank: AppConfig = toml::from_str("[recovery]\nstate_dir = \"  \"\n").expect("blank");
+        assert_eq!(blank.recovery_state_dir(), default_recovery_state_dir());
+
+        // Merge: the higher-priority source's Some values win field by field.
+        let cli = AppConfig {
+            recovery: RecoveryConfig {
+                enabled: Some(true),
+                state_dir: None,
+                max_records: Some(9),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let merged = file.merge(&cli);
+        assert!(merged.recovery_enabled());
+        assert_eq!(
+            merged.recovery_state_dir(),
+            Some(std::path::PathBuf::from("/tmp/fm-recovery"))
+        );
+        assert_eq!(merged.recovery_max_records(), 9);
+    }
+
+    #[test]
+    fn git_indicators_default_enable_and_merge_by_higher_priority_source() {
+        // Default: indicators on (Phase 8 Task 1 already refreshes at startup).
+        assert!(AppConfig::default().git_enabled());
+
+        // TOML can disable.
+        let file: AppConfig = toml::from_str("[git]\nenabled = false\n").unwrap();
+        assert!(!file.git_enabled());
+
+        // CLI/partial Some wins over an earlier source field by field.
+        let cli = AppConfig {
+            git: GitConfig {
+                enabled: Some(true),
+            },
+            ..Default::default()
+        };
+        assert!(file.clone().merge(&cli).git_enabled());
+
+        // An absent field keeps the lower-priority source.
+        let absent: AppConfig = toml::from_str("[git]\n").unwrap();
+        assert!(!absent.clone().merge(&file).git_enabled());
+        assert!(absent.merge(&AppConfig::default()).git_enabled());
     }
 }

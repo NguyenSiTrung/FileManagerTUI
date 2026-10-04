@@ -31,6 +31,8 @@ impl HelpTab {
 /// State for the help overlay.
 #[derive(Debug, Default)]
 pub struct HelpState {
+    /// Owned originating panel/document, captured before Help becomes modal.
+    pub origin: Option<crate::commands::CommandContext>,
     /// Scroll offset for the help content.
     pub scroll_offset: usize,
     /// Active tab (Keybindings or Settings).
@@ -69,24 +71,12 @@ const NAVIGATION_KEYS: &[KeyEntry] = &[
         description: "Jump to last item",
     },
     KeyEntry {
-        key: "Enter / l / →",
-        description: "Expand dir / Load more entries",
+        key: "Enter",
+        description: "Open text / Expand dir / Load more entries",
     },
     KeyEntry {
         key: "Backspace / h / ←",
         description: "Collapse directory",
-    },
-    KeyEntry {
-        key: "Tab",
-        description: "Cycle panel focus (forward)",
-    },
-    KeyEntry {
-        key: "Ctrl+←/→",
-        description: "Focus left/right panel",
-    },
-    KeyEntry {
-        key: "Ctrl+↑/↓",
-        description: "Focus up/down (terminal)",
     },
     KeyEntry {
         key: ".",
@@ -158,10 +148,6 @@ const FILE_OPS_KEYS: &[KeyEntry] = &[
 ];
 
 const SEARCH_FILTER_KEYS: &[KeyEntry] = &[
-    KeyEntry {
-        key: "Ctrl+P",
-        description: "Open fuzzy finder",
-    },
     KeyEntry {
         key: "/",
         description: "Start inline filter",
@@ -280,10 +266,6 @@ const EDITOR_KEYS: &[KeyEntry] = &[
         description: "Exit edit mode (prompt if unsaved)",
     },
     KeyEntry {
-        key: "Ctrl+S",
-        description: "Save file",
-    },
-    KeyEntry {
         key: "Arrows",
         description: "Move cursor",
     },
@@ -367,24 +349,16 @@ const EDITOR_KEYS: &[KeyEntry] = &[
 
 const TERMINAL_KEYS: &[KeyEntry] = &[
     KeyEntry {
-        key: "t / Ctrl+T",
-        description: "Toggle terminal panel",
-    },
-    KeyEntry {
-        key: "Ctrl+Shift+↑",
-        description: "Resize terminal smaller",
-    },
-    KeyEntry {
-        key: "Ctrl+Shift+↓",
-        description: "Resize terminal larger",
+        key: "q / Ctrl+C / Ctrl+A/E/U/K/W",
+        description: "Sent to shell unless explicitly bound",
     },
     KeyEntry {
         key: "Esc",
-        description: "Clear selection / Leave terminal (→ tree)",
+        description: "Sent to shell unless bound (does not leave terminal)",
     },
     KeyEntry {
         key: "Tab",
-        description: "Shell autocompletion (sent to PTY)",
+        description: "Shell autocompletion unless explicitly bound",
     },
     KeyEntry {
         key: "Shift+↑/↓",
@@ -403,7 +377,7 @@ const TERMINAL_KEYS: &[KeyEntry] = &[
         description: "Copy selected text to clipboard",
     },
     KeyEntry {
-        key: "Ctrl+Insert",
+        key: "Super+C (if distinctly delivered)",
         description: "Copy selected text to clipboard",
     },
     KeyEntry {
@@ -422,20 +396,12 @@ const GENERAL_KEYS: &[KeyEntry] = &[
         description: "Toggle this help overlay",
     },
     KeyEntry {
-        key: "q",
-        description: "Quit",
-    },
-    KeyEntry {
-        key: "Ctrl+C",
-        description: "Quit",
-    },
-    KeyEntry {
         key: "F5",
         description: "Manual refresh",
     },
     KeyEntry {
         key: "Ctrl+R",
-        description: "Toggle file watcher",
+        description: "Toggle tree auto-refresh (open-document change detection stays on)",
     },
 ];
 
@@ -469,7 +435,7 @@ const CATEGORIES: &[KeyCategory] = &[
         entries: TERMINAL_KEYS,
     },
     KeyCategory {
-        name: "General",
+        name: "Tree/preview native controls",
         entries: GENERAL_KEYS,
     },
 ];
@@ -478,11 +444,21 @@ const CATEGORIES: &[KeyCategory] = &[
 pub struct HelpOverlay<'a> {
     theme: &'a ThemeColors,
     state: &'a HelpState,
+    app: Option<&'a crate::app::App>,
 }
 
 impl<'a> HelpOverlay<'a> {
     pub fn new(theme: &'a ThemeColors, state: &'a HelpState) -> Self {
-        Self { theme, state }
+        Self {
+            theme,
+            state,
+            app: None,
+        }
+    }
+
+    pub fn app(mut self, app: &'a crate::app::App) -> Self {
+        self.app = Some(app);
+        self
     }
 
     /// Build the tab bar line.
@@ -514,6 +490,40 @@ impl<'a> HelpOverlay<'a> {
     /// Build keybinding content lines.
     fn build_keybinding_lines(&self) -> Vec<Line<'static>> {
         let mut lines: Vec<Line<'static>> = Vec::new();
+
+        if let Some(app) = self.app {
+            let fallback = crate::commands::CommandContext::capture(app);
+            let origin = self.state.origin.as_ref().unwrap_or(&fallback);
+            let context = origin.binding_context(app);
+            lines.push(Line::from(format!("Workspace bindings · {context:?}")));
+            for metadata in crate::commands::REGISTRY {
+                let labels = app.keymap.binding_labels(metadata.id, context);
+                let binding = if labels.is_empty() {
+                    "unbound".into()
+                } else {
+                    labels.join(" / ")
+                };
+                lines.push(Line::from(format!("{binding}: {}", metadata.label)));
+                if let Some(reason) = crate::commands::unavailable_reason(app, origin, metadata.id)
+                {
+                    // Keep disabled status visible even when compact labels are clipped.
+                    lines.push(Line::from(format!("  disabled: {reason}")));
+                }
+            }
+            lines.push(Line::from(
+                "Browser delivery varies; Web avoids reserved Ctrl+P/T/S/R routes.",
+            ));
+            lines.push(Line::from(format!(
+                "Prefix: Esc/mismatch/{}ms timeout cancels; suffix is consumed.",
+                app.config.keymap.timeout_ms.unwrap_or(1200)
+            )));
+            lines.push(Line::from(
+                "Focus/paste/live replacement cancels; one delayed key is quarantined.",
+            ));
+            lines.push(Line::from(
+                "Native panel controls (subject to explicit workspace overrides):",
+            ));
+        }
 
         // Title
         lines.push(Line::from(vec![Span::styled(
@@ -585,6 +595,7 @@ impl<'a> HelpOverlay<'a> {
     }
 
     /// Get total number of keybinding content lines (for scroll bounds).
+    #[cfg(test)]
     pub fn keybinding_total_lines() -> usize {
         let mut count = 2; // title + blank
         for category in CATEGORIES {
@@ -599,7 +610,7 @@ impl<'a> HelpOverlay<'a> {
     /// Get total lines for the current tab.
     pub fn total_lines_for_tab(&self) -> usize {
         match self.state.active_tab {
-            HelpTab::Keybindings => Self::keybinding_total_lines(),
+            HelpTab::Keybindings => self.build_keybinding_lines().len(),
             HelpTab::Settings => {
                 if let Some(ref settings) = self.state.settings_state {
                     use super::settings::SettingsWidget;
@@ -615,6 +626,9 @@ impl<'a> HelpOverlay<'a> {
 
 impl<'a> Widget for HelpOverlay<'a> {
     fn render(self, area: Rect, buf: &mut Buffer) {
+        if area.width == 0 || area.height == 0 {
+            return;
+        }
         // Center the overlay — 70% width, 80% height
         let overlay_width = (area.width as f32 * 0.70).min(90.0) as u16;
         let overlay_height = (area.height as f32 * 0.80).min(50.0) as u16;
@@ -714,8 +728,15 @@ impl<'a> Widget for HelpOverlay<'a> {
                     + overlay_area
                         .width
                         .saturating_sub(ind_span.width() as u16 + 1);
-                let ind_y = overlay_area.y + overlay_area.height - 1;
-                buf.set_span(ind_x, ind_y, &ind_span, ind_span.width() as u16);
+                let ind_y = overlay_area.y + overlay_area.height.saturating_sub(1);
+                if overlay_area.width > 0 && overlay_area.height > 0 {
+                    buf.set_span(
+                        ind_x,
+                        ind_y,
+                        &ind_span,
+                        (ind_span.width() as u16).min(overlay_area.right().saturating_sub(ind_x)),
+                    );
+                }
             }
         }
     }
@@ -724,6 +745,167 @@ impl<'a> Widget for HelpOverlay<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn task3_web_help_has_no_static_standard_workspace_routes() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = crate::config::AppConfig::default();
+        config.keymap.profile = Some(crate::keymap::KeymapProfile::Web);
+        let mut app = crate::app::App::new(dir.path(), config).unwrap();
+        app.set_overlay(crate::app::AppMode::Help);
+        let lines = HelpOverlay::new(&app.theme_colors, &app.help_state)
+            .app(&app)
+            .build_keybinding_lines();
+        let text = lines
+            .iter()
+            .map(crate::text::line_text)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(!text.contains("Cycle panel focus (forward)"));
+        assert!(!text.contains("Toggle terminal panel"));
+        assert!(!text.contains("Open fuzzy finder"));
+        assert!(!text.contains("Save file"));
+    }
+
+    #[test]
+    fn task3_help_disabled_reasons_and_modal_origin_are_truthful() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app =
+            crate::app::App::new(dir.path(), crate::config::AppConfig::default()).unwrap();
+        app.workspace.focus.panel = crate::app::FocusedPanel::Terminal;
+        app.set_overlay(crate::app::AppMode::Help);
+        assert_eq!(app.input_context(), crate::keymap::FocusContext::Modal);
+        let lines = HelpOverlay::new(&app.theme_colors, &app.help_state)
+            .app(&app)
+            .build_keybinding_lines();
+        let text = lines
+            .iter()
+            .map(crate::text::line_text)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.starts_with("Workspace bindings · Terminal"));
+        assert!(text.contains("disabled: No retained editable document"));
+        let origin = app.help_state.origin.as_ref().unwrap();
+        for (id, row) in [
+            (
+                crate::commands::CommandId::ToggleExplorer,
+                "Alt+G e: Toggle explorer pane",
+            ),
+            (
+                crate::commands::CommandId::MaximizeEditor,
+                "Alt+G x: Maximize editor",
+            ),
+            (
+                crate::commands::CommandId::MaximizeTerminal,
+                "Alt+G z: Maximize terminal",
+            ),
+            (
+                crate::commands::CommandId::RestoreLayout,
+                "Alt+G r: Restore pane layout",
+            ),
+        ] {
+            assert!(text.lines().any(|line| line == row), "{text}");
+            assert_eq!(crate::commands::unavailable_reason(&app, origin, id), None);
+        }
+        assert_eq!(
+            crate::commands::unavailable_reason(
+                &app,
+                origin,
+                crate::commands::CommandId::GrowTerminal
+            ),
+            Some("Terminal has no resizable split"),
+        );
+        assert!(text.contains("disabled: Terminal has no resizable split"));
+        assert!(text.contains("Private recovery is not implemented"));
+        assert!(text.contains("Sent to shell unless bound (does not leave terminal)"));
+        assert!(!text.contains("Leave terminal (→ tree)"));
+        assert!(!text.contains("Ctrl+P") || text.contains("reserved Ctrl+P/T/S/R"));
+    }
+
+    #[test]
+    fn task3_help_and_settings_render_bounded_at_all_sizes_and_origins() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app =
+            crate::app::App::new(dir.path(), crate::config::AppConfig::default()).unwrap();
+        app.set_overlay(crate::app::AppMode::Help);
+        app.help_state.settings_state = Some(SettingsState::from_config(&app.config));
+        for tab in [HelpTab::Keybindings, HelpTab::Settings] {
+            app.help_state.active_tab = tab;
+            for (x, y, w, h) in [
+                (0, 0, 0, 0),
+                (0, 0, 1, 1),
+                (0, 0, 2, 3),
+                (0, 0, 60, 20),
+                (0, 0, 80, 24),
+                (0, 0, 120, 40),
+                (7, 9, 60, 20),
+            ] {
+                let mut terminal =
+                    ratatui::Terminal::new(ratatui::backend::TestBackend::new(x + w, y + h))
+                        .unwrap();
+                terminal
+                    .draw(|frame| {
+                        frame.render_widget(
+                            HelpOverlay::new(&app.theme_colors, &app.help_state).app(&app),
+                            Rect::new(x, y, w, h),
+                        )
+                    })
+                    .unwrap();
+                let buffer = terminal.backend().buffer();
+                for row in 0..y + h {
+                    for col in 0..x + w {
+                        if col < x || row < y {
+                            assert_eq!(buffer[(col, row)].symbol(), " ");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn task3_help_uses_editor_origin_live_override_and_disabled_reason() {
+        use crate::keymap::{BindingOverride, FocusContext, KeymapConfig, KeymapProfile};
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.txt");
+        std::fs::write(&path, "alpha").unwrap();
+        let mut app =
+            crate::app::App::new(dir.path(), crate::config::AppConfig::default()).unwrap();
+        app.open_document_path(&path, true);
+        app.apply_keymap_config(KeymapConfig {
+            profile: Some(KeymapProfile::Web),
+            bindings: Some(vec![
+                BindingOverride {
+                    command: "document.save".into(),
+                    context: FocusContext::Editor,
+                    keys: vec!["F9".into()],
+                },
+                BindingOverride {
+                    command: "document.close".into(),
+                    context: FocusContext::Editor,
+                    keys: vec![],
+                },
+            ]),
+            ..Default::default()
+        })
+        .unwrap();
+        app.set_overlay(crate::app::AppMode::Help);
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+        terminal
+            .draw(|frame| crate::ui::render(&mut app, frame))
+            .unwrap();
+        let text: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|c| c.symbol())
+            .collect();
+        assert!(text.contains("F9"));
+        assert!(text.contains("Save retained document"));
+        assert!(text.contains("unbound"));
+    }
 
     #[test]
     fn keybinding_total_lines_is_nonzero() {
@@ -777,9 +959,11 @@ mod tests {
     fn total_lines_for_settings_tab() {
         let theme = crate::theme::dark_theme();
         let config = crate::config::AppConfig::default();
-        let mut state = HelpState::default();
-        state.active_tab = HelpTab::Settings;
-        state.settings_state = Some(super::super::settings::SettingsState::from_config(&config));
+        let state = HelpState {
+            active_tab: HelpTab::Settings,
+            settings_state: Some(super::super::settings::SettingsState::from_config(&config)),
+            ..Default::default()
+        };
         let overlay = HelpOverlay::new(&theme, &state);
         assert!(overlay.total_lines_for_tab() > 0);
     }

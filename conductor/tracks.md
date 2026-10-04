@@ -76,7 +76,7 @@
 
 ---
 
-## [ ] Track: Terminal Workspace for Headless and Web Terminals
+## [~] Track: Terminal Workspace for Headless and Web Terminals
 
 *Link: [./conductor/tracks/terminal-workspace_20261001/](./conductor/tracks/terminal-workspace_20261001/)*
 

@@ -200,7 +200,7 @@ impl<'a> Widget for SearchActionWidget<'a> {
         // Hint at bottom
         if inner.height > 3 {
             let hint_line = Line::from(Span::styled(
-                "[Esc] Back to search",
+                "[Esc] Search: Enter opens; F2 actions",
                 Style::default()
                     .fg(self.theme.dim_fg)
                     .add_modifier(Modifier::DIM),

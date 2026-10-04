@@ -16,8 +16,10 @@ use crate::theme::ThemeColors;
 pub const LINE_COUNT_STEP: usize = 10;
 
 /// Hard cap for full-file preview loading (5 MB).
-/// Files larger than this are handled via head+tail mode instead.
-const MAX_PREVIEW_SIZE: u64 = 5 * 1024 * 1024;
+///
+/// Files larger than this are handled via head+tail mode instead; the notebook
+/// path takes this as its explicit budget because it has no head/tail fallback.
+pub const MAX_PREVIEW_SIZE: u64 = 5 * 1024 * 1024;
 
 /// Detect the syntax name for a file based on its extension or filename.
 pub fn detect_syntax_name(path: &Path) -> &str {
@@ -71,11 +73,13 @@ pub fn detect_syntax_name(path: &Path) -> &str {
 
 /// Detect syntax from shebang line for extensionless files.
 fn detect_from_shebang(path: &Path) -> &str {
+    /// Cap the shebang probe; a real `#!` line is far shorter than this.
+    const MAX_SHEBANG_BYTES: u64 = 4096;
     let file = match fs::File::open(path) {
         Ok(f) => f,
         Err(_) => return "Plain Text",
     };
-    let mut reader = BufReader::new(file);
+    let mut reader = BufReader::new(file.take(MAX_SHEBANG_BYTES));
     let mut first_line = String::new();
     if reader.read_line(&mut first_line).is_err() {
         return "Plain Text";
@@ -114,6 +118,74 @@ fn syntect_color_to_ratatui(c: syntect::highlighting::Color) -> Color {
     Color::Rgb(c.r, c.g, c.b)
 }
 
+/// Read at most `max_bytes` bytes from `reader` in one bounded pass.
+///
+/// One extra detection byte distinguishes "fits the budget" from "grew past
+/// it" without a metadata-then-read race: a source holding more than
+/// `max_bytes` bytes yields `None` instead of a silently truncated buffer.
+/// This mirrors the bounded descriptor read in `src/fs/save.rs`.
+fn read_bounded(reader: impl Read, max_bytes: u64) -> std::io::Result<Option<Vec<u8>>> {
+    let mut bytes = Vec::new();
+    reader
+        .take(max_bytes.saturating_add(1))
+        .read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > max_bytes {
+        Ok(None)
+    } else {
+        Ok(Some(bytes))
+    }
+}
+
+/// Result of a bounded whole-file preview read.
+enum PreviewRead {
+    /// Decoded content; `is_lossy` is set when the bytes were not valid UTF-8.
+    Text { text: String, is_lossy: bool },
+    /// The file held more than the byte budget (or grew past it while reading).
+    TooLarge { size_bytes: u64 },
+    /// The file could not be opened or read.
+    Error(std::io::Error),
+}
+
+/// Open `path` once and read at most `max_bytes` bytes from that descriptor.
+///
+/// Opening once and reading from the same descriptor removes the
+/// metadata-then-read TOCTOU window: a file that grows after the size check
+/// is still refused by the `max_bytes + 1` detection byte rather than read
+/// without bound.
+fn read_preview_text(path: &Path, max_bytes: u64) -> PreviewRead {
+    let mut file = match fs::File::open(path) {
+        Ok(file) => file,
+        Err(error) => return PreviewRead::Error(error),
+    };
+    // Size at open time, used only for the honest oversize message; the
+    // bounded read still refuses a file that grows after this point.
+    let observed = file.metadata().map(|meta| meta.len()).unwrap_or(0);
+    match read_bounded(&mut file, max_bytes) {
+        Ok(Some(bytes)) => {
+            let is_lossy = std::str::from_utf8(&bytes).is_err();
+            let text = match String::from_utf8(bytes) {
+                Ok(text) => text,
+                Err(error) => String::from_utf8_lossy(error.as_bytes()).to_string(),
+            };
+            PreviewRead::Text { text, is_lossy }
+        }
+        Ok(None) => PreviewRead::TooLarge {
+            size_bytes: observed.max(max_bytes.saturating_add(1)),
+        },
+        Err(error) => PreviewRead::Error(error),
+    }
+}
+
+/// The bounded oversize state shared by both whole-file preview paths.
+fn too_large_lines(size_bytes: u64, colors: &ThemeColors) -> Vec<Line<'static>> {
+    let size_mb = size_bytes as f64 / (1024.0 * 1024.0);
+    let msg = format!("File too large for full preview ({:.1} MB)", size_mb);
+    vec![Line::from(Span::styled(
+        msg,
+        Style::default().fg(colors.warning_fg),
+    ))]
+}
+
 /// Load and syntax-highlight a file's content, returning styled lines for ratatui.
 ///
 /// Returns `(lines, total_line_count)`. On error, returns a single error-message line.
@@ -123,43 +195,17 @@ pub fn load_highlighted_content(
     theme: &Theme,
     colors: &ThemeColors,
 ) -> (Vec<Line<'static>>, usize) {
-    // Defense-in-depth: reject files that exceed the hard size cap.
-    // Callers should gate via update_preview(), but this protects against
-    // future callers that skip that check.
-    match fs::metadata(path) {
-        Ok(meta) if meta.len() > MAX_PREVIEW_SIZE => {
-            let size_mb = meta.len() as f64 / (1024.0 * 1024.0);
-            let msg = format!("File too large for full preview ({:.1} MB)", size_mb);
-            return (
-                vec![Line::from(Span::styled(
-                    msg,
-                    Style::default().fg(colors.warning_fg),
-                ))],
-                1,
-            );
+    crate::highlighting::note_render_io_if_watching();
+    // Defense-in-depth bounded read: open once and take at most the hard-cap
+    // budget plus one detection byte from that descriptor. Callers gate via
+    // update_preview(), but this protects future callers that skip the check
+    // and refuses a file that grows after any earlier metadata read.
+    let (content, is_lossy) = match read_preview_text(path, MAX_PREVIEW_SIZE) {
+        PreviewRead::Text { text, is_lossy } => (text, is_lossy),
+        PreviewRead::TooLarge { size_bytes } => {
+            return (too_large_lines(size_bytes, colors), 1);
         }
-        Err(e) => {
-            let msg = format!("Error reading file: {}", e);
-            return (
-                vec![Line::from(Span::styled(
-                    msg,
-                    Style::default().fg(colors.error_fg),
-                ))],
-                1,
-            );
-        }
-        _ => {} // size is within limits
-    }
-
-    let (content, is_lossy) = match fs::read(path) {
-        Ok(bytes) => match String::from_utf8(bytes) {
-            Ok(s) => (s, false),
-            Err(e) => {
-                let lossy = String::from_utf8_lossy(e.as_bytes()).to_string();
-                (lossy, true)
-            }
-        },
-        Err(e) => {
+        PreviewRead::Error(e) => {
             let msg = format!("Error reading file: {}", e);
             return (
                 vec![Line::from(Span::styled(
@@ -292,7 +338,9 @@ pub fn fast_line_count(path: &Path) -> std::io::Result<usize> {
 /// On I/O error mid-read, returns the lines collected so far (partial success).
 pub fn read_head_lines(path: &Path, n: usize) -> std::io::Result<Vec<String>> {
     let file = fs::File::open(path)?;
-    let reader = BufReader::new(file);
+    // Cap total bytes read so a pathological single line cannot materialize the
+    // whole file; the final line may be clipped at the cap.
+    let reader = BufReader::new(file.take(MAX_PREVIEW_SIZE));
     let mut result = Vec::with_capacity(n);
     for line_result in reader.lines().take(n) {
         match line_result {
@@ -370,10 +418,13 @@ pub fn read_tail_lines(path: &Path, n: usize) -> std::io::Result<Vec<String>> {
         0
     };
 
-    // Read from start_offset to end
+    // Read from start_offset to end, bounded so a tail region larger than the
+    // preview cap (for example a single line with no newlines, where
+    // `start_offset` is 0) cannot materialize the whole file.
     file.seek(std::io::SeekFrom::Start(start_offset))?;
-    let mut content = String::new();
-    file.read_to_string(&mut content)?;
+    let mut bytes = Vec::new();
+    file.take(MAX_PREVIEW_SIZE).read_to_end(&mut bytes)?;
+    let mut content = String::from_utf8_lossy(&bytes).to_string();
 
     // Strip trailing newline to avoid empty last element
     if content.ends_with('\n') {
@@ -396,6 +447,7 @@ pub fn load_head_tail_content(
     tail_lines: usize,
     view_mode: ViewMode,
 ) -> (Vec<Line<'static>>, usize) {
+    crate::highlighting::note_render_io_if_watching();
     let total_lines = match fast_line_count(path) {
         Ok(n) => n,
         Err(e) => {
@@ -641,6 +693,7 @@ const BINARY_EXTENSIONS: &[&str] = &[
 
 /// Check if a file is binary by extension or null-byte scan.
 pub fn is_binary_file(path: &Path) -> bool {
+    crate::highlighting::note_render_io_if_watching();
     // Check known extensions first
     if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
         if BINARY_EXTENSIONS
@@ -711,6 +764,7 @@ fn format_permissions(mode: u32) -> String {
 
 /// Generate metadata display lines for a binary file.
 pub fn load_binary_metadata(path: &Path, colors: &ThemeColors) -> (Vec<Line<'static>>, usize) {
+    crate::highlighting::note_render_io_if_watching();
     let meta = match fs::metadata(path) {
         Ok(m) => m,
         Err(e) => {
@@ -952,6 +1006,60 @@ pub fn load_directory_summary_shallow(
     path: &Path,
     colors: &ThemeColors,
 ) -> (Vec<Line<'static>>, usize) {
+    crate::highlighting::note_render_io_if_watching();
+    let summary =
+        load_directory_summary_shallow_budgeted(path, colors, usize::MAX, usize::MAX, || false);
+    (summary.lines, summary.total)
+}
+
+pub(crate) struct ShallowSummary {
+    pub(crate) lines: Vec<Line<'static>>,
+    pub(crate) total: usize,
+    pub(crate) complete: bool,
+}
+
+pub(crate) fn summary_lines_bytes(lines: &Vec<Line<'static>>) -> usize {
+    lines.iter().fold(
+        lines
+            .capacity()
+            .saturating_mul(std::mem::size_of::<Line<'static>>()),
+        |bytes, line| {
+            line.spans.iter().fold(
+                bytes.saturating_add(
+                    line.spans
+                        .capacity()
+                        .saturating_mul(std::mem::size_of::<Span<'static>>()),
+                ),
+                |bytes, span| {
+                    bytes.saturating_add(match &span.content {
+                        std::borrow::Cow::Owned(text) => text.capacity(),
+                        std::borrow::Cow::Borrowed(_) => 0,
+                    })
+                },
+            )
+        },
+    )
+}
+
+/// Existing formatting policy with native worker cancellation/retention seams.
+/// At most 20 names and 32 rendered lines; lossily decoded names <=12 KiB each.
+pub(crate) fn load_directory_summary_shallow_budgeted(
+    path: &Path,
+    colors: &ThemeColors,
+    max_entries: usize,
+    bytes: usize,
+    stopped: impl Fn() -> bool,
+) -> ShallowSummary {
+    // Reserve all fixed formatting vectors, numeric text and directory label
+    // before collecting nested names or building rendered lines.
+    const FORMATTING_BYTES: usize = 32 * 1024;
+    if path.as_os_str().len() > 4096 || bytes < FORMATTING_BYTES {
+        return ShallowSummary {
+            lines: Vec::new(),
+            total: 0,
+            complete: false,
+        };
+    }
     let label_style = Style::default()
         .fg(colors.info_fg)
         .add_modifier(Modifier::BOLD);
@@ -966,24 +1074,55 @@ pub fn load_directory_summary_shallow(
 
     let mut file_count: u64 = 0;
     let mut dir_count: u64 = 0;
-    let mut child_names: Vec<(String, bool)> = Vec::new(); // (name, is_dir)
+    let mut child_names: Vec<(String, bool)> = Vec::with_capacity(SHALLOW_LISTING_LIMIT);
+    let mut names_bytes = 0usize;
+    let mut complete = true;
 
-    let entries = match fs::read_dir(path) {
-        Ok(e) => e,
-        Err(e) => {
-            return (
-                vec![Line::from(Span::styled(
-                    format!("  Error reading directory: {}", e),
+    let entries = match if stopped() {
+        None
+    } else {
+        Some(fs::read_dir(path))
+    } {
+        None => {
+            complete = false;
+            None
+        }
+        Some(Ok(entries)) => Some(entries),
+        Some(Err(_)) => {
+            return ShallowSummary {
+                lines: vec![Line::from(Span::styled(
+                    "  Incomplete: Error reading directory (I/O)",
                     Style::default().fg(colors.error_fg),
                 ))],
-                1,
-            );
+                total: 1,
+                complete: false,
+            };
         }
     };
 
-    for entry in entries.flatten() {
-        let is_dir = entry.metadata().map(|m| m.is_dir()).unwrap_or(false);
-        let name = entry.file_name().to_string_lossy().to_string();
+    for (scanned, entry) in entries.into_iter().flatten().enumerate() {
+        if stopped() || scanned == max_entries {
+            complete = false;
+            break;
+        }
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(_) => {
+                complete = false;
+                continue;
+            }
+        };
+        if stopped() {
+            complete = false;
+            break;
+        }
+        let is_dir = match entry.metadata() {
+            Ok(metadata) => metadata.is_dir(),
+            Err(_) => {
+                complete = false;
+                continue;
+            }
+        };
 
         if is_dir {
             dir_count += 1;
@@ -992,6 +1131,16 @@ pub fn load_directory_summary_shallow(
         }
 
         if child_names.len() < SHALLOW_LISTING_LIMIT {
+            let raw = entry.file_name();
+            let charge = raw.len().saturating_mul(6).saturating_add(32);
+            if raw.capacity() > 4096
+                || charge > bytes.saturating_sub(FORMATTING_BYTES + names_bytes)
+            {
+                complete = false;
+                break;
+            }
+            let name = raw.to_string_lossy().to_string();
+            names_bytes += charge;
             child_names.push((name, is_dir));
         }
     }
@@ -1048,8 +1197,17 @@ pub fn load_directory_summary_shallow(
         hint_style,
     )));
 
+    if !complete {
+        lines.push(Line::raw(
+            "  Incomplete (cap/deadline/I/O); totals are partial",
+        ));
+    }
     let total = lines.len();
-    (lines, total)
+    ShallowSummary {
+        lines,
+        total,
+        complete,
+    }
 }
 
 /// Load and render a Jupyter notebook (.ipynb) file.
@@ -1061,10 +1219,18 @@ pub fn load_notebook_content(
     ss: &SyntaxSet,
     theme: &Theme,
     colors: &ThemeColors,
+    max_bytes: u64,
 ) -> (Vec<Line<'static>>, usize) {
-    let content = match fs::read_to_string(path) {
-        Ok(s) => s,
-        Err(e) => {
+    crate::highlighting::note_render_io_if_watching();
+    // The notebook path takes an explicit budget so a large `.ipynb` can never
+    // be read whole. The read is bounded before parsing, so the JSON parser
+    // can never observe bytes beyond `max_bytes`.
+    let content = match read_preview_text(path, max_bytes) {
+        PreviewRead::Text { text, .. } => text,
+        PreviewRead::TooLarge { size_bytes } => {
+            return (too_large_lines(size_bytes, colors), 1);
+        }
+        PreviewRead::Error(e) => {
             return (
                 vec![Line::from(Span::styled(
                     format!("Error reading notebook: {}", e),
@@ -1836,7 +2002,8 @@ mod tests {
 
         let ss = SyntaxSet::load_defaults_newlines();
         let theme = load_theme(None);
-        let (lines, total) = load_notebook_content(&path, &ss, &theme, &test_colors());
+        let (lines, total) =
+            load_notebook_content(&path, &ss, &theme, &test_colors(), MAX_PREVIEW_SIZE);
         assert!(total > 0);
         let all_text: String = lines
             .iter()
@@ -1876,7 +2043,8 @@ mod tests {
 
         let ss = SyntaxSet::load_defaults_newlines();
         let theme = load_theme(None);
-        let (lines, _) = load_notebook_content(&path, &ss, &theme, &test_colors());
+        let (lines, _) =
+            load_notebook_content(&path, &ss, &theme, &test_colors(), MAX_PREVIEW_SIZE);
         let all_text: String = lines
             .iter()
             .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
@@ -1894,7 +2062,8 @@ mod tests {
 
         let ss = SyntaxSet::load_defaults_newlines();
         let theme = load_theme(None);
-        let (lines, total) = load_notebook_content(&path, &ss, &theme, &test_colors());
+        let (lines, total) =
+            load_notebook_content(&path, &ss, &theme, &test_colors(), MAX_PREVIEW_SIZE);
         assert_eq!(total, 1);
         let text: String = lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(text.contains("Error"));
@@ -1909,7 +2078,8 @@ mod tests {
 
         let ss = SyntaxSet::load_defaults_newlines();
         let theme = load_theme(None);
-        let (lines, total) = load_notebook_content(&path, &ss, &theme, &test_colors());
+        let (lines, total) =
+            load_notebook_content(&path, &ss, &theme, &test_colors(), MAX_PREVIEW_SIZE);
         assert_eq!(total, 1);
         let text: String = lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(text.contains("no cells"));
@@ -1977,7 +2147,8 @@ mod tests {
 
         let ss = SyntaxSet::load_defaults_newlines();
         let theme = load_theme(None);
-        let (lines, total) = load_notebook_content(&path, &ss, &theme, &test_colors());
+        let (lines, total) =
+            load_notebook_content(&path, &ss, &theme, &test_colors(), MAX_PREVIEW_SIZE);
         assert!(total > 0);
         let all_text: String = lines
             .iter()
@@ -2136,6 +2307,154 @@ mod tests {
         assert_eq!(lines.len(), 1);
         let text: String = lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(!text.contains("too large"));
+    }
+
+    // === FileManagerTUI-8u3: bounded preview reads ===
+
+    #[test]
+    fn bounded_reader_never_exceeds_limit_under_growth() {
+        use std::io::Cursor;
+        use std::sync::atomic::{AtomicU64, Ordering};
+        use std::sync::{Arc, Barrier};
+
+        struct GrowingReader {
+            prefix: Cursor<Vec<u8>>,
+            grown: bool,
+            barrier: Arc<Barrier>,
+            served: Arc<AtomicU64>,
+        }
+
+        impl Read for GrowingReader {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                if !self.grown {
+                    let n = self.prefix.read(buf)?;
+                    if n > 0 {
+                        self.served.fetch_add(n as u64, Ordering::SeqCst);
+                        return Ok(n);
+                    }
+                    self.grown = true;
+                    // Release the growth only once the test is also waiting:
+                    // deterministic coordination instead of a sleep.
+                    self.barrier.wait();
+                }
+                let chunk = [b'x'; 4096];
+                let n = chunk.len().min(buf.len());
+                buf[..n].copy_from_slice(&chunk[..n]);
+                self.served.fetch_add(n as u64, Ordering::SeqCst);
+                Ok(n)
+            }
+        }
+
+        let limit = 64u64;
+        let barrier = Arc::new(Barrier::new(2));
+        let served = Arc::new(AtomicU64::new(0));
+        let reader = GrowingReader {
+            prefix: Cursor::new(vec![b'a'; limit as usize]),
+            grown: false,
+            barrier: barrier.clone(),
+            served: served.clone(),
+        };
+
+        let handle = std::thread::spawn(move || {
+            let mut reader = reader;
+            read_bounded(&mut reader, limit)
+        });
+        // The reader blocks at the barrier only after serving the first
+        // `limit` bytes; releasing it here forces the growth deterministically.
+        barrier.wait();
+        let result = handle.join().unwrap().unwrap();
+
+        assert!(
+            result.is_none(),
+            "a source grown past the budget is refused"
+        );
+        let consumed = served.load(Ordering::SeqCst);
+        assert!(
+            consumed <= limit + 1,
+            "bounded reader consumed {consumed} bytes for a limit of {limit}"
+        );
+    }
+
+    #[test]
+    fn read_bounded_file_consumes_at_most_budget_plus_one() {
+        use std::io::Seek;
+
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("oversize.txt");
+        let budget = 16 * 1024u64;
+        std::fs::write(&path, vec![b'z'; (budget * 8) as usize]).unwrap();
+
+        let mut file = File::open(&path).unwrap();
+        let result = read_bounded(&mut file, budget).unwrap();
+        assert!(result.is_none(), "a file over budget must be refused");
+        // The descriptor position proves only budget + 1 bytes were consumed,
+        // so memory never scales with the file.
+        assert_eq!(file.stream_position().unwrap(), budget + 1);
+    }
+
+    #[test]
+    fn bounded_reader_propagates_read_errors() {
+        struct FailingReader;
+        impl Read for FailingReader {
+            fn read(&mut self, _buf: &mut [u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::other("injected read failure"))
+            }
+        }
+
+        let error = read_bounded(FailingReader, 16).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::Other);
+    }
+
+    #[test]
+    fn unreadable_preview_read_reports_error() {
+        // A directory opens as a descriptor on Unix but fails on read, which
+        // exercises the read-error arm of the bounded preview reader.
+        let dir = TempDir::new().unwrap();
+        let ss = SyntaxSet::load_defaults_newlines();
+        let theme = load_theme(None);
+        let (lines, total) = load_highlighted_content(dir.path(), &ss, &theme, &test_colors());
+        assert_eq!(total, 1);
+        let text: String = lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(text.contains("Error reading file"), "got: {text}");
+    }
+
+    #[test]
+    fn notebook_nonexistent_file_reports_read_error() {
+        let ss = SyntaxSet::load_defaults_newlines();
+        let theme = load_theme(None);
+        let (lines, total) = load_notebook_content(
+            Path::new("/nonexistent/missing.ipynb"),
+            &ss,
+            &theme,
+            &test_colors(),
+            MAX_PREVIEW_SIZE,
+        );
+        assert_eq!(total, 1);
+        let text: String = lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(text.contains("Error reading notebook"), "got: {text}");
+    }
+
+    #[test]
+    fn oversize_notebook_is_bounded_and_not_parsed() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("huge.ipynb");
+        // A valid notebook prefix followed by whitespace: the whole buffer is
+        // valid JSON and just above the budget. A parser that saw a truncated
+        // buffer would instead return the "no cells" state.
+        let mut body = String::from(r#"{"cells":[],"metadata":{}}"#);
+        body.push_str(&" ".repeat(8192));
+        std::fs::write(&path, body.as_bytes()).unwrap();
+
+        let ss = SyntaxSet::load_defaults_newlines();
+        let theme = load_theme(None);
+        let (lines, total) = load_notebook_content(&path, &ss, &theme, &test_colors(), 512);
+        assert_eq!(total, 1);
+        let text: String = lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(text.contains("too large"), "got: {text}");
+        assert!(
+            !text.contains("no cells"),
+            "the JSON parse must not observe a truncated buffer: {text}"
+        );
     }
 
     // === FR-2: UTF-8 lossy warning tests ===

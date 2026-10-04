@@ -1,12 +1,12 @@
 {
   "track_id": "terminal-workspace_20261001",
   "type": "feature",
-  "status": "new",
+  "status": "in_progress",
   "priority": "high",
   "depends_on": [],
   "estimated_hours": null,
   "created_at": "2026-10-01T12:59:04Z",
-  "updated_at": "2026-10-01T13:21:21Z",
+  "updated_at": "2026-10-01T22:58:14Z",
   "description": "Redesign FileManagerTUI as a safe IDE-like terminal workspace for headless VMs and Jupyter/Kubeflow terminals, including multiple documents, adaptive panes, browser-compatible commands, search, recovery, read-only Git indicators, installed-server LSP, and diagnostics.",
   "verification_policy": "automated_only",
   "manual_verification": false,
@@ -77,6 +77,7 @@
     "phase12_task1": "FileManagerTUI-cen.12.1",
     "phase12_task2": "FileManagerTUI-cen.12.2",
     "phase12_task3": "FileManagerTUI-cen.12.3",
-    "phase12_task4": "FileManagerTUI-cen.12.4"
+    "phase12_task4": "FileManagerTUI-cen.12.4",
+    "phase6_task6": "FileManagerTUI-cen.6.6"
   }
 }

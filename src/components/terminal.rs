@@ -3,7 +3,7 @@
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::widgets::{Block, Widget};
+use ratatui::widgets::{Paragraph, Widget};
 
 use crate::terminal::TerminalState;
 use crate::theme::ThemeColors;
@@ -12,7 +12,6 @@ use crate::theme::ThemeColors;
 pub struct TerminalWidget<'a> {
     state: &'a TerminalState,
     theme: &'a ThemeColors,
-    block: Option<Block<'a>>,
     show_cursor: bool,
 }
 
@@ -21,46 +20,39 @@ impl<'a> TerminalWidget<'a> {
         Self {
             state,
             theme,
-            block: None,
             show_cursor,
         }
-    }
-
-    pub fn block(mut self, block: Block<'a>) -> Self {
-        self.block = Some(block);
-        self
     }
 }
 
 impl<'a> Widget for TerminalWidget<'a> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        // Render block border if present
-        let inner = if let Some(ref block) = self.block {
-            let inner = block.inner(area);
-            block.clone().render(area, buf);
-            inner
-        } else {
-            area
-        };
+        let inner = area.intersection(buf.area);
 
         if inner.width == 0 || inner.height == 0 {
             return;
         }
 
-        if self.state.exited {
-            // Show exited message in center
-            let msg = "[Process exited - press t or Ctrl+T to restart]";
-            let y = inner.y + inner.height / 2;
-            let x = inner.x + inner.width.saturating_sub(msg.len() as u16) / 2;
+        let lines = self.state.render_lines(self.theme);
+        if self.state.exited
+            || (self.state.pty.is_none()
+                && lines
+                    .iter()
+                    .all(|line| line.spans.iter().all(|span| span.content.trim().is_empty())))
+        {
+            let msg = if self.state.exited {
+                "exited: use Toggle terminal to restart"
+            } else {
+                "not started: use Toggle terminal to start"
+            };
             let style = Style::default()
                 .fg(self.theme.dim_fg)
                 .add_modifier(Modifier::DIM);
-            buf.set_string(x, y, msg, style);
+            Paragraph::new(msg).style(style).render(inner, buf);
             return;
         }
 
         // Get rendered lines from emulator
-        let lines = self.state.render_lines(self.theme);
         let (cursor_row, cursor_col) = if self.state.pty.is_some() {
             self.state.emulator.cursor_position()
         } else {
@@ -121,7 +113,8 @@ impl<'a> Widget for TerminalWidget<'a> {
         }
 
         // Render cursor if focused (cursor is not occluded by selection)
-        if self.show_cursor && self.state.scroll_offset == 0 {
+        if self.show_cursor && self.state.emulator.cursor_visible() && self.state.scroll_offset == 0
+        {
             let cursor_y = inner.y + cursor_row as u16;
             let cursor_x = inner.x + cursor_col as u16;
             if cursor_x < inner.x + inner.width && cursor_y < inner.y + inner.height {
@@ -148,6 +141,28 @@ mod tests {
     use crate::theme;
 
     #[test]
+    fn adaptive_idle_exit_messages_are_binding_neutral_and_clipped_to_content() {
+        for exited in [false, true] {
+            let state = TerminalState {
+                exited,
+                ..Default::default()
+            };
+            let theme = theme::light_theme();
+            let area = Rect::new(2, 3, 12, 1);
+            let mut buf = Buffer::empty(Rect::new(0, 0, 60, 8));
+            TerminalWidget::new(&state, &theme, true).render(area, &mut buf);
+            let row: String = (2..14).map(|x| buf[(x, 3)].symbol()).collect();
+            assert!(
+                row.contains(if exited { "exited" } else { "not started" }),
+                "{row}"
+            );
+            for x in 14..60 {
+                assert_eq!(buf[(x, 3)].symbol(), " ");
+            }
+        }
+    }
+
+    #[test]
     fn test_terminal_widget_renders() {
         let mut state = TerminalState::default();
         state.emulator.process(b"Hello World");
@@ -171,8 +186,10 @@ mod tests {
 
     #[test]
     fn test_terminal_widget_exited() {
-        let mut state = TerminalState::default();
-        state.exited = true;
+        let state = TerminalState {
+            exited: true,
+            ..Default::default()
+        };
         let theme = theme::dark_theme();
 
         let widget = TerminalWidget::new(&state, &theme, false);
