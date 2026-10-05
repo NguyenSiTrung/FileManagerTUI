@@ -1,13 +1,13 @@
 {
-    "last_refresh": "2026-10-04T16:30:00+00:00",
+    "last_refresh": "2026-10-05T12:00:00+07:00",
     "changes": [
-        "workflow.md: commit convention corrected to 'Phase <n> Task <m>' + git notes (conductor(<id>): was stale); coverage language updated (spec-driven floor, 94.6%L/94.8%F measured, no repo-total-as-new-core reporting); Phase Verification now spec-driven (automated acceptance evidence allowed); new Test Tiers section (Rust gates / PTY matrix / browser suite / check-terminal-workspace.sh quality runner); self-review checklist adds --all-targets and the quality runner",
-        "product.md: verified current — features 16-20 (documents/tabs, command menu, read-only Git, private recovery, installed-server LSP) already synced by terminal-workspace_20261001 Task 3",
-        "tech-stack.md: verified current — release-builds CI matrix, Test Harness section, module map already synced",
-        "product-guidelines.md: verified current — config path + safety standards already synced",
-        "tracks.md: verified current — terminal-workspace_20261001 archived 2026-10-04, no active tracks",
-        "patterns.md: consolidated at archive time — 12 patterns elevated from terminal-workspace_20261001 (PTY assertion model, process-check realpath filter, watcher opt-in, coalescing floor, diff-inclusive coverage, evidence honesty, trust layering); no additional 2+-track recurring patterns found",
-        "beads: drift check OK — 6 open beads are intentional filed follow-ups (9kk, e0y, nux, bte) + archived manual-verification artifacts (652.2.4, 652.4.4); no contradiction with conductor state"
+        "tech-stack.md: added missing deps unicode-segmentation 1.12, unicode-width 0.2, libc 0.2 (linux/macos target-only); module map corrected app_jobs.rs -> background/app_jobs.rs",
+        "product.md: feature 4 extended with project content search (Quick Open Tab, literal, bounded, cancellable); new features 21 Pane Layout ([layout] prefs, non-persisted maximize) and 22 Session Restore ([session], paths and view state only)",
+        "product-guidelines.md: Cargo package name corrected file-manager-tui -> file_manager_tui",
+        "workflow.md: verified current - CI/workflows unchanged since acd705d (pre-dates last refresh)",
+        "tracks.md: verified current - no active tracks",
+        "patterns.md: no new learnings since terminal-workspace_20261001 archive elevation; no consolidation needed",
+        "beads: 0 open/in-progress; the 6 follow-ups noted at last refresh were closed by maintainer request 2026-10-05; no conductor/beads drift"
     ],
-    "drift_source": "22 commits since last refresh (2026-09-30): terminal-workspace_20261001 completed and archived (all 12 phases / 52 tasks); docs largely synced by its Task 3 documentation pass; only workflow.md drifted"
+    "drift_source": "2 commits since last refresh (0e65460): README feature/config/architecture update (28c0358) surfaced undocumented content search, pane layout, session restore; .gitignore profraw (440a28a). Dep and module drift pre-existing from terminal-workspace_20261001"
 }

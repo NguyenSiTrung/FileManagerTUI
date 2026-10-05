@@ -1,6 +1,6 @@
 # Initial Concept
 
-> Last refreshed: 2026-09-30 — S3 head preview, S3 theme colors, undo, icons, Windows/distribution
+> Last refreshed: 2026-10-05 — project content search, pane layout, session restore
 
 A terminal-based file manager TUI (FileManagerTUI) built with Rust and Ratatui, designed for environments like KubeFlow and Jupyter notebooks where folder tree interaction is limited.
 
@@ -31,7 +31,7 @@ A single static binary that provides a VS Code-like file explorer experience in 
 1. **Tree Navigation** — Folder tree with lazy loading, expand/collapse, multi-select, inline filter (`/`), viewport mouse-wheel scrolling with visual scrollbar (drag-to-scroll, click-to-jump), PageUp/PageDown, configurable `scroll_lines`, Nerd Font file-type icons with ASCII fallback (`--no-icons`), `T` to open terminal at selected path
 2. **File Preview** — Syntax-highlighted preview panel with theme-aware defaults (auto-selects `InspiredGitHub` for light scheme, `base16-ocean.dark` for dark), streaming head/tail for large files, shallow directory summaries (depth-1) by default with on-demand deep scan (`D` key), cancel-on-navigate, configurable `preview_timeout_ms`, semantic `ThemeColors` for consistent contrast across themes, and double-click line selection with mouse text selection support
 3. **File Operations** — Create, rename, delete, copy, cut, paste with confirmation dialogs and async progress; single-level undo (`Ctrl+Z`) for rename, copy-paste, and move-paste
-4. **Fuzzy Search + Action Menu** — Ctrl+P fuzzy finder overlay with context-aware action menu (navigate, preview, edit, copy path via `y`, rename, delete, open in terminal)
+4. **Fuzzy Search + Action Menu** — Ctrl+P fuzzy finder overlay with context-aware action menu (navigate, preview, edit, copy path via `y`, rename, delete, open in terminal); `Tab` inside Quick Open switches to project content search — native literal (non-regex) search on a worker thread, cancelled/superseded while typing, bounded by `search_exclude_dirs` / `search_max_files` / `search_max_hits` / `search_max_file_bytes` / `search_max_bytes_scanned`
 5. **Filesystem Watcher** — Background watcher with manual refresh (F5/Ctrl+R) and optional auto-refresh mode via config
 6. **ML-Aware** — Special handling for .ipynb, .pt, .h5, .csv, .parquet, .yaml files
 7. **Configurable** — TOML config, CLI args, themes, keybindings; live settings panel in help overlay (`?` → Settings tab) with live syntax theme reload on scheme change
@@ -48,6 +48,8 @@ A single static binary that provides a VS Code-like file explorer experience in 
 18. **Read-Only Git Indicators** — Branch label on the status bar and modified/untracked tree markers via `git status --porcelain=v2 -z --branch` with `--no-optional-locks`; a missing `git` degrades to no indicators; `--no-git` / `[git] enabled = false` disables entirely
 19. **Private Recovery** — Bounded snapshots of dirty documents (0700 dir / 0600 records, workspace+path+disk-revision keyed, retention + age limits) with a relaunch prompt for restore/discard; restoring never writes the original file
 20. **Installed-Server LSP** — Optional stdio JSON-RPC language features and diagnostics for user-installed servers (e.g. `pylsp`, `yaml-language-server`, `rust-analyzer`); project-local argv requires an interactive, session-scoped trust grant; durable grants live only in the global config
+21. **Pane Layout** — Resizable/toggleable explorer and terminal panes with temporary editor/terminal maximize; preferences persist via `[layout]` (`explorer_width`, `explorer_visible`, `terminal_height`, `terminal_visible`), maximize is never persisted
+22. **Session Restore** — Versioned, workspace-scoped restore of open document paths, cursors, pane layout and recent files (`[session] enabled`); persists paths and view state only — never processes, terminal buffers, execution trust or secrets — written atomically to a private state dir
 
 ## Non-Functional Requirements
 - Binary size target: < 10MB (static musl build)

@@ -1,5 +1,7 @@
 # Product Guidelines
 
+> Last refreshed: 2026-10-05 — Cargo package name corrected to `file_manager_tui`
+
 ## Tone & Voice
 - **Technical & concise** — Developer-focused, no fluff
 - Status messages are short and actionable (e.g., "3 files copied", "Permission denied: /root")
@@ -14,7 +16,7 @@
 ## Naming Conventions
 - Binary name: `fm`
 - Config file: `~/.config/fm-tui/config.toml`
-- Project references: "FileManagerTUI" in docs, `file-manager-tui` in Cargo package name
+- Project references: "FileManagerTUI" in docs, `file_manager_tui` in Cargo package name
 
 ## Visual Identity
 - Default theme: dark background, high-contrast text

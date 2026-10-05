@@ -1,6 +1,6 @@
 # Tech Stack
 
-> Last refreshed: 2026-09-30 — packaging artifacts (.deb/AppImage), Windows target, dev-dependency
+> Last refreshed: 2026-10-05 — unicode-segmentation/unicode-width/libc deps, background/app_jobs.rs module path
 
 ## Language
 - **Rust** (edition 2021)
@@ -25,6 +25,9 @@
 | `portable-pty` | 0.8 | Cross-platform pseudo-terminal (PTY) creation |
 | `vte` | 0.13 | VT100/xterm escape sequence parser for terminal emulation |
 | `base64` | 0.22 | Base64 encoding for OSC 52 clipboard escape sequences |
+| `unicode-segmentation` | 1.12 | Grapheme-cluster boundaries for text slicing and truncation (`text.rs`, workspace chrome) |
+| `unicode-width` | 0.2 | Display-column widths for CJK/emoji-safe rendering and truncation |
+| `libc` | 0.2 | Linux/macOS-only target dependency: no-replace atomic rename (`renameat2`/`renamex_np`) and xattr/owner/timestamp preservation for safe saves, nonblocking `poll`, signals, termios |
 
 **Dev dependency**: `tempfile` 3 — temporary directories for filesystem tests.
 
@@ -48,4 +51,4 @@
 - Event-driven TUI loop (crossterm poll → handler dispatch → render)
 - Lazy directory loading (on-demand tree expansion with pagination)
 - Async file operations (tokio tasks for large copy/delete, directory expansion, preview)
-- Module structure: `main.rs`, `app.rs`, `app_jobs.rs`, `event.rs`, `handler.rs`, `ui.rs`, `tui.rs`, `error.rs`, `config.rs`, `theme.rs`, `editor.rs`, `keymap.rs`, `commands.rs`, `diagnostics.rs`, `git.rs`, `recovery.rs`, `session.rs`, `search.rs`, `text.rs`, `preview_content.rs`, `highlighting.rs`, `background.rs`, `workspace/` (mod, documents, focus, layout), `components/` (tree, preview, editor, status_bar, dialog, search, content_search, search_action, help, settings, terminal, command_menu, language_features, diagnostics, document_tabs, workspace_chrome), `fs/` (mod, tree, operations, save, watcher, clipboard), `terminal/` (mod, pty, emulator), `s3/` (mod, types, parser, backend), `lsp/` (mod, config, client, transport, positions, features)
+- Module structure: `main.rs`, `app.rs`, `event.rs`, `handler.rs`, `ui.rs`, `tui.rs`, `error.rs`, `config.rs`, `theme.rs`, `editor.rs`, `keymap.rs`, `commands.rs`, `diagnostics.rs`, `git.rs`, `recovery.rs`, `session.rs`, `search.rs`, `text.rs`, `preview_content.rs`, `highlighting.rs`, `background.rs` + `background/app_jobs.rs`, `workspace/` (mod, documents, focus, layout), `components/` (tree, preview, editor, status_bar, dialog, search, content_search, search_action, help, settings, terminal, command_menu, language_features, diagnostics, document_tabs, workspace_chrome), `fs/` (mod, tree, operations, save, watcher, clipboard), `terminal/` (mod, pty, emulator), `s3/` (mod, types, parser, backend), `lsp/` (mod, config, client, transport, positions, features)
