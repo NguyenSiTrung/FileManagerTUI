@@ -1,7 +1,7 @@
 //! S3 backend using bounded, owned argv-only AWS CLI children.
 //!
 //! No AWS SDK dependency — all operations are performed by spawning
-//! `aws s3 ls` / `aws s3 cp` subprocesses.
+//! `aws s3api list-objects-v2` / `aws s3 cp` subprocesses.
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -14,7 +14,12 @@ use std::sync::{
 use std::time::{Duration, Instant};
 
 use super::parser;
-use super::types::{S3Config, S3Entry, S3Path};
+use super::types::{S3Config, S3Entry, S3Page, S3Path};
+
+/// The S3 API never returns more than this many keys per request.
+const MAX_PAGE_KEYS: usize = 1000;
+/// Stdout bound for one page: at most 1000 keys of at most 1 KiB each plus JSON framing.
+const PAGE_STDOUT_BYTES: usize = 2 * 1024 * 1024;
 
 /// The S3 backend that manages CLI interactions and caching.
 #[derive(Debug, Clone)]
@@ -72,56 +77,55 @@ impl S3Backend {
         }
     }
 
-    /// List the contents of an S3 prefix.
+    /// List one page of an S3 prefix.
     ///
-    /// Spawns `aws s3 ls s3://bucket/prefix/` and parses the output.
-    #[allow(dead_code)]
-    pub async fn list_prefix(&self, s3_path: &S3Path) -> Result<Vec<S3Entry>, String> {
-        self.list_bounded(s3_path, 8 * 1024 * 1024, || false)
-            .map_err(str::to_owned)
-    }
-
-    pub(crate) fn list_bounded(
+    /// Spawns a single `aws s3api list-objects-v2 --no-paginate` request for at
+    /// most `page_size` keys (clamped to the API maximum) and resumes from
+    /// `token` when given. Output, memory and time are bounded; any limit,
+    /// cancel or CLI failure is an `Err`, never a partial page.
+    pub(crate) fn list_page_bounded(
         &self,
         s3_path: &S3Path,
+        token: Option<&str>,
+        page_size: usize,
         bytes: usize,
         stopped: impl Fn() -> bool,
-    ) -> Result<Vec<S3Entry>, &'static str> {
-        let uri = if s3_path.key.is_empty() {
-            format!("s3://{}/", s3_path.bucket)
-        } else if s3_path.key.ends_with('/') {
-            format!("s3://{}/{}", s3_path.bucket, s3_path.key)
+    ) -> Result<S3Page, &'static str> {
+        let prefix = if s3_path.key.is_empty() || s3_path.key.ends_with('/') {
+            s3_path.key.clone()
         } else {
-            format!("s3://{}/{}/", s3_path.bucket, s3_path.key)
+            format!("{}/", s3_path.key)
         };
-
         let mut cmd = self.base_command();
-        cmd.arg("s3").arg("ls").arg(&uri);
-        let output = capture_owned(cmd, 1024 * 1024, None, &stopped)?;
-        let capacity = 4096usize.min(bytes / (2 * std::mem::size_of::<S3Entry>()));
-        let mut entries = Vec::with_capacity(capacity);
-        let mut retained = entries.capacity() * std::mem::size_of::<S3Entry>();
-        for line in output.split(|byte| *byte == b'\n') {
-            if line.len() > 4096 || stopped() {
-                return Err("S3 listing Incomplete: line limit/cancel/deadline");
-            }
-            // Guard the legacy parser's fixed byte date slicing. Malformed
-            // non-ASCII date prefixes are not parsed as dates.
-            if !line.starts_with(b"PRE ") && line.len() >= 20 && !line[..20].is_ascii() {
-                continue;
-            }
-            let charge = line.len().saturating_mul(3).saturating_add(32);
-            if charge > bytes.saturating_sub(retained) || entries.len() == capacity {
-                return Err("S3 listing Incomplete: parser/result budget");
-            }
-            let text = String::from_utf8_lossy(line);
-            let parsed = parser::parse_ls_output(&text);
-            for entry in parsed {
-                retained += entry.name.capacity() + entry.modified.capacity();
-                entries.push(entry);
-            }
+        // `--opt=value` keeps bucket/prefix/token values from ever parsing as flags.
+        cmd.args([
+            "s3api",
+            "list-objects-v2",
+            "--no-paginate",
+            "--output",
+            "json",
+            "--delimiter",
+            "/",
+        ])
+        .arg(format!("--bucket={}", s3_path.bucket))
+        .arg(format!("--max-keys={}", page_size.clamp(1, MAX_PAGE_KEYS)));
+        if !prefix.is_empty() {
+            cmd.arg(format!("--prefix={prefix}"));
         }
-        Ok(entries)
+        if let Some(token) = token {
+            cmd.arg(format!("--continuation-token={token}"));
+        }
+        let output = capture_owned(cmd, PAGE_STDOUT_BYTES, None, &stopped)?;
+        let page = parser::parse_list_objects(&output, &prefix)?;
+        let retained = page.entries.iter().fold(
+            page.entries.capacity() * std::mem::size_of::<S3Entry>()
+                + page.next_token.as_ref().map_or(0, String::capacity),
+            |total, entry| total + entry.name.capacity() + entry.modified.capacity(),
+        );
+        if retained > bytes {
+            return Err("S3 listing Incomplete: parser/result budget");
+        }
+        Ok(page)
     }
 
     /// Download an S3 object to the local cache directory.
@@ -264,7 +268,7 @@ fn capture_owned(
         enough: Arc<AtomicBool>,
     ) -> std::thread::JoinHandle<Vec<u8>> {
         std::thread::spawn(move || {
-            let mut output = Vec::with_capacity(bytes);
+            let mut output = Vec::with_capacity(bytes.min(64 * 1024));
             let mut buffer = [0u8; 1024];
             let mut count = 0;
             loop {
@@ -403,12 +407,25 @@ mod tests {
             use std::os::unix::fs::PermissionsExt;
             let dir = tempfile::tempdir().unwrap();
             let fake = dir.path().join("aws");
-            std::fs::write(&fake, r#"#!/usr/bin/python3
-import os, sys, signal
+            std::fs::write(
+                &fake,
+                r#"#!/usr/bin/python3
+import os, sys, signal, json
 args = sys.argv[1:]
 if "--profile" in args:
     assert args[:2] == ["--profile", "literal '; profile"], args
-uri = args[-1] if "ls" in args else args[-2]
+def opt(name):
+    for arg in args:
+        if arg.startswith("--" + name + "="):
+            return arg.split("=", 1)[1]
+if "s3api" in args:
+    for flag in ("--no-paginate", "--delimiter"):
+        assert flag in args, args
+    assert opt("max-keys"), args
+    prefix = opt("prefix") or ""
+    uri = "s3://" + opt("bucket") + "/" + prefix
+else:
+    uri = args[-2]
 if "cancel" in uri or "deadline" in uri:
     marker = os.environ["PEER_PID"]
     with open(marker + ".pending", "w") as output:
@@ -429,15 +446,36 @@ elif "failure" in uri:
 elif "longline" in uri:
     sys.stdout.write("PRE " + "x" * 5000)
 elif "giantlist" in uri:
-    sys.stdout.write("x" * 2097152)
+    sys.stdout.write("x" * 3145728)
 elif "binary" in uri:
     sys.stdout.buffer.write(b"a\0b")
 elif "cp" in args:
     assert uri == "s3://fake-bucket/literal '; object", args
     sys.stdout.write("one\ntwo\nthree\n")
+elif "paged" in uri:
+    if opt("continuation-token") == "tok2":
+        page = {"Contents": [{"Key": prefix + "c.txt", "Size": 3}]}
+    else:
+        assert opt("continuation-token") is None, args
+        page = {
+            "CommonPrefixes": [{"Prefix": prefix + "d/"}],
+            "Contents": [{"Key": prefix + "a.txt", "Size": 1}],
+            "NextContinuationToken": "tok2",
+        }
+    sys.stdout.write(json.dumps(page))
 else:
-    sys.stdout.write("PRE child/\n2026-03-10 12:34:56 7 file.txt\nmalformed\n" + "\u00e9" * 24 + "\n")
-"#).unwrap();
+    page = {
+        "Contents": [
+            {"Key": prefix, "Size": 0},
+            {"Key": prefix + "file.txt", "Size": 7, "LastModified": "2026-03-10T12:34:56+00:00"},
+        ],
+        "CommonPrefixes": [{"Prefix": prefix + "child/"}]
+            + ([{"Prefix": "paged/"}] if prefix == "" else []),
+    }
+    sys.stdout.write(json.dumps(page))
+"#,
+            )
+            .unwrap();
             std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o700)).unwrap();
             let output = Command::new(std::env::current_exe().unwrap())
                 .args([
@@ -470,10 +508,27 @@ else:
             path: path.clone(),
             profile: Some("literal '; profile".into()),
         });
-        let entries = backend.list_bounded(&path, 8192, || false).unwrap();
-        assert_eq!(entries.len(), 2);
+        let page = backend
+            .list_page_bounded(&path, None, 1000, 8192, || false)
+            .unwrap();
+        assert!(page.next_token.is_none());
+        let entries = page.entries;
+        assert_eq!(entries.len(), 3);
         assert_eq!((&*entries[0].name, entries[0].is_dir), ("child/", true));
-        assert_eq!((&*entries[1].name, entries[1].size), ("file.txt", 7));
+        assert_eq!((&*entries[1].name, entries[1].is_dir), ("paged/", true));
+        assert_eq!((&*entries[2].name, entries[2].size), ("file.txt", 7));
+        assert_eq!(entries[2].modified, "2026-03-10 12:34:56");
+        let paged = S3Path::parse("s3://fake-bucket/paged/").unwrap();
+        let first = backend
+            .list_page_bounded(&paged, None, 2, 8192, || false)
+            .unwrap();
+        assert_eq!(first.entries.len(), 2);
+        assert_eq!(first.next_token.as_deref(), Some("tok2"));
+        let second = backend
+            .list_page_bounded(&paged, first.next_token.as_deref(), 2, 8192, || false)
+            .unwrap();
+        assert_eq!(second.entries.len(), 1);
+        assert!(second.next_token.is_none());
         let head = S3Path::parse("s3://fake-bucket/literal '; object").unwrap();
         assert_eq!(
             backend.head_bounded(&head, 2, || false).unwrap(),
@@ -491,8 +546,10 @@ else:
         ] {
             assert!(
                 backend
-                    .list_bounded(
+                    .list_page_bounded(
                         &S3Path::parse(&format!("s3://fake-bucket/{name}")).unwrap(),
+                        None,
+                        1000,
                         8192,
                         || false
                     )
@@ -507,7 +564,9 @@ else:
                 || false
             )
             .is_err());
-        assert!(backend.list_bounded(&path, 1, || false).is_err());
+        assert!(backend
+            .list_page_bounded(&path, None, 1000, 1, || false)
+            .is_err());
         // Readiness comes from the actual peer's PID publication, not a sleep.
         let pid_file = PathBuf::from(std::env::var_os("PEER_PID").unwrap());
         assert!(backend
@@ -555,7 +614,7 @@ else:
             app.spawn_s3_initial_load(&tx);
             let result = app.next_background().await.unwrap();
             app.apply_background(result);
-            assert_eq!(app.tree_state.root.children.as_ref().unwrap().len(), 2);
+            assert_eq!(app.tree_state.root.children.as_ref().unwrap().len(), 3);
             assert!(!app.tree_state.root.is_loading);
             app.spawn_s3_expand("s3://fake-bucket/child/".into(), &tx);
             let result = app.next_background().await.unwrap();
@@ -567,6 +626,37 @@ else:
             .unwrap();
             assert_eq!(child.children.as_ref().unwrap().len(), 2);
             assert!(!child.is_loading);
+            app.spawn_s3_expand("s3://fake-bucket/paged/".into(), &tx);
+            let result = app.next_background().await.unwrap();
+            app.apply_background(result);
+            let paged_path = PathBuf::from("s3://fake-bucket/paged/");
+            let paged = crate::fs::tree::TreeState::find_node_mut_pub(
+                &mut app.tree_state.root,
+                &paged_path,
+            )
+            .unwrap();
+            assert_eq!(paged.children.as_ref().unwrap().len(), 2);
+            assert!(paged.has_more_children);
+            assert_eq!(paged.s3_next_token.as_deref(), Some("tok2"));
+            assert_eq!(paged.total_child_count, None);
+            app.load_more(&paged_path);
+            let result = app.next_background().await.unwrap();
+            app.apply_background(result);
+            let paged = crate::fs::tree::TreeState::find_node_mut_pub(
+                &mut app.tree_state.root,
+                &paged_path,
+            )
+            .unwrap();
+            let names: Vec<_> = paged
+                .children
+                .as_ref()
+                .unwrap()
+                .iter()
+                .map(|child| child.name.as_str())
+                .collect();
+            assert_eq!(names, ["d/", "a.txt", "c.txt"]);
+            assert!(!paged.has_more_children && paged.s3_next_token.is_none());
+            assert_eq!(paged.total_child_count, Some(3));
             app.handle_s3_listing_complete(
                 "s3://fake-bucket/",
                 vec![S3Entry {
@@ -574,7 +664,8 @@ else:
                     is_dir: false,
                     size: 1,
                     modified: String::new(),
-                }],
+                }]
+                .into(),
             );
             app.tree_state.selected_index = 1;
             app.spawn_s3_head(&tx);

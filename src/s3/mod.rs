@@ -7,4 +7,4 @@ pub mod parser;
 pub mod types;
 
 pub use backend::S3Backend;
-pub use types::{S3Config, S3Entry, S3Path};
+pub use types::{S3Config, S3Entry, S3Page, S3Path};

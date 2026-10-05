@@ -119,7 +119,7 @@ impl fmt::Display for S3Path {
 /// An entry from an S3 directory listing.
 ///
 /// Represents either a "directory" (common prefix) or a file (object)
-/// as returned by `aws s3 ls`.
+/// as returned by `aws s3api list-objects-v2`.
 #[derive(Debug, Clone)]
 pub struct S3Entry {
     /// The entry name (e.g., "model.pt" or "checkpoints/").
@@ -132,6 +132,24 @@ pub struct S3Entry {
     /// Empty for directories (S3 prefixes have no modification time).
     #[allow(dead_code)]
     pub modified: String,
+}
+
+/// One page of an S3 prefix listing.
+#[derive(Debug, Clone, Default)]
+pub struct S3Page {
+    pub entries: Vec<S3Entry>,
+    /// Opaque continuation token for the next page; `None` on the final page.
+    pub next_token: Option<String>,
+}
+
+#[cfg(test)]
+impl From<Vec<S3Entry>> for S3Page {
+    fn from(entries: Vec<S3Entry>) -> Self {
+        Self {
+            entries,
+            next_token: None,
+        }
+    }
 }
 
 /// Configuration for the S3 backend.

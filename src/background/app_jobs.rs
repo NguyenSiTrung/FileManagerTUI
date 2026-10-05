@@ -20,6 +20,8 @@ pub(crate) enum Target {
     },
     S3Root(PathBuf),
     S3Expand(PathBuf),
+    /// Next page of an already listed S3 prefix, resumed from this continuation token.
+    S3More(PathBuf, String),
     S3Head(PathBuf),
     Clipboard(PathBuf),
     Paste(PathBuf, u64),
@@ -37,6 +39,7 @@ impl Target {
             Self::Root(path) | Self::Snapshot(path) | Self::Count(path) => path,
             Self::Summary { path, .. } => path,
             Self::S3Root(path) | Self::S3Expand(path) | Self::S3Head(path) => path,
+            Self::S3More(path, _) => path,
             Self::Clipboard(path) | Self::Paste(path, _) => path,
             Self::Preview(key) => &key.path,
             Self::FilenameIndex(path) | Self::ContentSearch(path) => path,
@@ -50,7 +53,10 @@ impl Target {
         matches!(self, Self::Summary { .. })
     }
     pub(crate) fn is_s3(&self) -> bool {
-        matches!(self, Self::S3Root(_) | Self::S3Expand(_) | Self::S3Head(_))
+        matches!(
+            self,
+            Self::S3Root(_) | Self::S3Expand(_) | Self::S3More(..) | Self::S3Head(_)
+        )
     }
     pub(crate) fn is_preview(&self) -> bool {
         matches!(self, Self::Preview(_))
@@ -71,6 +77,7 @@ impl Target {
             Self::Root(path) | Self::Snapshot(path) | Self::Count(path) => path.capacity(),
             Self::Summary { path, .. } => path.capacity(),
             Self::S3Root(path) | Self::S3Expand(path) | Self::S3Head(path) => path.capacity(),
+            Self::S3More(path, token) => path.capacity().saturating_add(token.capacity()),
             Self::Clipboard(path) | Self::Paste(path, _) => path.capacity(),
             // A preview's backing file is not part of the job envelope: the worker's
             // bounded reader decides how much of it becomes result state. Charging
@@ -294,7 +301,7 @@ pub(crate) enum NativeOutput {
         complete: bool,
     },
     Shallow(crate::preview_content::ShallowSummary),
-    S3Listing(Vec<crate::s3::S3Entry>),
+    S3Listing(crate::s3::S3Page),
     S3Head(String),
     Preview(crate::highlighting::PreparedPreview),
     Clipboard {
@@ -325,11 +332,13 @@ impl Payload for NativeOutput {
                 })
                 .saturating_add(search_cursor_bytes(&batch.cursor)),
             Self::Shallow(summary) => crate::preview_content::summary_lines_bytes(&summary.lines),
-            Self::S3Listing(entries) => entries
+            Self::S3Listing(page) => page
+                .entries
                 .capacity()
                 .saturating_mul(std::mem::size_of::<crate::s3::S3Entry>())
+                .saturating_add(page.next_token.as_ref().map_or(0, String::capacity))
                 .saturating_add(
-                    entries
+                    page.entries
                         .iter()
                         .map(|entry| {
                             entry
@@ -611,9 +620,15 @@ pub(crate) fn run(job: NativeJob, cancel: Cancellation) -> NativeOutput {
                 .head_bounded(&path, job.s3_head_lines, stopped)
                 .map(NativeOutput::S3Head)
         } else {
+            let token = match &job.target {
+                Target::S3More(_, token) => Some(token.as_str()),
+                _ => None,
+            };
             backend
-                .list_bounded(
+                .list_page_bounded(
                     &path,
+                    token,
+                    job.snapshot_options.page_size,
                     job.result_bytes
                         .saturating_sub(std::mem::size_of::<NativeOutput>()),
                     stopped,

@@ -392,14 +392,7 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent, event_tx: &crate::ev
                         if let Some(item) = app.tree_state.flat_items.get(clicked_index) {
                             if item.node_type == NodeType::LoadMore {
                                 if let Some(parent_path) = item.load_more_parent.clone() {
-                                    let loaded = app.tree_state.load_next_page(&parent_path);
-                                    if loaded > 0 {
-                                        app.set_status_message(format!(
-                                            "Loaded {} more entries",
-                                            loaded
-                                        ));
-                                        app.invalidate_search_cache();
-                                    }
+                                    app.load_more(&parent_path);
                                 }
                             } else if item.node_type == NodeType::Directory {
                                 if item.is_expanded {
@@ -1458,18 +1451,9 @@ fn handle_tree_keys(app: &mut App, key: KeyEvent, event_tx: &crate::event::Event
         KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => {
             if let Some(item) = app.tree_state.flat_items.get(app.tree_state.selected_index) {
                 if item.node_type == NodeType::LoadMore {
-                    // Trigger load_next_page on the parent directory
                     if let Some(parent_path) = item.load_more_parent.clone() {
-                        let loaded = app.tree_state.load_next_page(&parent_path);
-                        if loaded > 0 {
-                            app.set_status_message(format!("Loaded {} more entries", loaded));
-                            app.invalidate_search_cache();
-                        }
+                        app.load_more(&parent_path);
                     }
-                } else if app.is_s3_mode() && item.node_type == NodeType::Directory {
-                    // S3 expand: use S3 listing instead of filesystem
-                    let s3_uri = item.path.to_string_lossy().to_string();
-                    app.spawn_s3_expand(s3_uri, event_tx);
                 } else {
                     app.expand_selected_async(event_tx);
                 }

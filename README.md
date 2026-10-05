@@ -660,6 +660,8 @@ Browse AWS S3 buckets directly from the TUI by passing an `s3://` URI as the pat
 - **Auto-detection** — If the path starts with `s3://`, `fm` automatically enters S3 browse mode
 - **Read-only** — Write operations (create, rename, delete, paste) are disabled with a friendly message
 - **On-demand listing** — S3 prefixes are listed asynchronously as you expand directories
+- **Paged listing** — Each prefix is fetched one page at a time (`aws s3api list-objects-v2`, at most `max_entries_per_page`, capped at 1000 keys). A `Load more...` row at the end of a prefix (Enter, `l`, or a second click) fetches the next page, so prefixes with 100k–1M objects stay responsive. Loading stops at `snapshot_max_entries` entries per prefix (default 500000) with a status message; a failed or timed-out page keeps the entries already loaded and can be retried. Collapsing and re-expanding a prefix reuses the loaded pages.
+- **Required permission** — `s3:ListBucket` (the same as `aws s3 ls`)
 - **S3-specific UX** — Cloud icons (☁), peach/amber tree colors, and an `☁ S3` status bar badge
 - **Copy S3 URIs** — Press `y` to copy the full `s3://` URI of the selected item to clipboard
 - **AWS profile support** — Use `--aws-profile <name>` for MFA or role-based authentication
@@ -748,7 +750,7 @@ src/
 ├── s3/
 │   ├── mod.rs         # Module exports
 │   ├── backend.rs     # Async S3 backend (shells out to `aws` CLI)
-│   ├── parser.rs      # Parser for `aws s3 ls` output
+│   ├── parser.rs      # Parser for `aws s3api list-objects-v2` JSON pages
 │   └── types.rs       # S3Path, S3Entry, S3Config types
 └── terminal/
     ├── mod.rs         # Module exports, PtyProcess struct

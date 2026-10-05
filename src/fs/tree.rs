@@ -399,6 +399,9 @@ pub struct TreeNode {
     pub is_stale: bool,
     /// Whether an async directory scan is in progress for this node.
     pub is_loading: bool,
+    /// S3 only: continuation token for the next page of this prefix.
+    /// `Some` exactly while `has_more_children` is true for an S3 directory.
+    pub s3_next_token: Option<String>,
 }
 
 impl TreeNode {
@@ -441,6 +444,7 @@ impl TreeNode {
             loaded_offset: 0,
             is_stale: false,
             is_loading: false,
+            s3_next_token: None,
         })
     }
 
@@ -961,11 +965,17 @@ impl TreeState {
 
                 // Emit the "Load more..." virtual node
                 if has_load_more {
-                    let remaining = node
-                        .total_child_count
-                        .unwrap_or(0)
-                        .saturating_sub(node.loaded_child_count);
-                    let label = format!("Load more... (remaining: ~{})", remaining);
+                    // S3 listings stream pages with no known total.
+                    let (label, remaining) = match node.total_child_count {
+                        Some(total) => {
+                            let remaining = total.saturating_sub(node.loaded_child_count);
+                            (
+                                format!("Load more... (remaining: ~{})", remaining),
+                                Some(remaining),
+                            )
+                        }
+                        None => ("Load more...".to_string(), None),
+                    };
                     items.push(FlatItem {
                         name: label,
                         path: node.path.clone(), // path points to the parent dir
@@ -975,7 +985,7 @@ impl TreeState {
                         is_last_sibling: true,
                         is_hidden: false,
                         load_more_parent: Some(node.path.clone()),
-                        load_more_remaining: Some(remaining),
+                        load_more_remaining: remaining,
                         child_count: None,
                     });
                 }

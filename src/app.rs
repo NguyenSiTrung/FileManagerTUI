@@ -1010,7 +1010,9 @@ impl App {
                 if target.is_snapshot()
                     || matches!(
                         target,
-                        crate::app_jobs::Target::S3Root(_) | crate::app_jobs::Target::S3Expand(_)
+                        crate::app_jobs::Target::S3Root(_)
+                            | crate::app_jobs::Target::S3Expand(_)
+                            | crate::app_jobs::Target::S3More(..)
                     )
                 {
                     if let Some(node) =
@@ -2552,6 +2554,7 @@ impl App {
             loaded_offset: 0,
             is_stale: false,
             is_loading: false,
+            s3_next_token: None,
         };
 
         self.tree_state.root = root;
@@ -2580,58 +2583,102 @@ impl App {
         }
     }
 
-    /// Handle S3 listing completion — build tree nodes from entries.
-    pub fn handle_s3_listing_complete(&mut self, s3_uri: &str, entries: Vec<crate::s3::S3Entry>) {
-        let s3_path = match crate::s3::S3Path::parse(s3_uri) {
-            Some(p) => p,
-            None => return,
-        };
-
-        // Build child TreeNodes from S3 entries
-        let children: Vec<crate::fs::tree::TreeNode> = entries
-            .iter()
-            .map(|entry| {
-                let child_s3 = s3_path.child(&entry.name);
-                let child_uri = child_s3.to_uri();
-                crate::fs::tree::TreeNode {
-                    name: entry.name.clone(),
-                    path: PathBuf::from(&child_uri),
-                    node_type: if entry.is_dir {
-                        crate::fs::tree::NodeType::Directory
-                    } else {
-                        crate::fs::tree::NodeType::File
-                    },
-                    children: None,
-                    is_expanded: false,
-                    depth: 1, // children of root
-                    meta: crate::fs::tree::FileMeta {
-                        size: entry.size,
-                        modified: None, // S3 modified dates are strings, not SystemTime
-                        is_hidden: entry.name.starts_with('.'),
-                    },
-                    total_child_count: None,
-                    loaded_child_count: 0,
-                    has_more_children: false,
-                    snapshot: None,
-                    loaded_offset: 0,
-                    is_stale: false,
-                    is_loading: false,
-                }
-            })
-            .collect();
-
-        let count = children.len();
-        self.tree_state.root.children = Some(children);
-        self.tree_state.root.total_child_count = Some(count);
-        self.tree_state.root.loaded_child_count = count;
-        self.tree_state.root.is_loading = false;
-        self.tree_state.flatten();
-
-        if count == 0 {
-            self.set_status_message("☁ S3: Empty prefix".to_string());
+    /// Install one listed page under `node`: replace its children, or extend them
+    /// when `append`. Returns `(loaded, more, capped)`: children now loaded,
+    /// whether another page can be requested, and whether the display cap of
+    /// `cap` entries cut the listing short (no further paging is offered then).
+    fn fill_s3_node(
+        node: &mut crate::fs::tree::TreeNode,
+        prefix: &crate::s3::S3Path,
+        page: crate::s3::S3Page,
+        append: bool,
+        cap: usize,
+    ) -> (usize, bool, bool) {
+        use crate::fs::tree::{FileMeta, NodeType, TreeNode};
+        let depth = node.depth + 1;
+        let mut children = if append {
+            node.children.take().unwrap_or_default()
         } else {
-            self.set_status_message(format!("☁ S3: {} items loaded", count));
+            Vec::new()
+        };
+        let room = cap.saturating_sub(children.len());
+        let truncated = page.entries.len() > room;
+        children.extend(page.entries.into_iter().take(room).map(|entry| {
+            let meta = FileMeta {
+                size: entry.size,
+                modified: None, // S3 modified dates are strings, not SystemTime
+                is_hidden: entry.name.starts_with('.'),
+            };
+            TreeNode {
+                path: PathBuf::from(prefix.child(&entry.name).to_uri()),
+                name: entry.name,
+                node_type: if entry.is_dir {
+                    NodeType::Directory
+                } else {
+                    NodeType::File
+                },
+                children: None,
+                is_expanded: false,
+                depth,
+                meta,
+                total_child_count: None,
+                loaded_child_count: 0,
+                has_more_children: false,
+                snapshot: None,
+                loaded_offset: 0,
+                is_stale: false,
+                is_loading: false,
+                s3_next_token: None,
+            }
+        }));
+        let at_cap = children.len() >= cap;
+        let more = !at_cap && page.next_token.is_some();
+        let capped = at_cap && (truncated || page.next_token.is_some());
+        let loaded = children.len();
+        node.children = Some(children);
+        node.loaded_child_count = loaded;
+        // The total of a streamed listing is unknown until the final page.
+        node.total_child_count = (!more && !capped).then_some(loaded);
+        node.has_more_children = more;
+        node.s3_next_token = if more { page.next_token } else { None };
+        node.is_loading = false;
+        (loaded, more, capped)
+    }
+
+    fn s3_page_status(loaded: usize, more: bool, capped: bool, cap: usize) -> String {
+        if capped {
+            format!("☁ S3: showing first {loaded} entries (display cap of {cap} reached)")
+        } else if loaded == 0 {
+            "☁ S3: Empty prefix".to_string()
+        } else if more {
+            format!("☁ S3: {loaded} items loaded — select \"Load more...\" for the next page")
+        } else {
+            format!("☁ S3: {loaded} items loaded")
         }
+    }
+
+    /// Install a listed S3 page under the root (`root`) or the node at `s3_uri`.
+    fn apply_s3_page(&mut self, s3_uri: &str, page: crate::s3::S3Page, root: bool, append: bool) {
+        let Some(prefix) = crate::s3::S3Path::parse(s3_uri) else {
+            return;
+        };
+        let cap = self.config.snapshot_max_entries();
+        let node = if root {
+            Some(&mut self.tree_state.root)
+        } else {
+            TreeState::find_node_mut_pub(&mut self.tree_state.root, Path::new(s3_uri))
+        };
+        let Some(node) = node else {
+            return;
+        };
+        let (loaded, more, capped) = Self::fill_s3_node(node, &prefix, page, append, cap);
+        self.tree_state.flatten();
+        self.set_status_message(Self::s3_page_status(loaded, more, capped, cap));
+    }
+
+    /// Handle completion of the first page of the S3 root listing.
+    pub fn handle_s3_listing_complete(&mut self, s3_uri: &str, page: crate::s3::S3Page) {
+        self.apply_s3_page(s3_uri, page, true, false);
     }
 
     /// Expand an S3 directory by listing its prefix.
@@ -2641,66 +2688,36 @@ impl App {
         }
     }
 
-    /// Handle completion of an S3 subdirectory listing.
-    pub fn handle_s3_subdirectory_complete(
-        &mut self,
-        s3_uri: &str,
-        entries: Vec<crate::s3::S3Entry>,
-    ) {
-        let s3_path = match crate::s3::S3Path::parse(s3_uri) {
-            Some(p) => p,
-            None => return,
+    /// Request the next page of an S3 prefix that still has a continuation token.
+    pub fn spawn_s3_more(&mut self, parent: &Path) {
+        if self.s3_backend.is_none() {
+            return;
+        }
+        let Some(node) = TreeState::find_node_mut_pub(&mut self.tree_state.root, parent) else {
+            return;
         };
-
-        let node_path = PathBuf::from(s3_uri);
-        let node = match crate::fs::tree::TreeState::find_node_mut_pub(
-            &mut self.tree_state.root,
-            &node_path,
-        ) {
-            Some(n) => n,
-            None => return,
+        if node.is_loading {
+            return;
+        }
+        let Some(token) = node.s3_next_token.clone() else {
+            return;
         };
+        self.submit_native_job(crate::app_jobs::Target::S3More(parent.to_path_buf(), token));
+    }
 
-        let depth = node.depth + 1;
-        let children: Vec<crate::fs::tree::TreeNode> = entries
-            .iter()
-            .map(|entry| {
-                let child_s3 = s3_path.child(&entry.name);
-                let child_uri = child_s3.to_uri();
-                crate::fs::tree::TreeNode {
-                    name: entry.name.clone(),
-                    path: PathBuf::from(&child_uri),
-                    node_type: if entry.is_dir {
-                        crate::fs::tree::NodeType::Directory
-                    } else {
-                        crate::fs::tree::NodeType::File
-                    },
-                    children: None,
-                    is_expanded: false,
-                    depth,
-                    meta: crate::fs::tree::FileMeta {
-                        size: entry.size,
-                        modified: None,
-                        is_hidden: entry.name.starts_with('.'),
-                    },
-                    total_child_count: None,
-                    loaded_child_count: 0,
-                    has_more_children: false,
-                    snapshot: None,
-                    loaded_offset: 0,
-                    is_stale: false,
-                    is_loading: false,
-                }
-            })
-            .collect();
+    /// Handle completion of the first page of an S3 subdirectory listing.
+    pub fn handle_s3_subdirectory_complete(&mut self, s3_uri: &str, page: crate::s3::S3Page) {
+        self.apply_s3_page(s3_uri, page, false, false);
+    }
 
-        let count = children.len();
-        node.children = Some(children);
-        node.total_child_count = Some(count);
-        node.loaded_child_count = count;
-        node.is_loading = false;
-
-        self.tree_state.flatten();
+    /// Append a follow-up page. Ignored unless `token` is still the node's
+    /// pending continuation token (the prefix was not re-listed meanwhile).
+    pub fn handle_s3_more_complete(&mut self, s3_uri: &str, page: crate::s3::S3Page, token: &str) {
+        let current = TreeState::find_node_mut_pub(&mut self.tree_state.root, Path::new(s3_uri))
+            .is_some_and(|node| node.s3_next_token.as_deref() == Some(token));
+        if current {
+            self.apply_s3_page(s3_uri, page, false, true);
+        }
     }
 
     /// Spawn an async S3 head preview: stream the first N lines of the selected S3 file.
@@ -3424,13 +3441,15 @@ impl App {
                 self.handle_s3_head_complete(&uri, Ok(content));
                 return;
             }
-            Ok(NativeOutput::S3Listing(entries)) if !head => {
-                if matches!(delivery.target, Target::S3Root(_)) {
-                    if self.tree_state.root.path == path {
-                        self.handle_s3_listing_complete(&uri, entries);
+            Ok(NativeOutput::S3Listing(page)) if !head => {
+                match &delivery.target {
+                    Target::S3Root(_) => {
+                        if self.tree_state.root.path == path {
+                            self.handle_s3_listing_complete(&uri, page);
+                        }
                     }
-                } else {
-                    self.handle_s3_subdirectory_complete(&uri, entries);
+                    Target::S3More(_, token) => self.handle_s3_more_complete(&uri, page, token),
+                    _ => self.handle_s3_subdirectory_complete(&uri, page),
                 }
                 return;
             }
@@ -3449,6 +3468,11 @@ impl App {
             node.total_child_count = None;
             self.tree_state.flatten();
         }
+        let failure = if matches!(delivery.target, Target::S3More(..)) {
+            format!("{failure} — loaded entries kept; select \"Load more...\" to retry")
+        } else {
+            failure
+        };
         self.set_status_message(failure);
     }
 
@@ -5332,8 +5356,25 @@ impl App {
                 return;
             }
         }
+        if self.is_s3_mode() {
+            self.spawn_s3_expand(path.to_string_lossy().into_owned(), event_tx);
+            return;
+        }
         self.spawn_async_snapshot(&path, event_tx);
         self.clear_search_cache();
+    }
+
+    /// Load the next page of `parent`'s children (the "Load more..." row).
+    pub fn load_more(&mut self, parent: &Path) {
+        if self.is_s3_mode() {
+            self.spawn_s3_more(parent);
+            return;
+        }
+        let loaded = self.tree_state.load_next_page(parent);
+        if loaded > 0 {
+            self.set_status_message(format!("Loaded {} more entries", loaded));
+            self.invalidate_search_cache();
+        }
     }
 
     /// Expand the selected directory synchronously (for non-async contexts like tests).
@@ -5364,7 +5405,16 @@ impl App {
             } else {
                 crate::app_jobs::Target::Snapshot(path.clone())
             };
-            if self.jobs.as_mut().is_some_and(|jobs| jobs.cancel(&target)) {
+            let more = if self.is_s3_mode() {
+                TreeState::find_node_mut_pub(&mut self.tree_state.root, &path)
+                    .and_then(|node| node.s3_next_token.clone())
+                    .map(|token| crate::app_jobs::Target::S3More(path.clone(), token))
+            } else {
+                None
+            };
+            if self.jobs.as_mut().is_some_and(|jobs| {
+                jobs.cancel(&target) || more.as_ref().is_some_and(|more| jobs.cancel(more))
+            }) {
                 if let Some(node) = TreeState::find_node_mut_pub(&mut self.tree_state.root, &path) {
                     node.is_loading = false;
                 }
@@ -8039,6 +8089,164 @@ mod tests {
         );
     }
 
+    fn s3_test_app(config: AppConfig) -> (App, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = App::new(dir.path(), config).unwrap();
+        app.init_s3_mode(crate::s3::S3Config {
+            path: crate::s3::S3Path::parse("s3://fake-bucket/").unwrap(),
+            profile: None,
+        });
+        (app, dir)
+    }
+
+    fn s3_test_page(prefix: &str, count: usize, next: Option<&str>) -> crate::s3::S3Page {
+        crate::s3::S3Page {
+            entries: (0..count)
+                .map(|i| crate::s3::S3Entry {
+                    name: format!("{prefix}{i}"),
+                    is_dir: false,
+                    size: 1,
+                    modified: String::new(),
+                })
+                .collect(),
+            next_token: next.map(str::to_owned),
+        }
+    }
+
+    #[test]
+    fn s3_pages_append_then_stop_at_display_cap() {
+        let mut config = AppConfig::default();
+        config.general.snapshot_max_entries = Some(10_000);
+        let (mut app, _dir) = s3_test_app(config);
+        let root = app.tree_state.root.path.to_string_lossy().into_owned();
+        app.handle_s3_listing_complete(&root, s3_test_page("a", 6_000, Some("t1")));
+        assert!(app.tree_state.root.has_more_children);
+        assert!(app
+            .tree_state
+            .flat_items
+            .last()
+            .is_some_and(
+                |item| item.node_type == NodeType::LoadMore && item.load_more_remaining.is_none()
+            ));
+
+        // Page 2 overshoots the cap: truncated, no continuation offered.
+        app.handle_s3_more_complete(&root, s3_test_page("b", 6_000, Some("t2")), "t1");
+        let node = &app.tree_state.root;
+        assert_eq!(node.children.as_ref().unwrap().len(), 10_000);
+        assert!(!node.has_more_children && node.s3_next_token.is_none());
+        assert_eq!(node.total_child_count, None);
+        assert!(app
+            .tree_state
+            .flat_items
+            .iter()
+            .all(|item| item.node_type != NodeType::LoadMore));
+        assert!(app
+            .status_message
+            .as_ref()
+            .unwrap()
+            .0
+            .contains("display cap"));
+    }
+
+    #[test]
+    fn s3_page_for_superseded_token_is_ignored() {
+        let (mut app, _dir) = s3_test_app(AppConfig::default());
+        let root = app.tree_state.root.path.to_string_lossy().into_owned();
+        app.handle_s3_listing_complete(&root, s3_test_page("a", 3, Some("old")));
+        app.handle_s3_listing_complete(&root, s3_test_page("n", 2, Some("new")));
+        app.handle_s3_more_complete(&root, s3_test_page("late", 5, None), "old");
+        let node = &app.tree_state.root;
+        assert_eq!(node.children.as_ref().unwrap().len(), 2);
+        assert_eq!(node.s3_next_token.as_deref(), Some("new"));
+    }
+
+    #[tokio::test]
+    async fn s3_reexpand_keeps_loaded_pages() {
+        let (mut app, _dir) = s3_test_app(AppConfig::default());
+        let root = app.tree_state.root.path.to_string_lossy().into_owned();
+        app.handle_s3_listing_complete(
+            &root,
+            crate::s3::S3Page {
+                entries: vec![crate::s3::S3Entry {
+                    name: "dir/".into(),
+                    is_dir: true,
+                    size: 0,
+                    modified: String::new(),
+                }],
+                next_token: None,
+            },
+        );
+        let dir = "s3://fake-bucket/dir/";
+        app.handle_s3_subdirectory_complete(dir, s3_test_page("x", 4, Some("t")));
+        // Job admission expands the node in the real flow.
+        TreeState::find_node_mut_pub(&mut app.tree_state.root, Path::new(dir))
+            .unwrap()
+            .is_expanded = true;
+        app.tree_state.flatten();
+        let (tx, _rx) = crate::event::event_channel(Default::default());
+        // Collapse, then expand again: cached pages and the token must survive.
+        app.tree_state.selected_index = 1;
+        app.collapse_selected();
+        assert_eq!(app.tree_state.selected_index, 1);
+        app.expand_selected_async(&tx);
+        let node = TreeState::find_node_mut_pub(&mut app.tree_state.root, Path::new(dir)).unwrap();
+        assert!(node.is_expanded && !node.is_loading);
+        assert_eq!(node.children.as_ref().unwrap().len(), 4);
+        assert_eq!(node.s3_next_token.as_deref(), Some("t"));
+    }
+
+    #[tokio::test]
+    async fn mouse_reclick_on_s3_directory_lists_the_prefix_not_the_filesystem() {
+        use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+        let (mut app, _dir) = s3_test_app(AppConfig::default());
+        app.handle_s3_listing_complete(
+            "s3://fake-bucket/",
+            vec![crate::s3::S3Entry {
+                name: "child/".into(),
+                is_dir: true,
+                size: 0,
+                modified: String::new(),
+            }]
+            .into(),
+        );
+        let (seen_tx, seen_rx) = std::sync::mpsc::channel();
+        app.jobs = Some(
+            crate::app_jobs::AppJobs::new(
+                Default::default(),
+                crate::background::Worker::Blocking(Arc::new(move |job, _| {
+                    seen_tx.send(job.target.clone()).unwrap();
+                    crate::app_jobs::NativeOutput::Failed("recorded")
+                })),
+            )
+            .unwrap(),
+        );
+        app.tree_area = ratatui::layout::Rect::new(0, 0, 30, 10);
+        app.tree_content_area = ratatui::widgets::Block::bordered().inner(app.tree_area);
+        let (tx, _rx) = crate::event::event_channel(Default::default());
+        // First click selects `child/`; the second one expands it.
+        for _ in 0..2 {
+            crate::handler::handle_mouse_event(
+                &mut app,
+                MouseEvent {
+                    kind: MouseEventKind::Down(MouseButton::Left),
+                    column: 2,
+                    row: 2,
+                    modifiers: KeyModifiers::NONE,
+                },
+                &tx,
+            );
+        }
+        let delivery = app.next_background().await.unwrap();
+        app.apply_background(delivery);
+        assert_eq!(
+            seen_rx.try_iter().collect::<Vec<_>>(),
+            [crate::app_jobs::Target::S3Expand(PathBuf::from(
+                "s3://fake-bucket/child/"
+            ))]
+        );
+        app.shutdown_background().await;
+    }
+
     #[tokio::test]
     async fn app_jobs_final_s3_head_admission_preserves_loading_preview_policy() {
         let dir = tempfile::tempdir().unwrap();
@@ -8054,7 +8262,8 @@ mod tests {
                 is_dir: false,
                 size: 1,
                 modified: String::new(),
-            }],
+            }]
+            .into(),
         );
         app.jobs = Some(
             crate::app_jobs::AppJobs::new(
@@ -8107,7 +8316,8 @@ mod tests {
                     is_dir: !head,
                     size: 1,
                     modified: String::new(),
-                }],
+                }]
+                .into(),
             );
             let (entered, ready) = tokio::sync::oneshot::channel();
             let entered = std::sync::Mutex::new(Some(entered));
@@ -8180,7 +8390,8 @@ mod tests {
                         size: 1,
                         modified: String::new(),
                     },
-                ],
+                ]
+                .into(),
             );
             app.preview_state.content_lines = vec![Line::raw("prior preview")];
             app.set_overlay(AppMode::Help);
@@ -8214,7 +8425,7 @@ mod tests {
                         if matches!(job.target, crate::app_jobs::Target::S3Head(_)) {
                             crate::app_jobs::NativeOutput::S3Head("accepted".into())
                         } else {
-                            crate::app_jobs::NativeOutput::S3Listing(Vec::new())
+                            crate::app_jobs::NativeOutput::S3Listing(Default::default())
                         }
                     })),
                 )
@@ -8319,7 +8530,8 @@ mod tests {
                     size: 1,
                     modified: String::new(),
                 })
-                .collect(),
+                .collect::<Vec<_>>()
+                .into(),
         );
         let (entered, ready) = tokio::sync::oneshot::channel();
         let entered = std::sync::Mutex::new(Some(entered));
@@ -8376,7 +8588,8 @@ mod tests {
                         is_dir: false,
                         size: 1,
                         modified: String::new(),
-                    }],
+                    }]
+                    .into(),
                 );
                 app.jobs = Some(
                     crate::app_jobs::AppJobs::new(
@@ -8387,12 +8600,15 @@ mod tests {
                             } else if head {
                                 crate::app_jobs::NativeOutput::S3Head("literal head\n".into())
                             } else {
-                                crate::app_jobs::NativeOutput::S3Listing(vec![crate::s3::S3Entry {
-                                    name: "accepted.txt".into(),
-                                    is_dir: false,
-                                    size: 7,
-                                    modified: String::new(),
-                                }])
+                                crate::app_jobs::NativeOutput::S3Listing(
+                                    vec![crate::s3::S3Entry {
+                                        name: "accepted.txt".into(),
+                                        is_dir: false,
+                                        size: 7,
+                                        modified: String::new(),
+                                    }]
+                                    .into(),
+                                )
                             }
                         })),
                     )
@@ -8459,7 +8675,8 @@ mod tests {
                         size: 1,
                         modified: String::new(),
                     },
-                ],
+                ]
+                .into(),
             );
             app.preview_state.content_lines = vec![Line::raw("keep preview")];
             app.jobs = Some(
