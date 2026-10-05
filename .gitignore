@@ -38,3 +38,7 @@ build/
 # Playwright fixture artifacts
 tools/terminal-tests/test-results/
 tools/terminal-tests/playwright-report/
+
+# LLVM coverage profiles (-C instrument-coverage)
+*.profraw
+*.profdata
