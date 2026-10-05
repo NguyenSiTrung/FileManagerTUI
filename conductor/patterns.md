@@ -169,7 +169,8 @@ This file is the project's institutional knowledge - learnings extracted from co
 - S3 runtime state (`s3_backend`, `s3_config`) stored on App struct, not in AppConfig — it's runtime state not user configuration (from: s3-browse_20260310, archived 2026-03-10)
 - Virtual TreeNode construction without `fs::metadata` by directly setting struct fields (no `TreeNode::new()`) — used for S3 entries that have no local filesystem metadata (from: s3-browse_20260310, archived 2026-03-10)
 - `TreeState::find_node_mut` is private; use `find_node_mut_pub` for access from app.rs (from: s3-browse_20260310, archived 2026-03-10)
-- `aws s3 ls` output uses leading whitespace before `PRE` — parser must handle both trimmed and untrimmed input (from: s3-browse_20260310, archived 2026-03-10)
+- S3 listing uses `aws s3api list-objects-v2 --no-paginate --delimiter=/ --output json` — parse `CommonPrefixes` (dirs) and `Contents` (objects) from JSON, never `aws s3 ls` text; error mapping (`parse_s3_error`) still works on `aws` CLI stderr (from: s3 commit e7ff78c, 2026-10-05)
+- S3 pagination mirrors local paged dirs: `S3Page` carries `NextContinuationToken`, each `TreeNode` keeps `s3_next_token` and shows a `Load more...` row; keyboard and mouse submit `Target::S3More`, stale pages dropped by token match, `expand_selected_async` routes S3 dirs to `spawn_s3_expand` when children absent (from: s3 commit e7ff78c, 2026-10-05)
 - S3 paths stored as `PathBuf` (`PathBuf::from(s3_uri)`) for compatibility with existing tree code that expects `PathBuf` throughout (from: s3-browse_20260310, archived 2026-03-10)
 - `S3ListingComplete` event for both initial and subdirectory listings; routing in main.rs checks `is_root` flag to dispatch correctly (from: s3-browse_20260310, archived 2026-03-10)
 
