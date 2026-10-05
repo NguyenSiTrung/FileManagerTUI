@@ -9,7 +9,7 @@ A fast, keyboard-driven terminal file manager built with Rust and [Ratatui](http
 
 - **Dual-pane layout** — file tree + live preview with syntax highlighting
 - **Vim-style navigation** — `j`/`k`/`g`/`G` and arrow keys
-- **Quick Open** — filename finder with direct document opening and secondary file actions
+- **Quick Open + project content search** — filename finder with direct document opening and secondary file actions; `Tab` inside Quick Open switches to a bounded, cancellable literal content search over the workspace
 - **Inline filter** — `/` to filter the current directory tree
 - **File operations** — create, rename, delete, copy, cut, paste with undo
 - **Multi-select** — `Space` to select, batch operations on selection
@@ -24,6 +24,11 @@ A fast, keyboard-driven terminal file manager built with Rust and [Ratatui](http
 - **Embedded terminal** — integrated PTY shell panel with VT100 emulation, dynamic resize, and scrollback
 - **Retained text documents** — UTF-8 editing, independent tabs/history/find/scroll/wrap, syntax highlighting, safe saves, undo/redo and selections
 - **Command menu and keymaps** — configurable Standard/Web profiles, registry-generated help and live settings
+- **Pane layout** — resizable/toggleable explorer and terminal panes, temporary editor/terminal maximize, persisted pane preferences
+- **Session restore** — workspace-scoped, paths-and-view-state-only restore of open documents, cursors, layout and recent files
+- **Read-only Git indicators** — branch label and modified/untracked markers, never takes `index.lock`
+- **Installed-server LSP** — diagnostics, completion, hover, definition, references and symbols from language servers you already have; nothing is downloaded
+- **Private recovery** — bounded snapshots of unsaved documents with a restore/discard prompt after a crash
 - **AWS S3 browse mode** — read-only browsing of S3 buckets directly from the TUI using the AWS CLI; navigate prefixes, preview metadata, and copy S3 URIs to clipboard
 
 ## Installation
@@ -100,6 +105,8 @@ sudo cp target/release/fm /usr/local/bin/fm
 
 - **Rust toolchain** for building from source
 - **AWS CLI** (optional) — required only for S3 browse mode. Install via [AWS CLI docs](https://docs.aws.amazon.com/cli/latest/userguide/install-cliv2.html) or `pip install awscli`
+- **git** (optional) — only for branch/status indicators; absent `git` silently disables them
+- **Language servers** (optional) — e.g. `pylsp`, `yaml-language-server`, `rust-analyzer`; see [Language servers (LSP)](#language-servers-lsp)
 
 ## Usage
 
@@ -118,6 +125,9 @@ fm --no-icons --no-mouse --no-watcher
 
 # Disable embedded terminal
 fm --no-terminal
+
+# Disable Git indicators
+fm --no-git
 
 # Browser-terminal workspace routes (explicit opt-in)
 fm --keymap-profile web
@@ -229,6 +239,7 @@ Workspace commands and their authoritative configured shortcuts are in Help.
 | `/` | Start inline filter |
 | `Esc` | Cancel / clear filter |
 | `Enter` | Accept filter / Open action menu |
+| `Tab` (in Quick Open) | Toggle project content search (literal, bounded, cancellable) |
 
 ### Search Action Menu
 
@@ -420,6 +431,13 @@ clipboard. No real-clipboard browser certification is claimed.
 show_hidden = false
 confirm_delete = true
 mouse = true
+# Content search (Quick Open → Tab) is bounded; values shown are the defaults.
+# search_exclude_dirs = [".git", "target", "node_modules", ".venv"]  # replaces built-in list
+# search_max_files = 20000
+# search_max_hits = 2000
+# search_max_file_bytes = 2097152
+# search_max_bytes_scanned = 134217728
+# search_max_excerpt_bytes = 200
 
 [preview]
 enabled = true
@@ -480,6 +498,16 @@ templ = "html"
 [[lsp.trust]]
 root = "~/src/myproject"
 argv = ["pylsp"]
+
+[layout]                 # pane preferences; temporary maximize is never persisted
+explorer_width = 24
+explorer_visible = true
+terminal_height = 7
+terminal_visible = false
+
+[session]
+enabled = true           # workspace-scoped session restore
+# state_dir = "~/.local/state/fm-tui/sessions"  # defaults to the platform state dir
 
 [terminal]
 enabled = true
@@ -576,6 +604,43 @@ Snapshots are bounded and private:
   `recovery.enable` / `recovery.disable` — or `[recovery] enabled = false`
   to turn snapshots off entirely.
 
+## Project content search
+
+Open Quick Open (`Ctrl+P` in the Standard profile, `Alt+G o` in both profiles)
+and press `Tab` to switch between filename and content search. Content search
+is literal (not regex), runs on a worker so the UI thread never walks the
+filesystem, and is cancelled/superseded as you keep typing. Results are bounded
+by file count, hit count, per-file bytes, total bytes scanned and excerpt size
+(see `[general] search_*`); `search_exclude_dirs` replaces the built-in
+exclusions (`.git`, `target`, `node_modules`, `.venv`, …). `Alt+Enter` / `F2`
+opens the secondary action menu for the selected hit.
+
+## Session restore
+
+On launch fm restores the previous session for the **same workspace root**:
+open documents with their cursors, pane layout and recent files. A session
+record stores paths and view state only — never terminal buffers, running
+processes, LSP execution trust or secrets. It is size-validated before parsing
+(1 MiB, at most 256 documents), written atomically into a private state
+directory, and a corrupt or future-version record is non-fatal (a status line
+is shown and fm starts clean). Unsaved text is not part of a session; see
+[Private recovery](#private-recovery). Disable with `[session] enabled = false`.
+Session restore is skipped in S3 mode.
+
+### Command ids
+
+Every workspace action is a registered command with a stable id usable in
+`[[keymap.bindings]]`: `workspace.commands`, `workspace.quit`,
+`navigation.{quick_open,open_selection,selection_actions}`,
+`document.{list,pin,previous,next,reveal,save,save_as,close}`,
+`focus.{explorer,editor,preview,terminal,left,right,up,down,cycle}`,
+`pane.{explorer,terminal}.{toggle,grow,shrink}` (terminal also `maximize`),
+`pane.editor.maximize`, `pane.layout.restore`, `view.wrap.toggle`,
+`preview.view_mode`, `recovery.{restore,discard,clear,enable,disable}`,
+`lsp.{status,restart,completion,hover,definition,references,symbols,diagnostics}`
+and `diagnostics.{next,previous}`. The F8 menu lists the ones available in the
+current context, with disabled reasons.
+
 ## Built-in Themes
 
 ### Dark (Catppuccin Mocha) — Default
@@ -622,30 +687,62 @@ fm s3://ml-data-bucket --aws-profile mfa
 
 ```
 src/
-├── main.rs            # Entry point, CLI parsing, event loop
+├── main.rs            # Entry point, CLI parsing, main loop, session/recovery startup
 ├── app.rs             # Application state and logic
 ├── handler.rs         # Key/mouse event dispatch
+├── commands.rs        # Command registry (ids, titles, context gating)
+├── keymap.rs          # Standard/Web profiles, bindings, Alt+G prefix routes
+├── background.rs      # Bounded, generation-aware job/queue primitives
+├── background/
+│   └── app_jobs.rs    # Bounded App worker pool (scans, summaries, S3, clipboard)
 ├── ui.rs              # Layout and rendering
 ├── tui.rs             # Terminal setup/teardown
 ├── event.rs           # Event system (key, mouse, tick, async)
 ├── config.rs          # TOML configuration loading and merging
 ├── theme.rs           # Theme colors and palettes
 ├── error.rs           # Error types
-├── preview_content.rs # Syntax highlighting, notebook rendering
+├── text.rs            # Document positions (UTF-8 bytes) and display-cell helpers
 ├── editor.rs          # Editor state, undo/redo, find/replace
+├── highlighting.rs    # Prepared preview loading, line/checkpoint syntax caches
+├── preview_content.rs # Syntax highlighting, notebook rendering
+├── search.rs          # Filename index and bounded content search
+├── session.rs         # Versioned workspace session persistence
+├── recovery.rs        # Private recovery snapshots of dirty documents
+├── git.rs             # Read-only Git status backend
+├── diagnostics.rs     # Versioned per-server LSP diagnostics state
+├── workspace/
+│   ├── mod.rs         # Workspace aggregate
+│   ├── documents.rs   # Retained document set, tabs, open dispositions
+│   ├── focus.rs       # Focus/overlay state machine
+│   └── layout.rs      # Pane geometry, maximize/restore
+├── lsp/
+│   ├── mod.rs         # Session manager, sync, trust model
+│   ├── client.rs      # Server lifecycle and initialize handshake
+│   ├── transport.rs   # Bounded stdio JSON-RPC transport
+│   ├── config.rs      # [lsp] config and project-local trust rules
+│   ├── features.rs    # Completion, hover, definition, references, symbols
+│   └── positions.rs   # UTF-8/UTF-16/UTF-32 position-encoding adapters
 ├── components/
 │   ├── tree.rs        # File tree widget with icons
 │   ├── preview.rs     # Preview pane widget
 │   ├── editor.rs      # Editor widget (line numbers, cursor, find bar)
+│   ├── document_tabs.rs   # Retained-document tab strip
+│   ├── workspace_chrome.rs # Pane borders, Commands button, chrome
+│   ├── command_menu.rs    # Searchable command menu (F8)
+│   ├── settings.rs    # Live Settings tab
 │   ├── status_bar.rs  # Status bar widget
 │   ├── dialog.rs      # Modal dialog widget
-│   ├── search.rs      # Fuzzy finder overlay
+│   ├── search.rs      # Quick Open overlay
+│   ├── content_search.rs  # Content-search overlay state
 │   ├── search_action.rs # Search action menu overlay
+│   ├── diagnostics.rs # Diagnostics panel
+│   ├── language_features.rs # Completion/hover/references/symbols popups
 │   ├── help.rs        # Help overlay widget
 │   └── terminal.rs    # Terminal panel widget
 ├── fs/
 │   ├── tree.rs        # Tree data structure, sorting, filtering
 │   ├── operations.rs  # File CRUD operations
+│   ├── save.rs        # Bounded, revision-checked safe save policy
 │   ├── clipboard.rs   # Copy/cut/paste state
 │   └── watcher.rs     # Filesystem watcher with debounce
 ├── s3/
@@ -657,6 +754,9 @@ src/
     ├── mod.rs         # Module exports, PtyProcess struct
     ├── pty.rs         # PTY creation and async I/O
     └── emulator.rs    # VTE-based terminal emulator
+
+scripts/               # install.sh, terminal-workspace PTY harness, fake LSP server
+tools/terminal-tests/  # xterm.js + Playwright browser-terminal suite
 ```
 
 ## Development
